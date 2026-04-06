@@ -64,18 +64,17 @@ const DashboardPage = {
           </div>
         </div>
         <!-- Cluster Health Score -->
-        <div class="stat-card" id="stat-health-card" style="flex-direction:row;align-items:center;gap:12px;min-width:200px">
-          <div style="position:relative;width:64px;height:64px;flex-shrink:0">
+        <div class="stat-card" id="stat-health-card">
+          <div style="position:relative;width:48px;height:48px;flex-shrink:0">
             <svg id="health-gauge-svg" viewBox="0 0 36 36" style="width:100%;height:100%;transform:rotate(-90deg)">
               <circle cx="18" cy="18" r="15.915" fill="none" stroke="var(--surface3)" stroke-width="3"/>
               <circle id="health-gauge-arc" cx="18" cy="18" r="15.915" fill="none" stroke="var(--text-dim)" stroke-width="3" stroke-dasharray="0 100" stroke-linecap="round" style="transition:stroke-dasharray 0.8s ease,stroke 0.5s ease"/>
             </svg>
-            <div id="health-score-text" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:var(--text-dim)">—</div>
+            <div id="health-score-text" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--text-dim)">—</div>
           </div>
           <div class="stat-body">
-            <div class="stat-label" style="margin-bottom:2px"><i class="fas fa-heartbeat" style="margin-right:4px;color:var(--accent)"></i>Cluster Health</div>
-            <div id="health-status-text" style="font-size:12px;color:var(--text-dim)">Loading...</div>
-            <div id="health-detail-text" style="font-size:10px;color:var(--text-dim);margin-top:2px"></div>
+            <div class="stat-value" id="health-status-text" style="font-size:16px">—</div>
+            <div class="stat-label"><i class="fas fa-heartbeat" style="margin-right:4px"></i>Health</div>
           </div>
         </div>
       </div>
@@ -375,18 +374,16 @@ const DashboardPage = {
     const arc = document.getElementById('health-gauge-arc');
     const scoreText = document.getElementById('health-score-text');
     const statusText = document.getElementById('health-status-text');
-    const detailText = document.getElementById('health-detail-text');
     if (!arc || !scoreText) return;
 
     if (!health) {
       scoreText.textContent = '—';
-      if (statusText) statusText.textContent = 'Unavailable';
+      if (statusText) statusText.textContent = '—';
       return;
     }
 
     const score = health.score ?? 0;
     const status = health.status || 'unknown';
-    const b = health.breakdown || {};
 
     const color = score >= 80 ? 'var(--green)' : score >= 50 ? 'var(--yellow)' : 'var(--red)';
 
@@ -397,16 +394,8 @@ const DashboardPage = {
 
     const statusLabel = status === 'healthy' ? 'Healthy' : status === 'degraded' ? 'Degraded' : 'Critical';
     if (statusText) {
-      statusText.textContent = statusLabel;
+      statusText.textContent = `${score} ${statusLabel}`;
       statusText.style.color = color;
-    }
-    if (detailText) {
-      const parts = [];
-      if (b.containersTotal > 0) parts.push(`${b.containersRunning}/${b.containersTotal} running`);
-      if (b.cpuUsage !== undefined) parts.push(`CPU ${b.cpuUsage}%`);
-      if (b.memoryUsage !== undefined) parts.push(`RAM ${b.memoryUsage}%`);
-      if (b.unhealthy > 0) parts.push(`${b.unhealthy} unhealthy`);
-      detailText.textContent = parts.join(' · ');
     }
   },
 
