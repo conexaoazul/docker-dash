@@ -38,6 +38,7 @@ const StacksPage = {
             <button class="tab ${this._tab === 'compose' ? 'active' : ''}" data-tab="compose">${i18n.t('pages.stacks.tabCompose')}</button>
             <button class="tab ${this._tab === 'git' ? 'active' : ''}" data-tab="git">${i18n.t('pages.stacks.tabGit')}</button>
           </div>
+          <button class="btn btn-sm btn-primary" id="stacks-create"><i class="fas fa-plus"></i> Create Stack</button>
           <button class="btn btn-sm btn-secondary" id="stacks-refresh"><i class="fas fa-sync-alt"></i></button>
         </div>
       </div>
@@ -52,6 +53,7 @@ const StacksPage = {
       });
     });
     container.querySelector('#stacks-refresh').addEventListener('click', () => this._loadList());
+    container.querySelector('#stacks-create')?.addEventListener('click', () => this._createStackDialog());
 
     await this._loadList();
   },
@@ -161,8 +163,8 @@ const StacksPage = {
             <div class="text-sm text-muted" style="word-break:break-all">${Utils.escapeHtml(s.repoUrl || '')}</div>
             ${s.lastCommit ? `<div class="text-sm" style="margin-top:4px;font-family:var(--mono)">${Utils.escapeHtml(s.lastCommit)}</div>` : ''}
           ` : `
-            <div class="text-sm" style="margin-bottom:4px">${i18n.t('pages.stacks.containersRunning', { running: '<strong>' + s.running + '</strong>', total: s.total })}</div>
-            ${s.containers ? `<div class="text-sm text-muted">${s.containers.map(c => `<span style="color:${c.state === 'running' ? 'var(--green)' : 'var(--red)'}">${Utils.escapeHtml(c.name)}</span>`).join(', ')}</div>` : ''}
+            <div class="text-sm" style="margin-bottom:6px">${i18n.t('pages.stacks.containersRunning', { running: '<strong>' + s.running + '</strong>', total: s.total })}</div>
+            ${s.containers ? `<div style="display:flex;flex-wrap:wrap;gap:4px">${s.containers.map(c => `<span class="badge ${c.state === 'running' ? 'badge-running' : 'badge-stopped'}" style="font-size:10px">${Utils.escapeHtml(c.name)}</span>`).join('')}</div>` : ''}
           `}
           <div style="display:flex;gap:4px;margin-top:8px;justify-content:flex-end">
             ${isGit ? `
@@ -348,6 +350,49 @@ const StacksPage = {
       });
     } catch (err) {
       document.getElementById('gs-detail-content').innerHTML = `<div class="empty-msg" style="color:var(--red)">${Utils.escapeHtml(err.message)}</div>`;
+    }
+  },
+
+  async _createStackDialog() {
+    const result = await Modal.form(`
+      <div class="form-group">
+        <label>Stack Name</label>
+        <input type="text" id="cs-name" class="form-control" placeholder="my-stack" required>
+      </div>
+      <div class="form-group">
+        <label>Working Directory (optional)</label>
+        <input type="text" id="cs-dir" class="form-control" placeholder="/opt/stacks/my-stack">
+      </div>
+      <div class="form-group">
+        <label>docker-compose.yml</label>
+        <textarea id="cs-yaml" class="form-control" rows="12" placeholder="services:&#10;  web:&#10;    image: nginx:alpine&#10;    ports:&#10;      - '8080:80'" style="font-family:var(--mono);font-size:12px"></textarea>
+      </div>
+    `, {
+      title: 'Create Stack',
+      width: '650px',
+      onSubmit: (content) => {
+        const name = content.querySelector('#cs-name').value.trim();
+        const yaml = content.querySelector('#cs-yaml').value.trim();
+        if (!name) { Toast.warning('Stack name is required'); return false; }
+        if (!yaml) { Toast.warning('Compose YAML is required'); return false; }
+        return { name, dir: content.querySelector('#cs-dir').value.trim(), yaml };
+      },
+    });
+
+    if (result) {
+      try {
+        await Api.saveStackConfig(result.name, { config: result.yaml, workingDir: result.dir || undefined });
+        const deploy = await Modal.confirm(`Stack "${result.name}" created. Deploy it now?`, { confirmText: 'Deploy' });
+        if (deploy) {
+          await Api.deployStack(result.name, { workingDir: result.dir || undefined });
+          Toast.success(`Stack "${result.name}" deployed`);
+        } else {
+          Toast.success(`Stack "${result.name}" saved`);
+        }
+        await this._loadList();
+      } catch (err) {
+        Toast.error('Failed: ' + err.message);
+      }
     }
   },
 
