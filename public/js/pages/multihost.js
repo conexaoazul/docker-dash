@@ -36,6 +36,7 @@ const MultiHostPage = {
           <button class="btn-icon view-toggle" id="mh-collapse" title="Collapse all"><i class="fas fa-compress-alt"></i></button>
           <button class="btn-icon view-toggle" id="mh-expand" title="Expand all"><i class="fas fa-expand-alt"></i></button>
           <button class="btn btn-sm btn-secondary" id="mh-refresh" title="Refresh"><i class="fas fa-sync-alt"></i></button>
+          <button class="prune-help-btn" id="mh-guide" title="Actions guide" style="background:var(--accent);color:#fff;border-color:var(--accent)">i</button>
         </div>
       </div>
       <div id="mh-stats" style="margin-bottom:16px"></div>
@@ -67,6 +68,7 @@ const MultiHostPage = {
     });
 
     container.querySelector('#mh-refresh').addEventListener('click', () => this._load());
+    container.querySelector('#mh-guide')?.addEventListener('click', () => this._showGuide());
 
     container.querySelector('#mh-collapse').addEventListener('click', () => {
       document.querySelectorAll('[data-mh-stack-toggle]').forEach(btn => {
@@ -878,6 +880,65 @@ const MultiHostPage = {
         }
       });
     }
+  },
+
+  _showGuide() {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);max-width:600px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,0.5)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)">
+          <h3 style="margin:0"><i class="fas fa-info-circle" style="color:var(--accent);margin-right:8px"></i>Multi-Host Overview Guide</h3>
+          <button id="mh-guide-close" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:18px"><i class="fas fa-times"></i></button>
+        </div>
+        <div style="padding:20px;font-size:13px;line-height:1.7;color:var(--text)">
+
+          <h4 style="color:var(--accent);margin:0 0 8px"><i class="fas fa-server" style="margin-right:6px"></i>Tabs</h4>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-bottom:16px">
+            <strong>By Host</strong><span>View all hosts as cards with their stacks and containers grouped inside</span>
+            <strong>By Stack</strong><span>View all stacks grouped across hosts — see which hosts run each stack</span>
+          </div>
+
+          <h4 style="color:var(--accent);margin:0 0 8px"><i class="fas fa-eye" style="margin-right:6px"></i>Host View Modes</h4>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-bottom:16px">
+            <span><i class="fas fa-bars"></i> List</span><span>All hosts stacked vertically on one page</span>
+            <span><i class="fas fa-folder"></i> Tabs</span><span>One host at a time with tab navigation — shows detailed CPU/RAM bars and system info</span>
+          </div>
+
+          <h4 style="color:var(--accent);margin:0 0 8px"><i class="fas fa-tools" style="margin-right:6px"></i>Toolbar Buttons</h4>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-bottom:16px">
+            <span><i class="fas fa-compress-alt"></i> Collapse</span><span>Collapse all stack groups</span>
+            <span><i class="fas fa-expand-alt"></i> Expand</span><span>Expand all stack groups</span>
+            <span><i class="fas fa-sync-alt"></i> Refresh</span><span>Reload data from all hosts</span>
+            <span><i class="fas fa-search"></i> Search</span><span>Filter by host name, stack name, container name, or image</span>
+          </div>
+
+          <h4 style="color:var(--accent);margin:0 0 8px"><i class="fas fa-heartbeat" style="margin-right:6px"></i>Health Indicators</h4>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-bottom:16px">
+            <span style="color:var(--green)">● Green dot</span><span>Host online / container running</span>
+            <span style="color:var(--red)">● Red dot</span><span>Host offline / container stopped</span>
+            <span style="color:var(--yellow)">● Yellow dot</span><span>Container in non-standard state (paused, restarting)</span>
+            <span>CPU/RAM bars</span><span>Color-coded: green (&lt;50%), yellow (50-80%), red (&gt;80%)</span>
+          </div>
+
+          <h4 style="color:var(--accent);margin:0 0 8px"><i class="fas fa-mouse-pointer" style="margin-right:6px"></i>Actions</h4>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-bottom:16px">
+            <strong>Click container</strong><span>Switch to that host and navigate to container detail</span>
+            <strong>Drain button</strong><span>Stop all non-system containers on a host (maintenance mode)</span>
+            <strong>Activate button</strong><span>Restore host from maintenance mode to production</span>
+          </div>
+
+          <h4 style="color:var(--accent);margin:0 0 8px"><i class="fas fa-chart-bar" style="margin-right:6px"></i>Stat Cards</h4>
+          <p style="margin:0">The top bar shows aggregates across all hosts: total hosts (with online count), total containers, running, stopped, and total images. Data refreshes automatically every 15 seconds.</p>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('#mh-guide-close').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
   },
 
   destroy() {
