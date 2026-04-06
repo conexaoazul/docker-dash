@@ -67,7 +67,7 @@ const Modal = {
       const typeBlock = typeToConfirm
         ? `<div style="margin-top:12px"><p class="text-sm" style="color:var(--yellow)">Type <strong>${Utils.escapeHtml(typeToConfirm)}</strong> to confirm:</p><input type="text" class="form-control" id="modal-type-confirm" autocomplete="off" style="margin-top:6px"></div>`
         : '';
-      const html = `
+      const markup = `
         <div class="modal-header">
           <h3>${Utils.escapeHtml(title)}</h3>
           <button class="modal-close-btn" id="modal-x">
@@ -85,7 +85,7 @@ const Modal = {
           </button>
         </div>
       `;
-      this.open(html, { width: '420px' });
+      this.open(markup, { width: '420px' });
 
       const ok = () => { this.close(); resolve(true); };
       const cancel = () => { this.close(); resolve(false); };
