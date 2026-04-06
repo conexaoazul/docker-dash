@@ -25,6 +25,10 @@ const MultiHostPage = {
             <button class="tab ${this._tab === 'host' ? 'active' : ''}" data-mh-tab="host">
               <i class="fas fa-server" style="margin-right:4px"></i>By Host
             </button>
+            <span id="mh-host-view-toggle" style="display:${this._tab === 'host' ? 'flex' : 'none'};gap:2px;align-items:center;margin:0 2px">
+              <button class="btn-icon view-toggle ${this._hostView === 'list' ? 'active' : ''}" data-host-view="list" title="List view" style="width:28px;height:28px;font-size:12px"><i class="fas fa-bars"></i></button>
+              <button class="btn-icon view-toggle ${this._hostView === 'tabs' ? 'active' : ''}" data-host-view="tabs" title="Tab view" style="width:28px;height:28px;font-size:12px"><i class="fas fa-folder"></i></button>
+            </span>
             <button class="tab ${this._tab === 'stack' ? 'active' : ''}" data-mh-tab="stack">
               <i class="fas fa-layer-group" style="margin-right:4px"></i>By Stack
             </button>
@@ -44,6 +48,19 @@ const MultiHostPage = {
         container.querySelectorAll('[data-mh-tab]').forEach(b => {
           b.classList.toggle('active', b.dataset.mhTab === this._tab);
         });
+        // Show/hide host view toggle based on active tab
+        const toggle = document.getElementById('mh-host-view-toggle');
+        if (toggle) toggle.style.display = this._tab === 'host' ? 'flex' : 'none';
+        this._renderContent();
+        this._applySearch(this._searchFilter);
+      });
+    });
+
+    // Host view toggle (list vs tabs)
+    container.querySelectorAll('[data-host-view]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._hostView = btn.dataset.hostView;
+        container.querySelectorAll('[data-host-view]').forEach(b => b.classList.toggle('active', b.dataset.hostView === this._hostView));
         this._renderContent();
         this._applySearch(this._searchFilter);
       });
@@ -193,24 +210,7 @@ const MultiHostPage = {
           </div>
         </div>
       </div>
-      <div id="mh-host-view-toggle" style="display:flex;gap:4px;margin-top:10px">
-        <button class="btn-icon view-toggle ${this._hostView === 'list' ? 'active' : ''}" data-host-view="list" title="List view — all hosts stacked">
-          <i class="fas fa-bars"></i>
-        </button>
-        <button class="btn-icon view-toggle ${this._hostView === 'tabs' ? 'active' : ''}" data-host-view="tabs" title="Tab view — one host at a time">
-          <i class="fas fa-folder"></i>
-        </button>
-      </div>
     `;
-
-    el.querySelectorAll('[data-host-view]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        this._hostView = btn.dataset.hostView;
-        el.querySelectorAll('[data-host-view]').forEach(b => b.classList.toggle('active', b.dataset.hostView === this._hostView));
-        this._renderContent();
-        this._applySearch(this._searchFilter);
-      });
-    });
   },
 
   _renderContent() {
