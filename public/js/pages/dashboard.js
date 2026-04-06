@@ -75,6 +75,7 @@ const DashboardPage = {
           <div class="stat-body">
             <div class="stat-value" id="health-status-text" style="font-size:16px">—</div>
             <div class="stat-label"><i class="fas fa-heartbeat" style="margin-right:4px"></i>Health</div>
+            <div id="health-detail-text" style="font-size:9px;color:var(--text-dim);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
           </div>
         </div>
       </div>
@@ -374,6 +375,7 @@ const DashboardPage = {
     const arc = document.getElementById('health-gauge-arc');
     const scoreText = document.getElementById('health-score-text');
     const statusText = document.getElementById('health-status-text');
+    const detailText = document.getElementById('health-detail-text');
     if (!arc || !scoreText) return;
 
     if (!health) {
@@ -384,6 +386,7 @@ const DashboardPage = {
 
     const score = health.score ?? 0;
     const status = health.status || 'unknown';
+    const b = health.breakdown || {};
 
     const color = score >= 80 ? 'var(--green)' : score >= 50 ? 'var(--yellow)' : 'var(--red)';
 
@@ -395,6 +398,15 @@ const DashboardPage = {
     const statusLabel = status === 'healthy' ? 'Healthy' : status === 'degraded' ? 'Degraded' : 'Critical';
     if (statusText) {
       statusText.textContent = `${score} ${statusLabel}`;
+      statusText.style.color = color;
+    }
+    if (detailText) {
+      const parts = [];
+      if (b.containersTotal > 0) parts.push(`${b.containersRunning}/${b.containersTotal}`);
+      if (b.cpuUsage !== undefined) parts.push(`CPU ${b.cpuUsage}%`);
+      if (b.memoryUsage !== undefined) parts.push(`RAM ${b.memoryUsage}%`);
+      if (b.unhealthy > 0) parts.push(`${b.unhealthy} unhealthy`);
+      detailText.textContent = parts.join(' · ');
       statusText.style.color = color;
     }
   },

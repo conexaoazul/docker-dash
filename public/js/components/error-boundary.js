@@ -16,6 +16,14 @@ const ErrorBoundary = {
   _overlay: null,
   _maxErrors: 5, // prevent infinite error loops
 
+  _t(key, fallback) {
+    if (typeof i18n !== 'undefined' && i18n.t) {
+      const val = i18n.t(key);
+      if (val && val !== key) return val;
+    }
+    return fallback;
+  },
+
   init() {
     // Catch uncaught synchronous errors
     window.addEventListener('error', (event) => {
@@ -93,7 +101,7 @@ const ErrorBoundary = {
       return;
     }
 
-    const ts = error.timestamp.toLocaleString('ro-RO', {
+    const ts = error.timestamp.toLocaleString('en-GB', {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit', second: '2-digit',
     });
@@ -109,8 +117,8 @@ const ErrorBoundary = {
               <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
           </div>
-          <h2>A apărut o eroare</h2>
-          <p class="eb-subtitle">Aplicația a întâmpinat o problemă neașteptată</p>
+          <h2>${this._t('errors.title', 'An error occurred')}</h2>
+          <p class="eb-subtitle">${this._t('errors.subtitle', 'The application encountered an unexpected problem')}</p>
         </div>
 
         <div class="eb-body">
@@ -120,34 +128,34 @@ const ErrorBoundary = {
           </div>
 
           <div class="eb-message-box">
-            <label>Mesaj eroare:</label>
+            <label>${this._t('errors.errorMessage', 'Error message')}:</label>
             <code id="eb-message">${this._escHtml(error.message)}</code>
           </div>
 
           <details class="eb-details">
-            <summary>Detalii tehnice (stack trace)</summary>
-            <pre id="eb-stack">${this._escHtml(error.stack || 'Stack trace nu este disponibil')}</pre>
+            <summary>${this._t('errors.technicalDetails', 'Technical details (stack trace)')}</summary>
+            <pre id="eb-stack">${this._escHtml(error.stack || this._t('errors.noStack', 'Stack trace not available'))}</pre>
           </details>
 
-          ${error.source ? `<div class="eb-source"><strong>Sursă:</strong> <code>${this._escHtml(error.source)}</code></div>` : ''}
+          ${error.source ? `<div class="eb-source"><strong>${this._t('errors.source', 'Source')}:</strong> <code>${this._escHtml(error.source)}</code></div>` : ''}
 
           <div class="eb-help">
-            <p><strong>Ce puteți face:</strong> Încercați să reîncărcați pagina. Dacă problema persistă, copiați raportul de eroare folosind butonul de mai jos și trimiteți-l echipei de suport. <strong>Datele dvs. nu au fost afectate.</strong></p>
+            <p><strong>${this._t('errors.whatToDo', 'What you can do')}:</strong> ${this._t('errors.helpText', 'Try reloading the page. If the problem persists, copy the error report using the button below and send it to the support team.')} <strong>${this._t('errors.dataNotAffected', 'Your data has not been affected.')}</strong></p>
           </div>
         </div>
 
         <div class="eb-footer">
           <button class="eb-btn eb-btn-primary" id="eb-reload">
-            <i class="fas fa-sync-alt"></i> Reîncărcare pagină
+            <i class="fas fa-sync-alt"></i> ${this._t('errors.reload', 'Reload page')}
           </button>
           <button class="eb-btn eb-btn-secondary" id="eb-home">
-            <i class="fas fa-home"></i> Pagina principală
+            <i class="fas fa-home"></i> ${this._t('errors.home', 'Home page')}
           </button>
           <button class="eb-btn eb-btn-outline" id="eb-copy">
-            <i class="fas fa-copy"></i> Copiază raport eroare
+            <i class="fas fa-copy"></i> ${this._t('errors.copyReport', 'Copy error report')}
           </button>
           <button class="eb-btn eb-btn-ghost" id="eb-dismiss">
-            <i class="fas fa-times"></i> Închide
+            <i class="fas fa-times"></i> ${this._t('errors.dismiss', 'Dismiss')}
           </button>
         </div>
 
@@ -208,9 +216,13 @@ const ErrorBoundary = {
     Utils.copyToClipboard(report).then(() => {
       const btn = document.getElementById('eb-copy');
       if (btn) {
-        btn.innerHTML = '<i class="fas fa-check"></i> Copiat!';
+        const copiedText = this._t('errors.copied', 'Copied!');
+        btn.innerHTML = `<i class="fas fa-check"></i> ${copiedText}`;
         btn.style.color = '#3fb950';
-        setTimeout(() => { btn.innerHTML = '<i class="fas fa-copy"></i> Copiază raport eroare'; btn.style.color = ''; }, 2000);
+        setTimeout(() => {
+          btn.innerHTML = `<i class="fas fa-copy"></i> ${this._t('errors.copyReport', 'Copy error report')}`;
+          btn.style.color = '';
+        }, 2000);
       }
     });
   },

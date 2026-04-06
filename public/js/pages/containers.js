@@ -360,13 +360,13 @@ const ContainersPage = {
     const summaryInline = document.getElementById('container-summary-inline');
     if (summaryInline) {
       summaryInline.innerHTML = `
-        <span class="summary-item" style="font-size:11px"><i class="fas fa-cube"></i> <strong>${total}</strong></span>
+        <span class="summary-item" style="font-size:11px"><i class="fas fa-cube"></i> <strong>${total}</strong> ${i18n.t('pages.containers.total')}</span>
         <span class="summary-sep" style="font-size:11px">|</span>
-        <span class="summary-item summary-filter ${activeFilter === 'running' ? 'active' : ''} text-green" data-state-filter="running" style="font-size:11px;cursor:pointer"><i class="fas fa-play"></i> ${running}</span>
+        <span class="summary-item summary-filter ${activeFilter === 'running' ? 'active' : ''} text-green" data-state-filter="running" style="font-size:11px;cursor:pointer"><i class="fas fa-play"></i> ${running} ${i18n.t('common.running')}</span>
         <span class="summary-sep" style="font-size:11px">|</span>
-        <span class="summary-item summary-filter ${activeFilter === 'exited' ? 'active' : ''} text-muted" data-state-filter="exited" style="font-size:11px;cursor:pointer"><i class="fas fa-stop"></i> ${stopped}</span>
-        ${other > 0 ? `<span class="summary-sep" style="font-size:11px">|</span><span class="summary-item summary-filter ${activeFilter === 'other' ? 'active' : ''} text-yellow" data-state-filter="other" style="font-size:11px;cursor:pointer"><i class="fas fa-exclamation-triangle"></i> ${other}</span>` : ''}
-        ${needsAttention > 0 ? `<span class="summary-sep" style="font-size:11px">|</span><span class="summary-item summary-filter ${activeFilter === 'attention' ? 'active' : ''} text-orange" data-state-filter="attention" style="font-size:11px;cursor:pointer"><i class="fas fa-heartbeat"></i> ${needsAttention}</span>` : ''}
+        <span class="summary-item summary-filter ${activeFilter === 'exited' ? 'active' : ''} text-muted" data-state-filter="exited" style="font-size:11px;cursor:pointer"><i class="fas fa-stop"></i> ${stopped} ${i18n.t('common.stopped')}</span>
+        ${other > 0 ? `<span class="summary-sep" style="font-size:11px">|</span><span class="summary-item summary-filter ${activeFilter === 'other' ? 'active' : ''} text-yellow" data-state-filter="other" style="font-size:11px;cursor:pointer"><i class="fas fa-exclamation-triangle"></i> ${other} ${i18n.t('common.other')}</span>` : ''}
+        ${needsAttention > 0 ? `<span class="summary-sep" style="font-size:11px">|</span><span class="summary-item summary-filter ${activeFilter === 'attention' ? 'active' : ''} text-orange" data-state-filter="attention" style="font-size:11px;cursor:pointer"><i class="fas fa-heartbeat"></i> ${needsAttention} ${i18n.t('pages.containers.needsAttention')}</span>` : ''}
       `;
       summaryInline.querySelectorAll('[data-state-filter]').forEach(item => {
         item.addEventListener('click', () => {
