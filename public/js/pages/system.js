@@ -906,24 +906,17 @@ DB_PASS=secret"></textarea>
       // Deep cleanup button (keep last 24h only)
       el.querySelector('#db-deep-cleanup-btn').addEventListener('click', async () => {
         const ok = await Modal.confirm(
-          `<div style="max-width:450px">
-            <p style="margin:0 0 12px"><strong style="color:var(--red)">Deep Cleanup — Keep last 24 hours only</strong></p>
+          `<p style="margin:0 0 12px"><strong style="color:var(--red)">Deep Cleanup — Keep last 24 hours only</strong></p>
             <p class="text-sm" style="margin:0 0 12px">This will <strong>permanently delete</strong> all data older than 24 hours from:</p>
             <ul class="text-sm" style="margin:0 0 12px;padding-left:20px;color:var(--text)">
-              <li>Container stats (CPU, RAM, network metrics)</li>
-              <li>Aggregated stats (1-minute and 1-hour buckets)</li>
-              <li>Audit log entries</li>
-              <li>Docker events</li>
-              <li>Alert and health events</li>
-              <li>Webhook delivery history</li>
-              <li>Scan results</li>
-              <li>Notifications</li>
-              <li>Schedule execution history</li>
-              <li>Login attempts</li>
+              <li>Container stats, aggregated stats</li>
+              <li>Audit log, Docker events</li>
+              <li>Alert and health events, webhooks</li>
+              <li>Scan results, notifications</li>
+              <li>Schedule history, login attempts</li>
             </ul>
-            <p class="text-sm" style="margin:0;color:var(--red)"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>This action is irreversible. Historical trends and reports will be lost.</p>
-          </div>`,
-          { confirmText: 'Delete Everything Older Than 24h', danger: true }
+            <p class="text-sm" style="margin:0;color:var(--red)"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>This action is irreversible.</p>`,
+          { confirmText: 'Delete Everything Older Than 24h', danger: true, html: true }
         );
         if (!ok) return;
 

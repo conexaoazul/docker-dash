@@ -60,7 +60,7 @@ const Modal = {
   },
 
   // Convenience: confirmation dialog
-  confirm(message, { title, confirmText, danger = false, typeToConfirm } = {}) {
+  confirm(message, { title, confirmText, danger = false, typeToConfirm, html = false } = {}) {
     title = title || i18n.t('common.confirm');
     confirmText = confirmText || i18n.t('common.confirm');
     return new Promise((resolve) => {
@@ -75,7 +75,7 @@ const Modal = {
           </button>
         </div>
         <div class="modal-body">
-          <p>${Utils.escapeHtml(message)}</p>
+          <div>${html ? message : `<p>${Utils.escapeHtml(message)}</p>`}</div>
           ${typeBlock}
         </div>
         <div class="modal-footer">
