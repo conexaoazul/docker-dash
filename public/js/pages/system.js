@@ -24,7 +24,6 @@ const SystemPage = {
         <button class="tab" data-tab="events">${i18n.t('pages.system.tabEvents')}</button>
         <button class="tab" data-tab="schedules">${i18n.t('pages.system.tabSchedules')}</button>
         <button class="tab" data-tab="backup">${i18n.t('pages.system.tabBackup')}</button>
-        <button class="tab" data-tab="stacks"><i class="fas fa-layer-group" style="margin-right:4px"></i> Stacks</button>
         <button class="tab" data-tab="database"><i class="fas fa-database" style="margin-right:4px"></i> Database</button>
         <button class="tab" data-tab="tools"><i class="fas fa-toolbox" style="margin-right:4px"></i> Tools</button>
         <button class="tab" data-tab="templates"><i class="fas fa-rocket" style="margin-right:4px"></i> Templates</button>
@@ -60,7 +59,6 @@ const SystemPage = {
       else if (this._tab === 'events') await this._renderEvents(el);
       else if (this._tab === 'schedules') await this._renderSchedules(el);
       else if (this._tab === 'backup') this._renderBackup(el);
-      else if (this._tab === 'stacks') await this._renderStacks(el);
       else if (this._tab === 'database') await this._renderDatabase(el);
       else if (this._tab === 'tools') this._renderTools(el);
       else if (this._tab === 'templates') await this._renderTemplates(el);
