@@ -36,31 +36,47 @@
   </tr>
   <tr>
     <td align="center"><strong>Containers</strong><br><img src="docs/screenshots/containers.png" alt="Containers" width="400"></td>
-    <td align="center"><strong>Containers (Light)</strong><br><img src="docs/screenshots/containers-light.png" alt="Containers Light" width="400"></td>
+    <td align="center"><strong>Container Detail</strong><br><img src="docs/screenshots/container-detail.png" alt="Container Detail" width="400"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Container Detail</strong><br><img src="docs/screenshots/container-detail.png" alt="Container Detail" width="400"></td>
     <td align="center"><strong>Terminal (xterm.js)</strong><br><img src="docs/screenshots/terminal.png" alt="Terminal" width="400"></td>
+    <td align="center"><strong>Images</strong><br><img src="docs/screenshots/images.png" alt="Images" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Volumes</strong><br><img src="docs/screenshots/volumes.png" alt="Volumes" width="400"></td>
+    <td align="center"><strong>Networks</strong><br><img src="docs/screenshots/networks.png" alt="Networks" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Multi-Host Overview</strong><br><img src="docs/screenshots/multi-host.png" alt="Multi-Host" width="400"></td>
+    <td align="center"><strong>Stacks</strong><br><img src="docs/screenshots/stacks.png" alt="Stacks" width="400"></td>
   </tr>
   <tr>
     <td align="center"><strong>Security Scanning</strong><br><img src="docs/screenshots/security.png" alt="Security" width="400"></td>
-    <td align="center"><strong>Image Management</strong><br><img src="docs/screenshots/images.png" alt="Images" width="400"></td>
+    <td align="center"><strong>Log Explorer</strong><br><img src="docs/screenshots/log-explorer.png" alt="Log Explorer" width="400"></td>
   </tr>
   <tr>
+    <td align="center"><strong>Event Timeline</strong><br><img src="docs/screenshots/timeline.png" alt="Timeline" width="400"></td>
     <td align="center"><strong>Network Topology</strong><br><img src="docs/screenshots/topology.png" alt="Network Topology" width="400"></td>
+  </tr>
+  <tr>
     <td align="center"><strong>Dependency Map</strong><br><img src="docs/screenshots/dependency-map.png" alt="Dependency Map" width="400"></td>
-  </tr>
-  <tr>
     <td align="center"><strong>Cost Optimizer</strong><br><img src="docs/screenshots/cost-optimizer.png" alt="Cost Optimizer" width="400"></td>
-    <td align="center"><strong>Insights</strong><br><img src="docs/screenshots/insights.png" alt="Insights" width="400"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Stacks</strong><br><img src="docs/screenshots/stacks.png" alt="Stacks" width="400"></td>
-    <td align="center"><strong>Multi-Host</strong><br><img src="docs/screenshots/hosts.png" alt="Hosts" width="400"></td>
+    <td align="center"><strong>Insights</strong><br><img src="docs/screenshots/insights.png" alt="Insights" width="400"></td>
+    <td align="center"><strong>Alerts</strong><br><img src="docs/screenshots/alerts.png" alt="Alerts" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>System Tools</strong><br><img src="docs/screenshots/system-tools.png" alt="System Tools" width="400"></td>
+    <td align="center"><strong>How-To Guides</strong><br><img src="docs/screenshots/howto.png" alt="How-To" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Feature Comparison</strong><br><img src="docs/screenshots/compare.png" alt="Compare" width="400"></td>
+    <td align="center"><strong>Enterprise Mode</strong><br><img src="docs/screenshots/enterprise.png" alt="Enterprise" width="400"></td>
   </tr>
   <tr>
     <td align="center"><strong>API Playground</strong><br><img src="docs/screenshots/api-playground.png" alt="API Playground" width="400"></td>
-    <td align="center"><strong>Notifications</strong><br><img src="docs/screenshots/notifications.png" alt="Notifications" width="400"></td>
+    <td align="center"><strong>What's New</strong><br><img src="docs/screenshots/whatsnew.png" alt="What's New" width="400"></td>
   </tr>
 </table>
 
