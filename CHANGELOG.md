@@ -2,6 +2,42 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.2.0] - 2026-04-17
+
+### Added — Enterprise Deployment Tooling
+- **Secrets Audit** (System > Secrets tab) — scans up to 30 containers for secret hygiene: detects plain-text sensitive env vars (never exposing values), flags privileged containers, Docker socket mounts, missing `no-new-privileges`, no resource limits, missing `_FILE` pattern. Per-container 0-100 score + aggregate security score.
+- **Pre-Deploy Validation** (same tab) — paste `.env` + `docker-compose.yml` for instant validation. 10 checks: TODO placeholders, plain-text secrets, APP_SECRET presence, restart policy, healthcheck, resource limits, logging, secrets block, privileged mode, security_opt. Returns pass/fail/warn/info with fix suggestions.
+- **5 new How-To guides** (EN + RO, 51 total now):
+  - Docker Secrets Management — the `_FILE` pattern, compose wiring, permissions
+  - Secret Rotation Best Practices — 90-day cycles, atomic rename, rollback plan, two-person rule
+  - mTLS for Service-to-Service Auth — cfssl setup, nginx config, renewal
+  - printf vs echo — The Newline Trap — why `echo` silently corrupts credentials
+  - Pre-Deploy Checklist — 12-point script with two-person rule
+
+### Backend
+- `GET /api/system/secrets-audit` — container-by-container hygiene scan
+- `POST /api/system/deploy-validate` — stateless env + compose validator
+- Migration 042 — 5 bilingual deployment guides seeded (total built-in: 51)
+
+### Dashboard
+- **Cluster Health detail line restored** — shows `X/Y running · CPU% · RAM%` below the Health label
+
+### i18n
+- **Error boundary dialog now respects language setting** — all hardcoded Romanian text replaced with `i18n.t()` calls; falls back to English if i18n not loaded; new `errors.*` keys in EN and RO
+
+### Fixed
+- `Modal.confirm()` now supports `html: true` option — Deep Cleanup dialog no longer shows raw HTML tags
+- Column config gear button moved from absolute overlay to inline in last `<th>` — no more UI overlap
+- Container stats labels restored — `Total`, `Running`, `Stopped`, `Needs Attention` now show next to counts
+- Multi-Host view toggle moved between By Host and By Stack tabs — hidden when By Stack is active
+
+### Changed
+- **System > Stacks tab removed** — all functionality now in the main Stacks page (`#/stacks`) with Create Stack button and container badges (tags style)
+- Login Banner (MOTD) simplified — single textarea with one message per line + random checkbox (was 3-mode complex editor)
+- Cluster Health card on dashboard — compact 48px gauge inline with other stat cards
+- Stacks page — Create Stack modal with YAML editor + deploy prompt
+- Stacks page — container names displayed as colored badges (green=running, red=stopped) instead of comma-separated text
+
 ## [6.1.0] - 2026-04-06
 
 ### Added

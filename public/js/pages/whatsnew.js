@@ -10,6 +10,24 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.2.0',
+      date: '2026-04-17',
+      title: 'Enterprise Deployment Tooling — Secrets Audit, Deploy Validation, Bilingual Error Dialog',
+      changes: [
+        { type: 'feature', text: 'Secrets Audit (System > Secrets) — scans containers for secret hygiene: plain-text env vars, privileged mode, Docker socket mounts, missing no-new-privileges, no resource limits. Per-container 0-100 score + aggregate security score. Never exposes secret values.' },
+        { type: 'feature', text: 'Pre-Deploy Validation — paste .env and docker-compose.yml for instant 10-point checklist: TODO placeholders, plain-text secrets, APP_SECRET, restart policy, healthchecks, resource limits, logging, secrets block, privileged mode, security_opt. Pass/fail/warn with fix suggestions.' },
+        { type: 'feature', text: '5 new How-To guides (EN + RO, 51 total): Docker Secrets Management (_FILE pattern), Secret Rotation Best Practices, mTLS for Service-to-Service Auth, printf vs echo Newline Trap, Pre-Deploy Checklist' },
+        { type: 'improvement', text: 'Cluster Health detail line restored on dashboard — shows X/Y running · CPU% · RAM% below Health label' },
+        { type: 'improvement', text: 'Error boundary dialog now respects language setting — EN/RO via i18n instead of hardcoded Romanian' },
+        { type: 'improvement', text: 'Login Banner (MOTD) simplified — single textarea with one message per line + random checkbox' },
+        { type: 'improvement', text: 'Stacks functionality consolidated — System > Stacks tab removed, all features in the main Stacks page with Create Stack button and container badges' },
+        { type: 'improvement', text: 'Multi-Host view toggle moved between tabs — List/Tab buttons only visible in By Host mode' },
+        { type: 'fix', text: 'Modal.confirm() html option — Deep Cleanup dialog no longer shows raw HTML tags' },
+        { type: 'fix', text: 'Column config gear button moved inline in table header — no more UI overlap' },
+        { type: 'fix', text: 'Container stats labels restored — Total, Running, Stopped, Needs Attention show next to counts' },
+      ],
+    },
+    {
       version: '6.1.0',
       date: '2026-04-06',
       title: 'How-To Knowledge Base + 105-Feature Comparison + Fixes',
