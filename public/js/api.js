@@ -351,6 +351,45 @@ const Api = {
   getSecretsAudit() { return this.get('/system/secrets-audit'); },
   validateDeploy(data) { return this.post('/system/deploy-validate', data); },
 
+  // ─── Secrets Wizard ───────────────────────────────────
+  analyzeSecretsWizard(envContent) { return this.post('/system/secrets-wizard/analyze', { envContent }); },
+  generateSecretsScript(data) {
+    return fetch('/api/system/secrets-wizard/generate-script', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(this._bearerToken ? { Authorization: 'Bearer ' + this._bearerToken } : {}) },
+      credentials: 'same-origin',
+      body: JSON.stringify(data),
+    }).then(r => r.text());
+  },
+  generateSecretsCompose(data) {
+    return fetch('/api/system/secrets-wizard/generate-compose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(this._bearerToken ? { Authorization: 'Bearer ' + this._bearerToken } : {}) },
+      credentials: 'same-origin',
+      body: JSON.stringify(data),
+    }).then(r => r.text());
+  },
+
+  // ─── Secret Rotations ────────────────────────────
+  getSecretRotations() { return this.get('/secrets-rotations'); },
+  getSecretRotationsSummary() { return this.get('/secrets-rotations/summary'); },
+  registerSecretRotations(data) { return this.post('/secrets-rotations/bulk', data); },
+  markSecretRotated(id, notes) { return this.post(`/secrets-rotations/${id}/mark-rotated`, { notes: notes || '' }); },
+  updateSecretRotation(id, data) { return this.patch('/secrets-rotations/' + id, data); },
+  deleteSecretRotation(id) { return this.delete('/secrets-rotations/' + id); },
+  getSecretRotationHistory(id) { return this.get(`/secrets-rotations/${id}/history`); },
+
+  // ─── Secrets Remote Deploy ───────────────────────
+  deploySecretsRemote(data) { return this.post('/system/secrets-wizard/deploy-remote', data); },
+  getSecretsDeployLog(jobId) { return this.get('/system/secrets-wizard/deploy-log/' + jobId); },
+
+  // ─── Certificate Management ──────────────────────
+  getTrackedCertificates() { return this.get('/system/certificates'); },
+  addTrackedCertificate(data) { return this.post('/system/certificates', data); },
+  refreshCertificate(id) { return this.post(`/system/certificates/${id}/refresh`); },
+  deleteTrackedCertificate(id) { return this.delete('/system/certificates/' + id); },
+  generateCSR(data) { return this.post('/system/certificates/csr', data); },
+
   // ─── SSL/TLS ──────────────────────────────────────
   runCisBenchmark(hostId) { return this.get(`/system/cis-benchmark${hostId ? `?hostId=${hostId}` : ''}`); },
   getCisHardenedCompose(containerName, hostId) { return this.get(`/system/cis/container/${encodeURIComponent(containerName)}/hardened-compose${hostId ? `?hostId=${hostId}` : ''}`); },

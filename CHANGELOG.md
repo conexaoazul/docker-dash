@@ -2,6 +2,49 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.3.0] - 2026-04-18
+
+### Added — Secrets Lifecycle Suite
+
+**Phase 1 — Secrets Wizard**
+- 4-step wizard (System > Secrets > Audit & Wizard → *Launch Wizard*):
+  1. Paste `.env` + app name + secrets directory
+  2. Review classified secrets (20+ patterns: JWT, HMAC masterkey, Django secret, Cloudflare Tunnel/Turnstile, Entra/Graph, OAuth, TLS cert/key/CA, SSH key, SMTP, vendor, DB, migrator, Grafana, generic password/secret/token)
+  3. Paste provider-issued values (base64-embedded in output)
+  4. Download generated `setup-secrets.sh` + `compose-secrets.yml`, or deploy remotely via SSH
+- Generated script: `set -euo pipefail`, `printf '%s'` (never `echo`), `chmod 600`, `chown root:docker`, skips existing files, includes tmpfs fstab hint, verifies permissions at the end
+- Backend: `POST /api/system/secrets-wizard/analyze`, `/generate-script`, `/generate-compose`
+
+**Phase 2 — Remote SSH Deploy**
+- `POST /api/system/secrets-wizard/deploy-remote` — SFTP uploads the script to `/tmp/docker-dash-secrets-<rand>.sh`, executes with `sudo -n bash`, streams combined stdout/stderr back, self-deletes on exit
+- Wizard Step 4 adds a target-host dropdown (filtered to SSH-configured hosts) + live output panel + audit log entry
+
+**Phase 3 — Rotation Tracker**
+- Migration 043: `secret_rotations` + `secret_rotation_history`
+- System > Secrets > **Rotation Tracker** sub-tab: summary cards (Total / OK / Due Soon / Overdue) + table with per-secret status badges
+- Per-row actions: *Mark Rotated* (creates history entry + resets `next_due_at`), *Edit Interval*, *Untrack*
+- Wizard Step 4 gains a "Track for Rotation" block — bulk-registers all classified secrets with their default intervals (90–365 days)
+- Daily cron at 07:00 re-evaluates statuses and logs a scan entry when there are overdue/due-soon items
+- Routes: `GET /api/secrets-rotations`, `/summary`, `POST /bulk`, `POST /:id/mark-rotated`, `PATCH /:id`, `DELETE /:id`, `GET /:id/history`
+
+**Phase 4 — Certificate Management**
+- Migration 044: `tracked_certificates`
+- System > Secrets > **Certificates** sub-tab: summary cards + table (Name, Subject, SANs, Issuer, Status, Expires, Days, Fingerprint)
+- Add by pasting PEM content or providing an on-disk path (file mode re-reads on refresh/cron)
+- **CSR Generator** — openssl-backed form for CN, SANs (DNS + IP), O/OU/C/ST/L/Email, RSA 4096 or EC P-256 keys; downloads `.key` + `.csr`
+- Daily cron at 07:30 re-parses all tracked certs and logs scan entries when critical/warning/expired counts are non-zero
+- Routes: `GET /api/system/certificates`, `POST /`, `POST /:id/refresh`, `DELETE /:id`, `POST /certificates/csr`
+- Service: `src/services/certificates.js` (parsePem, generateCsr, daysUntil, statusForDays)
+
+### UI
+- New three-pane sub-tab bar inside System > Secrets: **Audit & Wizard** · **Rotation Tracker** · **Certificates**
+- Status color system: `ok` green · `warning` yellow (≤30d) · `critical` red (≤7d) · `expired` red · `unknown` dim
+
+### Security
+- Remote SSH exec uses `sudo -n` (non-interactive) — requires NOPASSWD sudoers entry or the script runs as the login user
+- Scripts self-delete from `/tmp` after execution (no plaintext residue)
+- All new endpoints require `admin` role; read-only endpoints also accept `operator`
+
 ## [6.2.0] - 2026-04-17
 
 ### Added — Enterprise Deployment Tooling

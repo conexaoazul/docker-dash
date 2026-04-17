@@ -1679,6 +1679,461 @@ router.post('/deploy-validate', requireAuth, requireRole('admin'), (req, res) =>
   }
 });
 
+// ─── Secrets Wizard ─────────────────────────────────────────
+
+// POST /secrets-wizard/analyze — parse .env, classify secrets, return structured analysis
+router.post('/secrets-wizard/analyze', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { envContent } = req.body;
+    if (!envContent) return res.status(400).json({ error: 'envContent required' });
+
+    // Classification patterns (order matters — first match wins)
+    const classifiers = [
+      { pattern: /fingerprint/i, type: 'ssh_fingerprint', label: 'SSH Host Key Fingerprint', action: 'ssh-keyscan', generator: null, rotation: 0 },
+      { pattern: /masterkey/i, type: 'hmac_masterkey', label: 'HMAC Masterkey (32B base64)', action: 'generate', generator: 'openssl rand -base64 32', rotation: 180 },
+      { pattern: /jwt|signing_key/i, type: 'jwt_key', label: 'JWT Signing Key (32B base64)', action: 'generate', generator: 'openssl rand -base64 32', rotation: 180 },
+      { pattern: /django.*secret|secret.*django|glitchtip.*secret/i, type: 'django_secret', label: 'Django Secret Key (50 chars)', action: 'generate', generator: `python3 -c 'import secrets,string; print("".join(secrets.choice(string.ascii_letters+string.digits+"!@#$%^&*(-_=+)") for _ in range(50)))'`, rotation: 180 },
+      { pattern: /tunnel_token/i, type: 'cf_tunnel', label: 'Cloudflare Tunnel Token', action: 'provider', provider: 'Cloudflare Zero Trust → Networks → Tunnels → Create tunnel → Copy token', rotation: 365 },
+      { pattern: /turnstile.*secret/i, type: 'cf_turnstile', label: 'Cloudflare Turnstile Secret', action: 'provider', provider: 'Cloudflare dashboard → Turnstile → Add site → Copy secret', rotation: 365 },
+      { pattern: /(entra|ms_).*secret|graph.*secret/i, type: 'entra_secret', label: 'Microsoft Entra ID Client Secret', action: 'provider', provider: 'Azure Portal → Entra ID → App registrations → [app] → Certificates & secrets → New client secret (6-month expiry)', rotation: 180 },
+      { pattern: /oauth.*secret/i, type: 'oauth_secret', label: 'OAuth Client Secret', action: 'provider', provider: 'OAuth provider dashboard → App settings → Generate client secret', rotation: 365 },
+      { pattern: /client_cert|\.crt_file|client\.pem/i, type: 'tls_cert', label: 'TLS Client Certificate', action: 'upload', provider: 'PEM file — signed by your CA', rotation: 365 },
+      { pattern: /client_key|_key_file$|\.key_file/i, type: 'tls_key', label: 'TLS Private Key', action: 'upload', provider: 'PEM file — matching the client cert', rotation: 365 },
+      { pattern: /ca_file|ca_path|_ca_/i, type: 'tls_ca', label: 'CA Bundle', action: 'upload', provider: 'CA certificate bundle (PEM)', rotation: 3650 },
+      { pattern: /sftp.*key|ssh.*private_key|private_key_path/i, type: 'ssh_key', label: 'SSH Private Key', action: 'upload', provider: 'Private key (ed25519 recommended) — SysAdmin provides via password manager', rotation: 365 },
+      { pattern: /smtp.*password|email.*password/i, type: 'smtp_password', label: 'SMTP Password', action: 'provider', provider: 'Email provider admin panel → App password or SMTP credentials', rotation: 365 },
+      { pattern: /cerm.*password|partner.*password|vendor.*password/i, type: 'vendor_password', label: 'Vendor API Password', action: 'provider', provider: 'Contact vendor support to obtain/rotate credentials', rotation: 365 },
+      { pattern: /db.*password|mssql.*password|postgres.*password|mysql.*password/i, type: 'db_password', label: 'Database Password (24B base64)', action: 'generate', generator: 'openssl rand -base64 24', rotation: 90 },
+      { pattern: /migrator.*password/i, type: 'db_migrator_password', label: 'DB Migrator Password (24B base64)', action: 'generate', generator: 'openssl rand -base64 24', rotation: 90 },
+      { pattern: /grafana.*password/i, type: 'grafana_password', label: 'Grafana Admin Password (16B base64)', action: 'generate', generator: 'openssl rand -base64 16', rotation: 90 },
+      { pattern: /password(?!.*_file).*file|password_file/i, type: 'generic_password', label: 'Password (24B base64)', action: 'generate', generator: 'openssl rand -base64 24', rotation: 90 },
+      { pattern: /secret_file|secret$/i, type: 'generic_secret', label: 'Secret (32B base64)', action: 'generate', generator: 'openssl rand -base64 32', rotation: 180 },
+      { pattern: /token_file|_token$/i, type: 'generic_token', label: 'API Token (32B base64)', action: 'generate', generator: 'openssl rand -base64 32', rotation: 180 },
+    ];
+
+    const lines = envContent.split('\n');
+    const secretFiles = []; // *_FILE entries pointing to /run/secrets/*
+    const todoPlaceholders = []; // <TODO_*> values that need manual provisioning
+
+    lines.forEach((line, lineNum) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+
+      const match = trimmed.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
+      if (!match) return;
+
+      const [, key, value] = match;
+
+      // Case 1: *_FILE variable pointing to /run/secrets/
+      if (key.endsWith('_FILE') && value.includes('/run/secrets/')) {
+        const secretName = value.split('/').pop();
+        let classification = classifiers.find(c => c.pattern.test(key) || c.pattern.test(secretName));
+        if (!classification) {
+          classification = { type: 'unknown', label: 'Unknown secret (review required)', action: 'manual', generator: null, provider: 'Manually provision — classification not detected', rotation: 180 };
+        }
+        secretFiles.push({
+          envKey: key,
+          secretName,
+          hostPath: '/etc/${APP_NAME}/secrets/' + secretName,
+          containerPath: value,
+          line: lineNum + 1,
+          ...classification,
+        });
+        return;
+      }
+
+      // Case 2: <TODO_*> placeholder that needs provisioning
+      const todoMatch = value.match(/^<TODO[^>]*>$/);
+      if (todoMatch) {
+        let classification = classifiers.find(c => c.pattern.test(key));
+        if (!classification) {
+          classification = { type: 'config_placeholder', label: 'Config placeholder', action: 'inline', generator: null, provider: 'Replace with actual value (non-secret public config)', rotation: 0 };
+        }
+        todoPlaceholders.push({
+          envKey: key,
+          placeholder: value,
+          line: lineNum + 1,
+          ...classification,
+        });
+      }
+    });
+
+    // Group by action type for UI rendering
+    const summary = {
+      total: secretFiles.length + todoPlaceholders.length,
+      generate: secretFiles.filter(s => s.action === 'generate').length,
+      provider: secretFiles.filter(s => s.action === 'provider').length + todoPlaceholders.filter(s => s.action === 'provider').length,
+      upload: secretFiles.filter(s => s.action === 'upload').length,
+      inline: todoPlaceholders.filter(s => s.action === 'inline').length,
+      fingerprint: secretFiles.filter(s => s.action === 'ssh-keyscan').length,
+      unknown: secretFiles.filter(s => s.type === 'unknown').length,
+    };
+
+    res.json({ secretFiles, todoPlaceholders, summary });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /secrets-wizard/generate-script — returns a full bash setup script
+router.post('/secrets-wizard/generate-script', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { appName = 'myapp', secretDir, secretFiles = [], providerValues = {} } = req.body;
+    const dir = secretDir || ('/etc/' + appName + '/secrets');
+
+    let script = '#!/bin/bash\n';
+    script += '# ============================================================================\n';
+    script += '# Generated by Docker Dash — Secrets Wizard\n';
+    script += '# App: ' + appName + '\n';
+    script += '# Generated: ' + new Date().toISOString() + '\n';
+    script += '# ============================================================================\n';
+    script += '# CRITICAL RULES:\n';
+    script += '#   - Always use printf, NEVER echo (echo appends \\n, breaks credentials)\n';
+    script += '#   - Files must be 600, directory 750, owner root:docker\n';
+    script += '#   - Run as root: sudo bash generated-secrets.sh\n';
+    script += '# ============================================================================\n\n';
+    script += 'set -euo pipefail\n\n';
+    script += 'DIR="' + dir + '"\n\n';
+    script += '# --- 1. Prepare directory ---\n';
+    script += 'echo "[1/3] Preparing secrets directory $DIR"\n';
+    script += 'mkdir -p "$DIR"\n';
+    script += 'chown root:docker "$DIR"\n';
+    script += 'chmod 750 "$DIR"\n\n';
+    script += '# Optional: tmpfs mount (secrets never hit disk plaintext)\n';
+    script += '# Add to /etc/fstab:\n';
+    script += '#   tmpfs ' + dir + ' tmpfs size=8m,mode=750,uid=0,gid=\\$(getent group docker | cut -d: -f3) 0 0\n\n';
+    script += '# --- 2. Generate secrets ---\n';
+    script += 'echo "[2/3] Generating secrets..."\n\n';
+
+    let idx = 0;
+    for (const s of secretFiles) {
+      idx++;
+      script += '# (' + idx + '/' + secretFiles.length + ') ' + s.envKey + ' — ' + s.label + '\n';
+      const targetPath = '$DIR/' + s.secretName;
+
+      if (s.action === 'generate' && s.generator) {
+        script += 'if [ ! -f "' + targetPath + '" ]; then\n';
+        script += '  printf "%s" "$(' + s.generator + ')" > "' + targetPath + '"\n';
+        script += '  chmod 600 "' + targetPath + '"\n';
+        script += '  chown root:docker "' + targetPath + '"\n';
+        script += '  echo "  ✓ Generated ' + s.secretName + '"\n';
+        script += 'else\n';
+        script += '  echo "  ⚠ Already exists: ' + s.secretName + ' (skipping — delete manually to regenerate)"\n';
+        script += 'fi\n\n';
+      } else if (s.action === 'provider') {
+        const val = providerValues[s.envKey];
+        if (val) {
+          // Base64-encode to safely embed in script
+          const b64 = Buffer.from(val).toString('base64');
+          script += 'if [ ! -f "' + targetPath + '" ]; then\n';
+          script += '  printf "%s" "$(printf "%s" "' + b64 + '" | base64 -d)" > "' + targetPath + '"\n';
+          script += '  chmod 600 "' + targetPath + '"\n';
+          script += '  chown root:docker "' + targetPath + '"\n';
+          script += '  echo "  ✓ Stored provider-issued: ' + s.secretName + '"\n';
+          script += 'else\n';
+          script += '  echo "  ⚠ Already exists: ' + s.secretName + '"\n';
+          script += 'fi\n\n';
+        } else {
+          script += '# MANUAL: ' + s.provider + '\n';
+          script += '# Run this AFTER obtaining the value:\n';
+          script += '#   sudo sh -c \'printf "%s" "<PASTED_VALUE>" > ' + targetPath + '\'\n';
+          script += '#   sudo chmod 600 ' + targetPath + '\n';
+          script += '#   sudo chown root:docker ' + targetPath + '\n';
+          script += 'echo "  ⏸ MANUAL REQUIRED: ' + s.secretName + ' (see instructions)"\n\n';
+        }
+      } else if (s.action === 'upload') {
+        script += '# UPLOAD FILE: ' + s.provider + '\n';
+        script += '#   sudo install -m 600 -o root -g docker /path/to/source ' + targetPath + '\n';
+        script += 'echo "  ⏸ UPLOAD REQUIRED: ' + s.secretName + '"\n\n';
+      } else if (s.action === 'ssh-keyscan') {
+        script += '# SSH Host Key Pin:\n';
+        script += '#   ssh-keyscan -t ed25519 -p 22 <host> 2>/dev/null | ssh-keygen -lf -\n';
+        script += '#   Paste "SHA256:..." into ' + s.envKey + ' in .env (NOT a file)\n';
+        script += 'echo "  ⚠ SSH FINGERPRINT: run ssh-keyscan for ' + s.envKey + '"\n\n';
+      } else {
+        script += '# MANUAL: ' + (s.provider || 'Provision manually') + '\n';
+        script += '#   sudo sh -c \'printf "%s" "<PASTED_VALUE>" > ' + targetPath + '\'\n';
+        script += '#   sudo chmod 600 ' + targetPath + '\n';
+        script += '#   sudo chown root:docker ' + targetPath + '\n';
+        script += 'echo "  ⏸ MANUAL REQUIRED: ' + s.secretName + ' (unknown type — review)"\n\n';
+      }
+    }
+
+    script += '# --- 3. Verification ---\n';
+    script += 'echo "[3/3] Verifying permissions..."\n';
+    script += 'BAD=$(find "$DIR" -type f ! -perm 600 2>/dev/null)\n';
+    script += 'if [ -n "$BAD" ]; then\n';
+    script += '  echo "FAIL — files with wrong permissions:"\n';
+    script += '  echo "$BAD"\n';
+    script += '  exit 1\n';
+    script += 'fi\n\n';
+    script += 'echo ""\n';
+    script += 'echo "============================================================================"\n';
+    script += 'echo "  ✓ Secrets provisioned at $DIR"\n';
+    script += 'echo "  Next steps:"\n';
+    script += 'echo "    1. Fill any MANUAL/UPLOAD required secrets (listed above)"\n';
+    script += 'echo "    2. Run: docker compose up -d"\n';
+    script += 'echo "    3. Record this deployment in your password manager"\n';
+    script += 'echo "============================================================================"\n';
+
+    res.type('text/plain').send(script);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /secrets-wizard/deploy-remote — upload + execute script on a remote SSH host
+router.post('/secrets-wizard/deploy-remote', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { hostId, appName = 'myapp', script, useSudo = true } = req.body;
+    if (!hostId) return res.status(400).json({ error: 'hostId required' });
+    if (!script || typeof script !== 'string') return res.status(400).json({ error: 'script required' });
+
+    const db = getDb();
+    const host = db.prepare('SELECT * FROM docker_hosts WHERE id = ?').get(parseInt(hostId));
+    if (!host) return res.status(404).json({ error: 'Host not found' });
+    if (host.connection_type !== 'ssh') return res.status(400).json({ error: 'Host does not have SSH configuration' });
+
+    let sshConfig;
+    try { sshConfig = JSON.parse(host.ssh_config || '{}'); }
+    catch { return res.status(400).json({ error: 'Invalid SSH configuration' }); }
+    if (!sshConfig.host || !sshConfig.username) return res.status(400).json({ error: 'SSH host/username missing' });
+
+    const { Client } = require('ssh2');
+    const client = new Client();
+    const connectOpts = {
+      host: sshConfig.host,
+      port: sshConfig.port || 22,
+      username: sshConfig.username,
+      readyTimeout: 15000,
+    };
+    if (sshConfig.privateKey) {
+      connectOpts.privateKey = sshConfig.privateKey;
+      if (sshConfig.passphrase) connectOpts.passphrase = sshConfig.passphrase;
+    } else if (sshConfig.password) {
+      connectOpts.password = sshConfig.password;
+    } else {
+      return res.status(400).json({ error: 'SSH host has no authentication configured' });
+    }
+
+    const remotePath = '/tmp/docker-dash-secrets-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.sh';
+
+    const result = await new Promise((resolve, reject) => {
+      let output = '';
+      let exitCode = null;
+      const timeout = setTimeout(() => { try { client.end(); } catch {} reject(new Error('Remote execution timeout (120s)')); }, 120000);
+
+      client.on('ready', () => {
+        client.sftp((err, sftp) => {
+          if (err) { clearTimeout(timeout); client.end(); return reject(new Error('SFTP init failed: ' + err.message)); }
+
+          const stream = sftp.createWriteStream(remotePath, { mode: 0o755 });
+          stream.on('error', (e) => { clearTimeout(timeout); client.end(); reject(new Error('SFTP write failed: ' + e.message)); });
+          stream.on('close', () => {
+            // chmod + execute
+            const execCmd = (useSudo ? 'sudo -n bash ' : 'bash ') + remotePath + ' 2>&1; RC=$?; rm -f ' + remotePath + '; exit $RC';
+            client.exec(execCmd, { pty: false }, (err2, ch) => {
+              if (err2) { clearTimeout(timeout); client.end(); return reject(new Error('exec failed: ' + err2.message)); }
+              ch.on('data', (d) => { output += d.toString(); });
+              ch.stderr.on('data', (d) => { output += d.toString(); });
+              ch.on('close', (code) => {
+                clearTimeout(timeout);
+                exitCode = code;
+                client.end();
+                resolve({ output, exitCode: code });
+              });
+            });
+          });
+          stream.end(script);
+        });
+      });
+
+      client.on('error', (e) => { clearTimeout(timeout); reject(e); });
+      client.connect(connectOpts);
+    });
+
+    auditService.log({
+      userId: req.user.id, username: req.user.username,
+      action: 'secrets_deploy_remote', targetType: 'host', targetId: String(hostId),
+      details: { appName, exitCode: result.exitCode, useSudo, outputLen: result.output.length },
+      ip: getClientIp(req),
+    });
+
+    res.json({ ok: result.exitCode === 0, exitCode: result.exitCode, output: result.output });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /secrets-wizard/generate-compose — returns docker-compose secrets block
+router.post('/secrets-wizard/generate-compose', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { appName = 'myapp', secretDir, secretFiles = [] } = req.body;
+    const dir = secretDir || ('/etc/' + appName + '/secrets');
+
+    let yaml = '# ============================================================================\n';
+    yaml += '# Generated by Docker Dash — Secrets Wizard\n';
+    yaml += '# Append this to your docker-compose.yml\n';
+    yaml += '# ============================================================================\n\n';
+    yaml += '# Under each service that needs secrets, add:\n';
+    yaml += '#   secrets:\n';
+    secretFiles.forEach(s => { yaml += '#     - ' + s.secretName + '\n'; });
+    yaml += '\n';
+    yaml += '# Top-level secrets block:\n';
+    yaml += 'secrets:\n';
+    secretFiles.forEach(s => {
+      yaml += '  ' + s.secretName + ':\n';
+      yaml += '    file: ' + dir + '/' + s.secretName + '\n';
+    });
+
+    res.type('text/plain').send(yaml);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Certificate Management ─────────────────────────────────
+
+const certService = require('../services/certificates');
+
+// GET /certificates — list tracked certs with computed status
+router.get('/certificates', requireAuth, requireRole('admin', 'operator'), (req, res) => {
+  try {
+    const db = getDb();
+    const rows = db.prepare(`SELECT id, name, source_type, source_path, subject, issuer, sans,
+      not_before, not_after, fingerprint_sha256, self_signed, host_id, notes, last_checked_at, last_error,
+      created_at, updated_at FROM tracked_certificates ORDER BY not_after ASC`).all();
+    const enriched = rows.map(r => {
+      const days = certService.daysUntil(r.not_after);
+      return { ...r, daysUntilExpiry: days, status: certService.statusForDays(days) };
+    });
+    res.json(enriched);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /certificates — add a tracked cert (PEM content or path)
+router.post('/certificates', requireAuth, requireRole('admin'), writeable, (req, res) => {
+  try {
+    const { name, pemContent, sourcePath = '', hostId = 0, notes = '' } = req.body || {};
+    if (!name) return res.status(400).json({ error: 'name required' });
+
+    let pem = pemContent;
+    let sourceType = 'uploaded';
+    if (!pem && sourcePath) {
+      if (!fs.existsSync(sourcePath)) return res.status(400).json({ error: 'sourcePath not found' });
+      pem = fs.readFileSync(sourcePath, 'utf8');
+      sourceType = 'file';
+    }
+    if (!pem) return res.status(400).json({ error: 'pemContent or sourcePath required' });
+
+    let info;
+    try { info = certService.parsePem(pem); }
+    catch (e) { return res.status(400).json({ error: 'PEM parse failed: ' + e.message }); }
+
+    const notBeforeIso = info.notBefore ? new Date(info.notBefore).toISOString() : null;
+    const notAfterIso = info.notAfter ? new Date(info.notAfter).toISOString() : null;
+
+    const db = getDb();
+    const result = db.prepare(`
+      INSERT INTO tracked_certificates
+        (name, source_type, source_path, pem_content, subject, issuer, sans, not_before, not_after,
+         fingerprint_sha256, self_signed, host_id, notes, last_checked_at, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+    `).run(name, sourceType, sourcePath, pem, info.subject, info.issuer, info.sans || '',
+      notBeforeIso, notAfterIso, info.fingerprintSha256, info.selfSigned ? 1 : 0,
+      Number(hostId) || 0, notes, req.user.id);
+
+    auditService.log({
+      userId: req.user.id, username: req.user.username,
+      action: 'cert_track', targetType: 'certificate', targetId: String(result.lastInsertRowid),
+      details: { name, subject: info.subject, notAfter: info.notAfter },
+      ip: getClientIp(req),
+    });
+
+    res.status(201).json({ ok: true, id: result.lastInsertRowid, info });
+  } catch (err) {
+    res.status(err.message.includes('UNIQUE') ? 409 : 500).json({ error: err.message });
+  }
+});
+
+// POST /certificates/:id/refresh — re-read source (file) and re-parse
+router.post('/certificates/:id/refresh', requireAuth, requireRole('admin'), writeable, (req, res) => {
+  try {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM tracked_certificates WHERE id = ?').get(parseInt(req.params.id));
+    if (!row) return res.status(404).json({ error: 'Not found' });
+
+    let pem = row.pem_content;
+    if (row.source_type === 'file' && row.source_path && fs.existsSync(row.source_path)) {
+      pem = fs.readFileSync(row.source_path, 'utf8');
+    }
+    try {
+      const info = certService.parsePem(pem);
+      const notBeforeIso = info.notBefore ? new Date(info.notBefore).toISOString() : null;
+      const notAfterIso = info.notAfter ? new Date(info.notAfter).toISOString() : null;
+      db.prepare(`UPDATE tracked_certificates
+        SET pem_content = ?, subject = ?, issuer = ?, sans = ?, not_before = ?, not_after = ?,
+            fingerprint_sha256 = ?, self_signed = ?, last_checked_at = datetime('now'),
+            last_error = '', updated_at = datetime('now')
+        WHERE id = ?`).run(pem, info.subject, info.issuer, info.sans || '',
+          notBeforeIso, notAfterIso, info.fingerprintSha256, info.selfSigned ? 1 : 0, row.id);
+      res.json({ ok: true, info });
+    } catch (e) {
+      db.prepare(`UPDATE tracked_certificates SET last_checked_at = datetime('now'), last_error = ? WHERE id = ?`)
+        .run(e.message, row.id);
+      res.status(400).json({ error: 'Refresh failed: ' + e.message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /certificates/:id
+router.delete('/certificates/:id', requireAuth, requireRole('admin'), writeable, (req, res) => {
+  try {
+    const db = getDb();
+    const row = db.prepare('SELECT id, name FROM tracked_certificates WHERE id = ?').get(parseInt(req.params.id));
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    db.prepare('DELETE FROM tracked_certificates WHERE id = ?').run(row.id);
+
+    auditService.log({
+      userId: req.user.id, username: req.user.username,
+      action: 'cert_untrack', targetType: 'certificate', targetId: String(row.id),
+      details: { name: row.name }, ip: getClientIp(req),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /certificates/csr — generate CSR + private key
+router.post('/certificates/csr', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { commonName, organization, organizationalUnit, country, state, locality, emailAddress, sans, keyType } = req.body || {};
+    if (!commonName) return res.status(400).json({ error: 'commonName required' });
+
+    const result = certService.generateCsr({
+      commonName, organization, organizationalUnit, country, state, locality, emailAddress,
+      sans: Array.isArray(sans) ? sans : (sans ? String(sans).split(',') : []),
+      keyType: keyType === 'ec' ? 'ec' : 'rsa',
+    });
+
+    auditService.log({
+      userId: req.user.id, username: req.user.username,
+      action: 'cert_csr_generate', targetType: 'certificate', targetId: commonName,
+      details: { commonName, keyType, sansCount: (sans || []).length },
+      ip: getClientIp(req),
+    });
+
+    res.json({ ok: true, csr: result.csr, privateKey: result.privateKey });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── SSL/TLS Management ─────────────────────────────────────
 
 // GET /api/system/ssl/status — current SSL status

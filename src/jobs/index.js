@@ -180,6 +180,79 @@ function startAll() {
   // VACUUM database to reclaim disk space — daily at 03:30
   jobs.push(cron.schedule('30 3 * * *', vacuumDatabase));
 
+  // Tracked certificates — re-parse + status check daily at 07:30
+  jobs.push(cron.schedule('30 7 * * *', () => {
+    try {
+      const db = getDb();
+      const certService = require('../services/certificates');
+      const fs2 = require('fs');
+      const rows = db.prepare(`SELECT * FROM tracked_certificates`).all();
+      let critical = 0, warning = 0, expired = 0;
+      const updateOk = db.prepare(`UPDATE tracked_certificates
+        SET pem_content = ?, subject = ?, issuer = ?, sans = ?, not_before = ?, not_after = ?,
+            fingerprint_sha256 = ?, self_signed = ?, last_checked_at = datetime('now'),
+            last_error = '', updated_at = datetime('now') WHERE id = ?`);
+      const updateErr = db.prepare(`UPDATE tracked_certificates
+        SET last_checked_at = datetime('now'), last_error = ? WHERE id = ?`);
+      for (const r of rows) {
+        let pem = r.pem_content;
+        try {
+          if (r.source_type === 'file' && r.source_path && fs2.existsSync(r.source_path)) {
+            pem = fs2.readFileSync(r.source_path, 'utf8');
+          }
+          const info = certService.parsePem(pem);
+          const notBeforeIso = info.notBefore ? new Date(info.notBefore).toISOString() : null;
+          const notAfterIso = info.notAfter ? new Date(info.notAfter).toISOString() : null;
+          updateOk.run(pem, info.subject, info.issuer, info.sans || '', notBeforeIso, notAfterIso,
+            info.fingerprintSha256, info.selfSigned ? 1 : 0, r.id);
+          const days = certService.daysUntil(notAfterIso);
+          const status = certService.statusForDays(days);
+          if (status === 'expired') expired++;
+          else if (status === 'critical') critical++;
+          else if (status === 'warning') warning++;
+        } catch (e) {
+          updateErr.run(e.message, r.id);
+        }
+      }
+      if (rows.length > 0 && (expired + critical + warning > 0)) {
+        try {
+          auditService.log({
+            action: 'certificate_scan', targetType: 'certificate', targetId: 'daily',
+            details: { total: rows.length, expired, critical, warning },
+          });
+        } catch { /* ignore */ }
+        log.info('Certificate scan', { total: rows.length, expired, critical, warning });
+      }
+    } catch (e) { log.error('Certificate scan failed', e.message); }
+  }));
+
+  // Secret rotations — evaluate statuses + emit security alerts daily at 07:00
+  jobs.push(cron.schedule('0 7 * * *', () => {
+    try {
+      const db = getDb();
+      const rows = db.prepare(`SELECT id, app_name, env_key, next_due_at, status FROM secret_rotations`).all();
+      const now = Date.now();
+      const update = db.prepare(`UPDATE secret_rotations SET status = ?, updated_at = datetime('now') WHERE id = ?`);
+      let overdue = 0, dueSoon = 0;
+      for (const r of rows) {
+        const days = Math.floor((new Date(r.next_due_at).getTime() - now) / 86400000);
+        const next = days < 0 ? 'overdue' : (days <= 14 ? 'due_soon' : 'ok');
+        if (next !== r.status) update.run(next, r.id);
+        if (next === 'overdue') overdue++;
+        else if (next === 'due_soon') dueSoon++;
+      }
+      if (overdue > 0 || dueSoon > 0) {
+        try {
+          auditService.log({
+            action: 'secret_rotation_scan', targetType: 'secret_rotation', targetId: 'daily',
+            details: { overdue, dueSoon, total: rows.length },
+          });
+        } catch { /* audit may be disabled */ }
+        log.info('Secret rotations scanned', { overdue, dueSoon, total: rows.length });
+      }
+    } catch (e) { log.error('Secret rotation scan failed', e.message); }
+  }));
+
   // Daily database backup at 02:00
   jobs.push(cron.schedule('0 2 * * *', () => {
     try {

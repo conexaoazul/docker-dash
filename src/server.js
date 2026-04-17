@@ -125,6 +125,7 @@ app.use('/api/permissions', apiLimiter, require('./routes/permissions'));
 app.use('/api/audit', apiLimiter, require('./routes/audit'));
 app.use('/api/security-alerts', apiLimiter, require('./routes/securityAlerts'));
 app.use('/api/secrets', apiLimiter, require('./routes/secrets'));
+app.use('/api/secrets-rotations', apiLimiter, require('./routes/secretsRotations'));
 app.use('/api/log-forwarders', apiLimiter, require('./routes/log-forwarders'));
 app.use('/api/swarm', apiLimiter, require('./routes/swarm'));
 app.use('/api', apiLimiter, require('./routes/misc'));

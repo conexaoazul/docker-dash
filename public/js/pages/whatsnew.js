@@ -10,6 +10,21 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.3.0',
+      date: '2026-04-18',
+      title: 'Secrets Lifecycle Suite — Wizard, Rotation Tracker, Remote Deploy, Certificate Manager',
+      changes: [
+        { type: 'feature', text: 'Secrets Wizard (System > Secrets > Audit & Wizard) — paste .env → auto-classify 20+ secret patterns (JWT, HMAC, Django, Cloudflare Tunnel/Turnstile, Entra/Graph, OAuth, TLS, SSH, SMTP, DB, Grafana) → generate hardened bash setup script (printf not echo, 600/750 perms, root:docker owner) + docker-compose secrets snippet. Provider values base64-embedded.' },
+        { type: 'feature', text: 'Rotation Tracker — register wizard-classified secrets for rotation reminders (90–365 day intervals). Dashboard shows OK / Due Soon / Overdue counts. Daily cron at 07:00 updates statuses. Per-secret rotation history with notes.' },
+        { type: 'feature', text: 'Remote Deploy via SSH — from wizard Step 4, select a registered SSH host → upload + execute the setup script with sudo → stream output to the modal. Audit logged.' },
+        { type: 'feature', text: 'Certificate Manager (System > Secrets > Certificates) — track PEM certs from pasted content or on-disk paths. Expiry countdown, status (OK/Warn ≤30d/Crit ≤7d/Expired), SANs, fingerprint, self-signed flag. Daily re-parse + status scan at 07:30.' },
+        { type: 'feature', text: 'CSR Generator — build a Certificate Signing Request + private key (RSA 4096 or EC P-256) with CN, SANs (DNS + IP), O/OU/C/ST/L/email. Downloadable .key + .csr files for submission to any CA.' },
+        { type: 'feature', text: 'Sub-tabs in System > Secrets: Audit & Wizard · Rotation Tracker · Certificates — consolidated lifecycle view for the full secret management workflow.' },
+        { type: 'improvement', text: 'Daily audit trail entries for secret rotation scans and certificate expiry scans — feeds into the existing Audit Log for compliance reporting.' },
+        { type: 'security', text: 'Remote SSH exec uses `sudo -n` (no password prompt) — requires NOPASSWD sudoers entry on target. Scripts self-delete after execution (no residue in /tmp).' },
+      ],
+    },
+    {
       version: '6.2.0',
       date: '2026-04-17',
       title: 'Enterprise Deployment Tooling — Secrets Audit, Deploy Validation, Bilingual Error Dialog',
