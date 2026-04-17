@@ -1490,6 +1490,195 @@ router.get('/backup/list', requireAuth, requireRole('admin'), (req, res) => {
   }
 });
 
+// ─── Secrets Audit ──────────────────────────────────────────
+
+// GET /secrets-audit — analyze secret hygiene across all containers
+router.get('/secrets-audit', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const docker = dockerService.getDocker(req.hostId);
+    const containers = await docker.listContainers({ all: true });
+    const results = [];
+
+    for (const c of containers.slice(0, 30)) {
+      try {
+        const container = docker.getContainer(c.Id);
+        const inspect = await container.inspect();
+        const name = inspect.Name.replace(/^\//, '');
+        const env = inspect.Config?.Env || [];
+        const mounts = inspect.Mounts || [];
+
+        // Check for secrets mount (/run/secrets/)
+        const secretMounts = mounts.filter(m =>
+          m.Destination?.startsWith('/run/secrets') || m.Source?.includes('secrets')
+        );
+
+        // Check env vars for potential secrets (passwords, keys, tokens in plain text)
+        const sensitivePatterns = /password|secret|token|api_key|apikey|private_key|auth|credential/i;
+        const plainSecrets = env.filter(e => {
+          const [key, ...val] = e.split('=');
+          const value = val.join('=');
+          return sensitivePatterns.test(key) && value && !value.includes('/run/secrets') && !key.endsWith('_FILE') && value !== '' && !value.startsWith('${');
+        }).map(e => e.split('=')[0]); // Return only key names
+
+        // Check for _FILE pattern (Docker secrets best practice)
+        const filePatternVars = env.filter(e => e.match(/_FILE=/)).map(e => e.split('=')[0]);
+
+        // Security flags
+        const privileged = inspect.HostConfig?.Privileged || false;
+        const socketMount = mounts.some(m =>
+          m.Source?.includes('docker.sock') || m.Destination?.includes('docker.sock')
+        );
+        const noNewPrivs = (inspect.HostConfig?.SecurityOpt || []).includes('no-new-privileges');
+        const readOnly = inspect.HostConfig?.ReadonlyRootfs || false;
+        const hasMemLimit = (inspect.HostConfig?.Memory || 0) > 0;
+        const hasCpuLimit = (inspect.HostConfig?.NanoCpus || 0) > 0;
+
+        let score = 100;
+        const issues = [];
+
+        if (plainSecrets.length > 0) {
+          score -= Math.min(40, plainSecrets.length * 10);
+          issues.push({ severity: 'critical', message: plainSecrets.length + ' sensitive env var(s) as plain text: ' + plainSecrets.join(', '), fix: 'Use Docker secrets with _FILE pattern or a secrets manager' });
+        }
+        if (secretMounts.length === 0 && plainSecrets.length > 0) {
+          score -= 10;
+          issues.push({ severity: 'warning', message: 'No /run/secrets mount detected', fix: 'Mount secrets via docker-compose secrets: block' });
+        }
+        if (privileged) {
+          score -= 30;
+          issues.push({ severity: 'critical', message: 'Container runs in privileged mode', fix: 'Remove privileged flag; use specific capabilities instead' });
+        }
+        if (socketMount) {
+          score -= 15;
+          issues.push({ severity: 'warning', message: 'Docker socket is mounted', fix: 'Use read-only mount (:ro) or a Docker socket proxy' });
+        }
+        if (!noNewPrivs) {
+          score -= 5;
+          issues.push({ severity: 'info', message: 'no-new-privileges not set', fix: 'Add security_opt: [no-new-privileges] to compose' });
+        }
+        if (!hasMemLimit) {
+          score -= 5;
+          issues.push({ severity: 'info', message: 'No memory limit set', fix: 'Add mem_limit to prevent OOM impact on host' });
+        }
+
+        results.push({
+          name, id: c.Id.substring(0, 12), image: c.Image, state: c.State,
+          score: Math.max(0, score),
+          secretMounts: secretMounts.length,
+          filePatternVars: filePatternVars.length,
+          plainSecrets: plainSecrets.length,
+          privileged, socketMount, noNewPrivs, readOnly, hasMemLimit, hasCpuLimit,
+          issues,
+        });
+      } catch { /* skip */ }
+    }
+
+    const avgScore = results.length > 0 ? Math.round(results.reduce((s, r) => s + r.score, 0) / results.length) : 100;
+    const criticalCount = results.reduce((s, r) => s + r.issues.filter(i => i.severity === 'critical').length, 0);
+    const warningCount = results.reduce((s, r) => s + r.issues.filter(i => i.severity === 'warning').length, 0);
+
+    res.json({ containers: results, avgScore, criticalCount, warningCount, total: results.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /deploy-validate — pre-deploy checklist for env + compose
+router.post('/deploy-validate', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { envContent, composeContent } = req.body;
+    const checks = [];
+
+    if (envContent) {
+      const todoMatches = (envContent.match(/<TODO[^>]*>/g) || []);
+      checks.push({
+        name: 'No TODO placeholders',
+        status: todoMatches.length === 0 ? 'pass' : 'fail',
+        details: todoMatches.length > 0 ? 'Found ' + todoMatches.length + ' unfilled placeholder(s)' : 'All placeholders filled',
+      });
+
+      const lines = envContent.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+      const sensitiveKeys = lines.filter(l => {
+        const [key, ...val] = l.split('=');
+        const value = val.join('=').trim();
+        return /password|secret|token|api_key|private_key/i.test(key) && value && !value.includes('/run/secrets') && !key.endsWith('_FILE');
+      }).map(l => l.split('=')[0]);
+
+      checks.push({
+        name: 'No plain-text secrets in env',
+        status: sensitiveKeys.length === 0 ? 'pass' : 'warn',
+        details: sensitiveKeys.length > 0 ? sensitiveKeys.length + ' sensitive var(s) as plain text. Use _FILE pattern with Docker secrets.' : 'All sensitive vars use file references',
+      });
+
+      const hasAppSecret = lines.some(l => /^(APP_SECRET|ENCRYPTION_KEY|JWT_SECRET)/i.test(l.split('=')[0]));
+      checks.push({
+        name: 'App secret configured',
+        status: hasAppSecret ? 'pass' : 'warn',
+        details: hasAppSecret ? 'App secret/encryption key found' : 'No APP_SECRET or ENCRYPTION_KEY found',
+      });
+    }
+
+    if (composeContent) {
+      const hasRestart = /restart:\s*(always|unless-stopped|on-failure)/i.test(composeContent);
+      checks.push({
+        name: 'Restart policy set',
+        status: hasRestart ? 'pass' : 'warn',
+        details: hasRestart ? 'Restart policy configured' : 'No restart policy — containers won\'t auto-restart',
+      });
+
+      const hasHealthcheck = /healthcheck:/i.test(composeContent);
+      checks.push({
+        name: 'Health check configured',
+        status: hasHealthcheck ? 'pass' : 'warn',
+        details: hasHealthcheck ? 'Health check found' : 'No healthcheck — Docker can\'t detect unhealthy containers',
+      });
+
+      const hasLimits = /mem_limit|memory:|cpus:|deploy.*resources/i.test(composeContent);
+      checks.push({
+        name: 'Resource limits set',
+        status: hasLimits ? 'pass' : 'info',
+        details: hasLimits ? 'Resource limits configured' : 'No memory/CPU limits — runaway container can affect host',
+      });
+
+      const hasLogging = /logging:/i.test(composeContent);
+      checks.push({
+        name: 'Logging configured',
+        status: hasLogging ? 'pass' : 'info',
+        details: hasLogging ? 'Logging driver configured' : 'No logging config — using default json-file without rotation',
+      });
+
+      const hasSecrets = /^secrets:|^\s+secrets:/m.test(composeContent);
+      checks.push({
+        name: 'Docker secrets used',
+        status: hasSecrets ? 'pass' : 'info',
+        details: hasSecrets ? 'Secrets block found' : 'Consider Docker secrets for sensitive data',
+      });
+
+      const hasPrivileged = /privileged:\s*true/i.test(composeContent);
+      checks.push({
+        name: 'No privileged mode',
+        status: hasPrivileged ? 'fail' : 'pass',
+        details: hasPrivileged ? 'privileged: true detected — major security risk!' : 'No privileged containers',
+      });
+
+      const hasSecOpt = /security_opt/i.test(composeContent);
+      checks.push({
+        name: 'Security options set',
+        status: hasSecOpt ? 'pass' : 'info',
+        details: hasSecOpt ? 'security_opt configured' : 'Add no-new-privileges security option',
+      });
+    }
+
+    const passed = checks.filter(c => c.status === 'pass').length;
+    const failed = checks.filter(c => c.status === 'fail').length;
+    const warned = checks.filter(c => c.status === 'warn').length;
+
+    res.json({ checks, summary: { total: checks.length, passed, failed, warned } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── SSL/TLS Management ─────────────────────────────────────
 
 // GET /api/system/ssl/status — current SSL status

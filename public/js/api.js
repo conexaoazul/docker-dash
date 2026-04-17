@@ -347,6 +347,10 @@ const Api = {
   removeSwarmService(id)              { return this.delete(`/swarm/services/${id}`); },
   getSwarmTasks(serviceId)            { return this.get(`/swarm/tasks${serviceId ? `?service=${serviceId}` : ''}`); },
 
+  // ─── Secrets Audit ────────────────────────────────────
+  getSecretsAudit() { return this.get('/system/secrets-audit'); },
+  validateDeploy(data) { return this.post('/system/deploy-validate', data); },
+
   // ─── SSL/TLS ──────────────────────────────────────
   runCisBenchmark(hostId) { return this.get(`/system/cis-benchmark${hostId ? `?hostId=${hostId}` : ''}`); },
   getCisHardenedCompose(containerName, hostId) { return this.get(`/system/cis/container/${encodeURIComponent(containerName)}/hardened-compose${hostId ? `?hostId=${hostId}` : ''}`); },

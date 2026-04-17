@@ -29,6 +29,7 @@ const SystemPage = {
         <button class="tab" data-tab="templates"><i class="fas fa-rocket" style="margin-right:4px"></i> Templates</button>
         <button class="tab" data-tab="ssl"><i class="fas fa-shield-alt" style="margin-right:4px"></i> SSL/TLS</button>
         <button class="tab" data-tab="cis"><i class="fas fa-clipboard-check" style="margin-right:4px"></i> CIS Benchmark</button>
+        <button class="tab" data-tab="secrets"><i class="fas fa-user-secret" style="margin-right:4px"></i> Secrets</button>
         <button class="tab" data-tab="prune">${i18n.t('pages.system.tabPrune')}</button>
         <button class="tab" data-tab="audit">${i18n.t('pages.system.tabAudit')}</button>
       </div>
@@ -64,6 +65,7 @@ const SystemPage = {
       else if (this._tab === 'templates') await this._renderTemplates(el);
       else if (this._tab === 'ssl') await this._renderSsl(el);
       else if (this._tab === 'cis') await this._renderCisBenchmark(el);
+      else if (this._tab === 'secrets') await this._renderSecretsAudit(el);
       else if (this._tab === 'prune') this._renderPrune(el);
       else if (this._tab === 'audit') await this._renderAudit(el);
     } catch (err) {
@@ -3434,6 +3436,116 @@ DB_PASS=secret"></textarea>
         btn.innerHTML = '<i class="fas fa-shield-alt" style="margin-right:5px"></i>Generate CIS-hardened compose';
       }
     });
+  },
+
+  async _renderSecretsAudit(el) {
+    el.innerHTML = '<div class="text-muted"><i class="fas fa-spinner fa-spin"></i> Scanning containers for secret hygiene...</div>';
+
+    try {
+      const data = await Api.getSecretsAudit();
+      const scoreColor = data.avgScore >= 80 ? 'var(--green)' : data.avgScore >= 50 ? 'var(--yellow)' : 'var(--red)';
+
+      el.innerHTML = `
+        <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+          <div class="card" style="padding:14px;text-align:center;min-width:120px;flex:1">
+            <div style="font-size:28px;font-weight:700;color:${scoreColor}">${data.avgScore}</div>
+            <div class="text-sm text-muted">Security Score</div>
+          </div>
+          <div class="card" style="padding:14px;text-align:center;min-width:120px;flex:1">
+            <div style="font-size:28px;font-weight:700;color:var(--red)">${data.criticalCount}</div>
+            <div class="text-sm text-muted">Critical Issues</div>
+          </div>
+          <div class="card" style="padding:14px;text-align:center;min-width:120px;flex:1">
+            <div style="font-size:28px;font-weight:700;color:var(--yellow)">${data.warningCount}</div>
+            <div class="text-sm text-muted">Warnings</div>
+          </div>
+          <div class="card" style="padding:14px;text-align:center;min-width:120px;flex:1">
+            <div style="font-size:28px;font-weight:700;color:var(--text)">${data.total}</div>
+            <div class="text-sm text-muted">Containers Scanned</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3><i class="fas fa-shield-alt" style="margin-right:8px;color:var(--accent)"></i>Container Secret Hygiene</h3></div>
+          <div class="card-body" style="padding:0;overflow-x:auto">
+            <table class="data-table compact" style="width:100%">
+              <thead><tr>
+                <th>Container</th>
+                <th>Score</th>
+                <th>Secret Mounts</th>
+                <th>_FILE Pattern</th>
+                <th>Plain Secrets</th>
+                <th>Issues</th>
+              </tr></thead>
+              <tbody>
+                ${data.containers.map(c => {
+                  const sColor = c.score >= 80 ? 'var(--green)' : c.score >= 50 ? 'var(--yellow)' : 'var(--red)';
+                  const issuesHtml = c.issues.length > 0 ? c.issues.map(i => {
+                    const iColor = i.severity === 'critical' ? 'var(--red)' : i.severity === 'warning' ? 'var(--yellow)' : 'var(--text-dim)';
+                    return '<div style="padding:4px 0;font-size:11px;border-top:1px dashed var(--border)"><span class="badge" style="font-size:9px;background:' + iColor + '22;color:' + iColor + '">' + i.severity.toUpperCase() + '</span> ' + Utils.escapeHtml(i.message) + '<br><span class="text-muted" style="font-size:10px;margin-left:8px"><i class="fas fa-wrench" style="margin-right:3px"></i>' + Utils.escapeHtml(i.fix) + '</span></div>';
+                  }).join('') : '<span class="text-muted text-sm">No issues</span>';
+
+                  return '<tr>'
+                    + '<td><div style="font-weight:600">' + Utils.escapeHtml(c.name) + '</div><div class="text-xs text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + Utils.escapeHtml(c.image) + '</div></td>'
+                    + '<td><strong style="color:' + sColor + ';font-size:14px">' + c.score + '</strong></td>'
+                    + '<td>' + (c.secretMounts > 0 ? '<span style="color:var(--green)"><i class="fas fa-check"></i> ' + c.secretMounts + '</span>' : '<span class="text-muted">0</span>') + '</td>'
+                    + '<td>' + (c.filePatternVars > 0 ? '<span style="color:var(--green)">' + c.filePatternVars + '</span>' : '<span class="text-muted">0</span>') + '</td>'
+                    + '<td>' + (c.plainSecrets > 0 ? '<span style="color:var(--red)"><i class="fas fa-exclamation-triangle"></i> ' + c.plainSecrets + '</span>' : '<span style="color:var(--green)">0</span>') + '</td>'
+                    + '<td style="max-width:400px">' + (c.issues.length > 0 ? '<details><summary style="cursor:pointer;font-size:12px">' + c.issues.length + ' issue(s)</summary>' + issuesHtml + '</details>' : '<span style="color:var(--green)"><i class="fas fa-check-circle"></i> Clean</span>') + '</td>'
+                    + '</tr>';
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-header"><h3><i class="fas fa-clipboard-check" style="margin-right:8px;color:var(--green)"></i>Pre-Deploy Validation</h3></div>
+          <div class="card-body">
+            <p class="text-muted text-sm" style="margin-bottom:12px">Paste your <code>.env</code> and/or <code>docker-compose.yml</code> to validate before deploying. Checks for: unfilled placeholders, plain-text secrets, missing health checks, resource limits, and security options.</p>
+            <div class="form-row">
+              <div class="form-group" style="flex:1">
+                <label>.env file content</label>
+                <textarea id="validate-env" class="form-control" rows="8" placeholder="APP_SECRET=my-secret&#10;DB_PASSWORD_FILE=/run/secrets/db_pass&#10;..." style="font-family:var(--mono);font-size:11px"></textarea>
+              </div>
+              <div class="form-group" style="flex:1">
+                <label>docker-compose.yml content</label>
+                <textarea id="validate-compose" class="form-control" rows="8" placeholder="services:&#10;  app:&#10;    image: myapp&#10;    restart: unless-stopped&#10;    ..." style="font-family:var(--mono);font-size:11px"></textarea>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-primary" id="validate-deploy-btn"><i class="fas fa-check-circle"></i> Run Validation</button>
+            <div id="validate-results" style="margin-top:12px"></div>
+          </div>
+        </div>
+      `;
+
+      el.querySelector('#validate-deploy-btn')?.addEventListener('click', async () => {
+        const envContent = el.querySelector('#validate-env')?.value || '';
+        const composeContent = el.querySelector('#validate-compose')?.value || '';
+        if (!envContent && !composeContent) { Toast.warning('Paste at least one file to validate'); return; }
+
+        const resultsEl = el.querySelector('#validate-results');
+        resultsEl.innerHTML = '<div class="text-muted"><i class="fas fa-spinner fa-spin"></i> Validating...</div>';
+
+        try {
+          const data = await Api.validateDeploy({ envContent, composeContent });
+          const checks = data.checks || [];
+          resultsEl.innerHTML = '<div style="display:flex;gap:12px;margin-bottom:12px;font-size:13px">'
+            + '<span style="color:var(--green)"><i class="fas fa-check-circle"></i> ' + data.summary.passed + ' passed</span>'
+            + '<span style="color:var(--red)"><i class="fas fa-times-circle"></i> ' + data.summary.failed + ' failed</span>'
+            + '<span style="color:var(--yellow)"><i class="fas fa-exclamation-triangle"></i> ' + data.summary.warned + ' warnings</span>'
+            + '</div>'
+            + checks.map(c => {
+                const icon = c.status === 'pass' ? '<i class="fas fa-check-circle" style="color:var(--green)"></i>' : c.status === 'fail' ? '<i class="fas fa-times-circle" style="color:var(--red)"></i>' : c.status === 'warn' ? '<i class="fas fa-exclamation-triangle" style="color:var(--yellow)"></i>' : '<i class="fas fa-info-circle" style="color:var(--accent)"></i>';
+                return '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">' + icon + '<div style="flex:1"><strong style="font-size:12px">' + Utils.escapeHtml(c.name) + '</strong><div class="text-sm text-muted" style="margin-top:2px">' + Utils.escapeHtml(c.details) + '</div></div></div>';
+              }).join('');
+        } catch (err) {
+          resultsEl.innerHTML = '<div style="color:var(--red)">' + err.message + '</div>';
+        }
+      });
+    } catch (err) {
+      el.innerHTML = '<div class="empty-msg" style="color:var(--red)">Error: ' + err.message + '</div>';
+    }
   },
 
   _cisContainerRemediation(msg) {
