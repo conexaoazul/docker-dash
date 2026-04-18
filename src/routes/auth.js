@@ -11,6 +11,7 @@ const { getClientIp } = require('../utils/helpers');
 const { getDb } = require('../db');
 const { generateToken, sha256 } = require('../utils/crypto');
 const bcrypt = require('bcrypt');
+const log = require('../utils/logger')('auth');
 
 const router = Router();
 
@@ -66,7 +67,7 @@ router.post('/login',
 
       res.json(response);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 );
@@ -112,7 +113,7 @@ router.post('/mfa/verify',
 
       res.json(response);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 );
@@ -156,7 +157,7 @@ router.post('/mfa/recovery',
 
       res.json(response);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 );
@@ -169,7 +170,7 @@ router.post('/mfa/setup', requireAuth, (req, res) => {
     auditService.log({ userId: req.user.id, username: req.user.username, action: 'mfa_setup', ip: getClientIp(req) });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -185,7 +186,7 @@ router.post('/mfa/enable', requireAuth, (req, res) => {
     auditService.log({ userId: req.user.id, username: req.user.username, action: 'mfa_enable', ip: getClientIp(req) });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -201,7 +202,7 @@ router.post('/mfa/disable', requireAuth, async (req, res) => {
     auditService.log({ userId: req.user.id, username: req.user.username, action: 'mfa_disable', ip: getClientIp(req) });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -220,7 +221,7 @@ router.delete('/users/:id/mfa', requireAuth, requireRole('admin'), (req, res) =>
       details: { targetUsername: user.username }, ip: getClientIp(req) });
 
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // Logout
@@ -256,7 +257,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
     auditService.log({ userId: req.user.id, username: req.user.username, action: 'change_password', ip: getClientIp(req) });
     res.json({ ok: true, message: 'Password changed. Please log in again.' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -296,7 +297,7 @@ router.post('/users', requireAuth, requireRole('admin'), async (req, res) => {
       targetType: 'user', targetId: String(result.id), details: { username: req.body.username }, ip: getClientIp(req) });
     res.status(201).json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -308,7 +309,7 @@ router.put('/users/:id', requireAuth, requireRole('admin'), (req, res) => {
       targetType: 'user', targetId: String(id), ip: getClientIp(req) });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -322,7 +323,7 @@ router.post('/users/:id/reset-password', requireAuth, requireRole('admin'), asyn
       targetType: 'user', targetId: req.params.id, ip: getClientIp(req) });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -335,7 +336,7 @@ router.delete('/users/:id', requireAuth, requireRole('admin'), (req, res) => {
       targetType: 'user', targetId: String(id), ip: getClientIp(req) });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -374,7 +375,7 @@ router.post('/users/:id/send-reset', requireAuth, requireRole('admin'), async (r
 
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -414,9 +415,74 @@ router.post('/users/:id/send-invite', requireAuth, requireRole('admin'), async (
 
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// ─── Public: Request Password Reset (self-service) ──────────
+// Rate-limited. Always returns generic 200 to prevent user enumeration.
+router.post('/request-password-reset',
+  rateLimit(5, 15 * 60 * 1000),
+  async (req, res) => {
+    const GENERIC_OK = { ok: true, message: 'If an account exists with that email, a reset link has been sent.' };
+    try {
+      const { email, origin, lang = 'en' } = req.body;
+      if (!email || typeof email !== 'string') {
+        // Still return generic 200 — don't leak validation info
+        return res.json(GENERIC_OK);
+      }
+
+      const db = getDb();
+      const user = db.prepare('SELECT id, username, email FROM users WHERE LOWER(email) = LOWER(?) AND is_active = 1')
+        .get(email.trim());
+
+      if (!user) {
+        // No account found — respond generically (no enumeration)
+        return res.json(GENERIC_OK);
+      }
+
+      // Generate a 32-byte random token; store the SHA-256 hash
+      const token = generateToken(32);
+      const tokenHash = sha256(token);
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+
+      // Invalidate any existing unused tokens for this user
+      db.prepare("UPDATE password_reset_tokens SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL")
+        .run(user.id);
+
+      db.prepare('INSERT INTO password_reset_tokens (user_id, token_hash, type, expires_at) VALUES (?, ?, ?, ?)')
+        .run(user.id, tokenHash, 'reset', expiresAt);
+
+      const baseUrl = (origin || config.app.publicUrl || config.app.baseUrl || '').replace(/\/$/, '');
+      const resetUrl = `${baseUrl}/reset-password.html?token=${token}`;
+
+      // Attempt to send email; fall back to stderr log if unconfigured
+      try {
+        if (config.smtp && config.smtp.host) {
+          await emailService.sendPasswordReset({ to: user.email, username: user.username, resetUrl, lang });
+        } else {
+          console.warn(`[auth] No SMTP configured — password reset URL for ${user.username}: ${resetUrl}`);
+        }
+      } catch (emailErr) {
+        // Log the error but do NOT reveal it to the caller
+        log.error('Password reset email failed', { userId: user.id, error: emailErr.message });
+        console.warn(`[auth] Email send failed — password reset URL for ${user.username}: ${resetUrl}`);
+      }
+
+      auditService.log({
+        userId: user.id, username: user.username,
+        action: 'password_reset_requested',
+        ip: getClientIp(req),
+      });
+
+      res.json(GENERIC_OK);
+    } catch (err) {
+      log.error('request-password-reset', err);
+      // Always return generic 200 — never expose internals
+      res.json(GENERIC_OK);
+    }
+  }
+);
 
 // ─── Public: Validate Reset Token ──────────────────────────
 router.post('/validate-reset-token',
@@ -438,7 +504,7 @@ router.post('/validate-reset-token',
 
     res.json({ valid: true, username: row.username, type: row.type });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -477,7 +543,7 @@ router.post('/reset-password-token',
 
     res.json({ ok: true, username: row.username });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -489,8 +555,12 @@ const crypto = require('crypto');
 
 /** Fetch JSON from a URL (for OIDC discovery, token exchange, userinfo) */
 function _oidcFetch(url, options = {}) {
+  // FIX #11: Only allow HTTPS for OIDC endpoints
+  if (!url.startsWith('https://')) {
+    return Promise.reject(new Error(`OIDC fetch rejected: only HTTPS URLs are allowed (got: ${url})`));
+  }
   return new Promise((resolve, reject) => {
-    const mod = url.startsWith('https') ? https : http;
+    const mod = https;
     const urlObj = new URL(url);
     const reqOpts = {
       hostname: urlObj.hostname,
@@ -515,14 +585,91 @@ function _oidcFetch(url, options = {}) {
   });
 }
 
-/** Decode JWT payload (no verification - we trust the token_endpoint response) */
-function _decodeJwtPayload(jwt) {
+// ─── OIDC JWT Signature Verification (FIX #11) ──────────────────────────────
+
+/** JWKS cache: { jwks, fetchedAt } per issuer */
+const _jwksCache = new Map();
+const JWKS_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+/** Fetch JWKS from issuer and cache for 1 hour */
+async function _getJwks(issuer) {
+  const cached = _jwksCache.get(issuer);
+  if (cached && (Date.now() - cached.fetchedAt) < JWKS_CACHE_TTL_MS) {
+    return cached.jwks;
+  }
+  const discoUrl = `${issuer}/.well-known/openid-configuration`;
+  const disco = await _oidcFetch(discoUrl);
+  if (!disco.body?.jwks_uri) throw new Error('OIDC discovery missing jwks_uri');
+  const jwksRes = await _oidcFetch(disco.body.jwks_uri);
+  if (!jwksRes.body?.keys) throw new Error('Invalid JWKS response');
+  const jwks = jwksRes.body.keys;
+  _jwksCache.set(issuer, { jwks, fetchedAt: Date.now() });
+  return jwks;
+}
+
+/**
+ * Verify an OIDC ID token (RS256 only) against the issuer's JWKS.
+ * Checks: signature, exp, nbf, iss, aud.
+ * Returns the verified payload or throws with a descriptive message.
+ */
+async function _verifyIdToken(idToken, issuer, clientId) {
+  const parts = idToken.split('.');
+  if (parts.length !== 3) throw new Error('Malformed JWT: expected 3 parts');
+
+  let header, payload;
   try {
-    const parts = jwt.split('.');
-    if (parts.length < 2) return null;
-    const payload = Buffer.from(parts[1], 'base64url').toString('utf8');
-    return JSON.parse(payload);
-  } catch { return null; }
+    header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  } catch {
+    throw new Error('Malformed JWT: failed to parse header/payload');
+  }
+
+  if (header.alg !== 'RS256') {
+    throw new Error(`Unsupported JWT algorithm: ${header.alg} (only RS256 is supported)`);
+  }
+
+  // Find the matching JWK by kid
+  const jwks = await _getJwks(issuer);
+  let jwk = jwks.find(k => k.kid === header.kid);
+  if (!jwk && jwks.length === 1) jwk = jwks[0]; // single-key JWKS without kid
+  if (!jwk) throw new Error(`JWT verification failed: no matching JWK for kid=${header.kid}`);
+  if (jwk.kty !== 'RSA') throw new Error(`Unsupported JWK key type: ${jwk.kty}`);
+
+  // Build public key from JWK
+  let publicKey;
+  try {
+    publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
+  } catch (err) {
+    throw new Error(`Failed to import JWK public key: ${err.message}`);
+  }
+
+  // Verify signature: RS256 = RSASSA-PKCS1-v1_5 + SHA256
+  const signedPart = `${parts[0]}.${parts[1]}`;
+  const signature = Buffer.from(parts[2], 'base64url');
+  const valid = crypto.verify('SHA256', Buffer.from(signedPart), publicKey, signature);
+  if (!valid) throw new Error('JWT signature verification failed');
+
+  // Verify claims
+  const now = Math.floor(Date.now() / 1000);
+
+  if (payload.exp === undefined || now >= payload.exp) {
+    throw new Error(`JWT expired at ${payload.exp}, now=${now}`);
+  }
+
+  if (payload.nbf !== undefined && now < payload.nbf) {
+    throw new Error(`JWT not yet valid (nbf=${payload.nbf}, now=${now})`);
+  }
+
+  if (payload.iss !== issuer) {
+    throw new Error(`JWT issuer mismatch: expected "${issuer}", got "${payload.iss}"`);
+  }
+
+  const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (!audList.includes(clientId)) {
+    throw new Error(`JWT audience mismatch: "${clientId}" not in [${audList.join(', ')}]`);
+  }
+
+  return payload;
 }
 
 // OIDC: Check if enabled
@@ -568,7 +715,7 @@ router.get('/oidc/login', async (req, res) => {
     const authUrl = `${disco.body.authorization_endpoint}?${params.toString()}`;
     res.json({ url: authUrl });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -613,10 +760,15 @@ router.get('/oidc/callback', async (req, res) => {
       return res.status(401).send('Token exchange failed: ' + (tokenRes.body?.error_description || tokenRes.body?.error || 'unknown'));
     }
 
-    // Extract user info — try id_token first, then userinfo endpoint
+    // Extract user info — try id_token first (with signature verification), then userinfo endpoint
     let userInfo = null;
     if (tokenRes.body.id_token) {
-      userInfo = _decodeJwtPayload(tokenRes.body.id_token);
+      try {
+        userInfo = await _verifyIdToken(tokenRes.body.id_token, issuer, config.oidc.clientId);
+      } catch (err) {
+        log.warn('OIDC id_token verification failed', { error: err.message });
+        // Fall through to userinfo endpoint
+      }
     }
 
     if ((!userInfo || !userInfo.email) && disco.body.userinfo_endpoint) {
@@ -715,7 +867,7 @@ router.delete('/sessions/:id', requireAuth, requireRole('admin'), writeable, (re
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -761,7 +913,7 @@ router.put('/ldap', requireAuth, requireRole('admin'), (req, res) => {
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -802,7 +954,7 @@ router.get('/ldap/users', requireAuth, requireRole('admin'), async (req, res) =>
     const users = await ldapService.listUsers(cfg, 100);
     res.json({ users, total: users.length });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

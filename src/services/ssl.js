@@ -53,33 +53,44 @@ async function getCaddyStatus() {
 }
 
 /**
- * Reload Caddy config by exec-ing into the running container
+ * Reload Caddy config by exec-ing into the running container (FIX #35)
+ * Gracefully handles 404 / ENOENT when Caddy container is not running.
  */
 async function reloadCaddy() {
-  const docker = _localDocker();
-  const container = docker.getContainer(CADDY_CONTAINER);
+  try {
+    const docker = _localDocker();
+    const container = docker.getContainer(CADDY_CONTAINER);
 
-  const exec = await container.exec({
-    Cmd: ['caddy', 'reload', '--config', '/data/certs/Caddyfile', '--adapter', 'caddyfile'],
-    AttachStdout: true,
-    AttachStderr: true,
-  });
-
-  return new Promise((resolve, reject) => {
-    exec.start({ hijack: true }, (err, stream) => {
-      if (err) return reject(err);
-      let out = '';
-      stream.on('data', chunk => { out += chunk.toString(); });
-      stream.on('end', () => {
-        exec.inspect((e, data) => {
-          if (e) return reject(e);
-          if (data.ExitCode !== 0) return reject(new Error('caddy reload failed: ' + out));
-          resolve(out.trim());
-        });
-      });
-      stream.on('error', reject);
+    const exec = await container.exec({
+      Cmd: ['caddy', 'reload', '--config', '/data/certs/Caddyfile', '--adapter', 'caddyfile'],
+      AttachStdout: true,
+      AttachStderr: true,
     });
-  });
+
+    return new Promise((resolve, reject) => {
+      exec.start({ hijack: true }, (err, stream) => {
+        if (err) return reject(err);
+        let out = '';
+        stream.on('data', chunk => { out += chunk.toString(); });
+        stream.on('end', () => {
+          exec.inspect((e, data) => {
+            if (e) return reject(e);
+            if (data.ExitCode !== 0) return reject(new Error('caddy reload failed: ' + out));
+            resolve(out.trim());
+          });
+        });
+        stream.on('error', reject);
+      });
+    });
+  } catch (err) {
+    // 404 = container not found, ENOENT = socket not available
+    if (err.statusCode === 404 || err.code === 'ENOENT' || err.code === 'ECONNREFUSED') {
+      log.warn('Caddy reload skipped: container not running', err.message);
+      return { ok: false, reason: 'caddy container not running' };
+    }
+    // Re-throw unexpected errors
+    throw err;
+  }
 }
 
 /**

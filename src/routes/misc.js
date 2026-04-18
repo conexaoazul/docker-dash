@@ -11,6 +11,7 @@ const { getClientIp, formatBytes } = require('../utils/helpers');
 const { getDb } = require('../db');
 const config = require('../config');
 const dockerService = require('../services/docker');
+const log = require('../utils/logger')('misc');
 
 const router = Router();
 
@@ -93,12 +94,12 @@ router.get('/favorites', requireAuth, (req, res) => {
 
 router.post('/favorites', requireAuth, (req, res) => {
   try { favorites.add(req.user.id, req.body.containerId); res.json({ ok: true }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { log.error('favorites add', err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete('/favorites/:containerId', requireAuth, (req, res) => {
   try { favorites.remove(req.user.id, req.params.containerId); res.json({ ok: true }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { log.error('favorites remove', err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ─── Notifications ──────────────────────────────────────────
@@ -119,17 +120,17 @@ router.get('/notifications/count', requireAuth, (req, res) => {
 
 router.post('/notifications/:id/read', requireAuth, (req, res) => {
   try { notifications.markRead(parseInt(req.params.id), req.user.id); res.json({ ok: true }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { log.error('notifications markRead', err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.post('/notifications/read-all', requireAuth, (req, res) => {
   try { notifications.markAllRead(req.user.id); res.json({ ok: true }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { log.error('notifications markAllRead', err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete('/notifications/:id', requireAuth, (req, res) => {
   try { notifications.delete(parseInt(req.params.id), req.user.id); res.json({ ok: true }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { log.error('notifications delete', err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.post('/notifications/bulk', requireAuth, (req, res) => {
@@ -140,7 +141,7 @@ router.post('/notifications/bulk', requireAuth, (req, res) => {
     }
     notifications.bulkAction(ids.map(id => parseInt(id)), req.user.id, action);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { log.error('notifications bulkAction', err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ─── API Keys ───────────────────────────────────────────────
@@ -155,12 +156,12 @@ router.post('/api-keys', requireAuth, (req, res) => {
     auditService.log({ userId: req.user.id, username: req.user.username,
       action: 'apikey_create', details: { name: req.body.name }, ip: getClientIp(req) });
     res.status(201).json(result);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { log.error('api-keys create', err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete('/api-keys/:id', requireAuth, (req, res) => {
   try { apiKeys.revoke(parseInt(req.params.id), req.user.id); res.json({ ok: true }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { log.error('api-keys revoke', err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ─── Audit Log ──────────────────────────────────────────────
@@ -197,7 +198,8 @@ router.get('/audit/export', requireAuth, requireRole('admin'), (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="audit-log-${ts}.csv"`);
     res.send(csv);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    log.error('audit export', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -251,7 +253,8 @@ router.get('/audit/analytics', requireAuth, requireRole('admin'), (req, res) => 
 
     res.json({ days, total, topUsers, topActions, topTargets, hourly, daily });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    log.error('audit analytics', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -276,10 +279,12 @@ router.post('/backup/database', requireAuth, requireRole('admin'), (req, res) =>
       });
       res.json({ ok: true, path: backupPath, size: stat.size, timestamp: ts });
     }).catch(err => {
-      res.status(500).json({ error: 'Backup failed: ' + err.message });
+      log.error('database backup', err);
+      res.status(500).json({ error: 'Backup failed' });
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    log.error('database backup', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -289,6 +294,7 @@ const SQLITE_MAGIC = 'SQLite format 3\0';
 
 router.post('/backup/restore', express.json({ limit: '750mb' }), requireAuth, requireRole('admin'), (req, res) => {
   try {
+    const crypto = require('crypto');
     const { content } = req.body || {};
 
     if (!content || typeof content !== 'string') {
@@ -297,6 +303,38 @@ router.post('/backup/restore', express.json({ limit: '750mb' }), requireAuth, re
 
     // Decode base64
     const fileBuffer = Buffer.from(content, 'base64');
+
+    // FIX #5 — enforce 500MB hard limit (before any further validation)
+    if (fileBuffer.length > 500 * 1024 * 1024) {
+      return res.status(413).json({ error: 'Database file too large (max 500MB)' });
+    }
+
+    // FIX #5 — SHA-256 checksum validation
+    const expectedSha256 = req.headers['x-backup-sha256'];
+    const allowUnchecked = process.env.ALLOW_UNCHECKED_DB_RESTORE === 'true';
+    const computedSha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+
+    if (!allowUnchecked) {
+      if (!expectedSha256) {
+        return res.status(400).json({
+          error: 'X-Backup-Sha256 header required (64 hex chars). Compute locally: sha256sum <file>. ' +
+                 'Set ALLOW_UNCHECKED_DB_RESTORE=true to skip (not recommended).',
+        });
+      }
+      if (!/^[0-9a-f]{64}$/i.test(expectedSha256)) {
+        return res.status(400).json({ error: 'X-Backup-Sha256 must be a 64-character hex string' });
+      }
+      if (expectedSha256.toLowerCase() !== computedSha256) {
+        return res.status(400).json({
+          error: `SHA-256 mismatch: expected ${expectedSha256.toLowerCase()}, got ${computedSha256}`,
+          code: 'CHECKSUM_MISMATCH',
+        });
+      }
+    } else {
+      log.warn('ALLOW_UNCHECKED_DB_RESTORE=true — skipping SHA-256 verification for restore', {
+        computedSha256, sizeBytes: fileBuffer.length, userId: req.user.id,
+      });
+    }
 
     // Validate minimum size (SQLite header is 100 bytes)
     if (fileBuffer.length < 100) {
@@ -307,11 +345,6 @@ router.post('/backup/restore', express.json({ limit: '750mb' }), requireAuth, re
     const header = fileBuffer.slice(0, 16).toString('ascii');
     if (header !== SQLITE_MAGIC) {
       return res.status(400).json({ error: 'Invalid file: not a SQLite database (magic bytes mismatch)' });
-    }
-
-    // Limit size to 500MB
-    if (fileBuffer.length > 500 * 1024 * 1024) {
-      return res.status(413).json({ error: 'Database file too large (max 500MB)' });
     }
 
     const path = require('path');
@@ -325,11 +358,11 @@ router.post('/backup/restore', express.json({ limit: '750mb' }), requireAuth, re
 
     const db = getDb();
 
-    // Log the restore action before closing
+    // FIX #5 — Audit log BEFORE writing
     auditService.log({
       userId: req.user.id, username: req.user.username,
-      action: 'database_restore',
-      details: JSON.stringify({ uploadSize: fileBuffer.length, safetyBackup: safetyBackupPath }),
+      action: 'db_restore_initiated',
+      details: JSON.stringify({ sizeBytes: fileBuffer.length, sha256: computedSha256, safetyBackup: safetyBackupPath }),
       ip: getClientIp(req),
     });
 
@@ -341,12 +374,23 @@ router.post('/backup/restore', express.json({ limit: '750mb' }), requireAuth, re
       // Write the uploaded database
       fs.writeFileSync(dbPath, fileBuffer);
 
+      // FIX #5 — Audit log AFTER writing (before process exit)
+      try {
+        auditService.log({
+          userId: req.user.id, username: req.user.username,
+          action: 'db_restore_completed',
+          details: JSON.stringify({ sizeBytes: fileBuffer.length, sha256: computedSha256, safetyBackup: safetyBackupPath }),
+          ip: getClientIp(req),
+        });
+      } catch (_e) { /* best-effort, db may be closed */ }
+
       // Respond before restart so the client gets confirmation
       res.json({
         ok: true,
         message: 'Database restored successfully. The application will restart.',
         safetyBackup: safetyBackupPath,
         restoredSize: fileBuffer.length,
+        sha256: computedSha256,
       });
 
       // Graceful restart after a short delay
@@ -354,10 +398,12 @@ router.post('/backup/restore', express.json({ limit: '750mb' }), requireAuth, re
         process.exit(0); // Docker/systemd will restart the process
       }, 1000);
     }).catch(err => {
-      res.status(500).json({ error: 'Failed to create safety backup: ' + err.message });
+      log.error('Failed to create safety backup before restore', err);
+      res.status(500).json({ error: 'Failed to create safety backup' });
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    log.error('Database restore error', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -467,7 +513,7 @@ router.get('/search', requireAuth, async (req, res) => {
 
     res.json({ results: results.slice(0, 30), query: q, total: results.length });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -525,7 +571,7 @@ router.get('/cluster-health', requireAuth, async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -561,7 +607,7 @@ router.get('/overview', requireAuth, async (req, res) => {
       dockerDash: { memoryRss: mem.rss, memoryHuman: formatBytes(mem.rss), uptime: Math.floor(process.uptime()), nodeVersion: process.version },
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -788,7 +834,7 @@ router.get('/dependencies', requireAuth, async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -955,7 +1001,7 @@ router.get('/watchtower', requireAuth, async (req, res) => {
       ],
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -994,7 +1040,7 @@ router.get('/motd/config', requireAuth, requireRole('admin'), (req, res) => {
     const lines = settingsService.get('login_motd_lines', '');
     const random = settingsService.get('login_motd_random_flag', 'false') === 'true';
     res.json({ lines, random });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // PUT /motd — admin only, saves lines + random flag
@@ -1004,7 +1050,7 @@ router.put('/motd', requireAuth, requireRole('admin'), writeable, (req, res) => 
     if (lines !== undefined) settingsService.set('login_motd_lines', lines, req.user?.id);
     if (random !== undefined) settingsService.set('login_motd_random_flag', String(!!random), req.user?.id);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ─── Export ─────────────────────────────────────────────────
@@ -1040,7 +1086,7 @@ router.get('/export/:type', requireAuth, requireRole('admin'), (req, res) => {
     } else {
       res.json(data);
     }
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ─── User Preferences ───────────────────────────────────────
@@ -1055,7 +1101,7 @@ router.get('/preferences', requireAuth, (req, res) => {
     }
     res.json(prefs);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1071,7 +1117,7 @@ router.put('/preferences', requireAuth, (req, res) => {
     `).run(req.user.id, key, value || '', value || '');
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1124,7 +1170,7 @@ router.put('/about/file/:name', requireAuth, requireRole('admin'), (req, res) =>
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1190,7 +1236,7 @@ router.post('/ai/chat', requireAuth, async (req, res) => {
 
     res.json({ response });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1316,7 +1362,7 @@ Respond with ONLY the docker-compose.yml content, no markdown fences, no explana
     const compose = await callAi();
     res.json({ compose, repo: `${owner}/${repo}` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1356,7 +1402,7 @@ router.get('/docker-versions', requireAuth, async (req, res) => {
 
     res.json({ versions });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1439,7 +1485,7 @@ router.get('/multi-host/overview', requireAuth, async (req, res) => {
 
     res.json({ hosts, totals });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1511,7 +1557,7 @@ router.get('/timeline', requireAuth, async (req, res) => {
 
     res.json({ events: events.slice(0, 300), hours });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1597,7 +1643,7 @@ router.get('/recommendations/balancing', requireAuth, async (req, res) => {
       })),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1622,7 +1668,7 @@ router.get('/howto', requireAuth, (req, res) => {
     const guides = db.prepare(sql).all(...params);
     res.json({ guides });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1633,7 +1679,7 @@ router.get('/howto/:slug', requireAuth, (req, res) => {
     if (!guide) return res.status(404).json({ error: 'Guide not found' });
     res.json(guide);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1651,7 +1697,7 @@ router.post('/howto', requireAuth, requireRole('admin'), writeable, (req, res) =
     res.status(201).json({ ok: true, slug });
   } catch (err) {
     if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Guide with this slug already exists' });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1667,7 +1713,7 @@ router.put('/howto/:slug', requireAuth, requireRole('admin'), writeable, (req, r
     if (result.changes === 0) return res.status(404).json({ error: 'Guide not found' });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1681,7 +1727,7 @@ router.delete('/howto/:slug', requireAuth, requireRole('admin'), writeable, (req
     getDb().prepare('DELETE FROM howto_guides WHERE slug = ?').run(req.params.slug);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

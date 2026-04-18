@@ -1,6 +1,4 @@
-# DEV override — mount source for live reload
-# Usage: docker compose up (automatically uses this file)
-version: "3.8"
+# Dev mode — use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
 services:
   app:

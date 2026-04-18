@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html><head><title>Docker Dash Demo</title>
+<style>
+  body { margin:0; background:#000; display:flex; align-items:center; justify-content:center; min-height:100vh; }
+  img { max-width:100%; max-height:100vh; display:none; }
+  img.active { display:block; }
+  .controls { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:10; }
+  .controls button { padding:8px 16px; background:rgba(255,255,255,0.1); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:6px; cursor:pointer; font-size:14px; }
+  .controls button:hover { background:rgba(255,255,255,0.2); }
+  .counter { position:fixed; top:20px; right:20px; color:#fff; font-size:14px; opacity:0.6; font-family:monospace; }
+  .title { position:fixed; top:20px; left:20px; color:#fff; font-size:16px; font-weight:bold; opacity:0.8; }
+</style></head><body>
+<div class="title" id="title"></div>
+<div class="counter" id="counter"></div>
+<img src="01-dashboard.png" data-title="dashboard" class="active">
+<img src="02-dashboard-light.png" data-title="dashboard light" >
+<img src="03-containers.png" data-title="containers" >
+<img src="04-container-detail.png" data-title="container detail" >
+<img src="05-terminal.png" data-title="terminal" >
+<img src="06-images.png" data-title="images" >
+<img src="07-volumes.png" data-title="volumes" >
+<img src="08-networks.png" data-title="networks" >
+<img src="09-stacks.png" data-title="stacks" >
+<img src="10-multi-host.png" data-title="multi host" >
+<img src="11-security.png" data-title="security" >
+<img src="12-logs.png" data-title="logs" >
+<img src="13-timeline.png" data-title="timeline" >
+<img src="14-insights.png" data-title="insights" >
+<img src="15-alerts.png" data-title="alerts" >
+<img src="16-system-tools.png" data-title="system tools" >
+<img src="17-howto.png" data-title="howto" >
+<img src="18-compare.png" data-title="compare" >
+<img src="19-topology.png" data-title="topology" >
+<img src="20-cost.png" data-title="cost" >
+<img src="21-dep-map.png" data-title="dep map" >
+<img src="22-enterprise.png" data-title="enterprise" >
+<img src="23-api.png" data-title="api" >
+<img src="24-whatsnew.png" data-title="whatsnew" >
+<div class="controls">
+  <button onclick="prev()">◀ Prev</button>
+  <button onclick="toggle()" id="playbtn">⏸ Pause</button>
+  <button onclick="next()">Next ▶</button>
+</div>
+<script>
+const imgs = document.querySelectorAll('img');
+let idx = 0, playing = true, timer;
+function show(i) { imgs.forEach(im=>im.classList.remove('active')); imgs[i].classList.add('active'); document.getElementById('counter').textContent = (i+1)+'/'+imgs.length; document.getElementById('title').textContent = imgs[i].dataset.title; }
+function next() { idx = (idx+1) % imgs.length; show(idx); }
+function prev() { idx = (idx-1+imgs.length) % imgs.length; show(idx); }
+function toggle() { playing = !playing; document.getElementById('playbtn').textContent = playing ? '⏸ Pause' : '▶ Play'; if(playing) start(); else clearInterval(timer); }
+function start() { timer = setInterval(next, 2000); }
+show(0); start();
+</script></body></html>

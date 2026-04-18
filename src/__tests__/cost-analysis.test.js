@@ -32,6 +32,7 @@ app.use('/api/stats', require('../routes/stats'));
 let adminToken = null;
 
 beforeAll(async () => {
+  require('./helpers/seedTestAdmin').clearMustChange('admin');
   const res = await request(app)
     .post('/api/auth/login')
     .send({ username: 'admin', password: 'CostTest123!' });

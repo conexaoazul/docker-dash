@@ -258,23 +258,84 @@ function startAll() {
     try {
       const db = getDb();
       const path = require('path');
-      const fs = require('fs');
-      const backupDir = process.env.DATA_DIR || '/data';
+      const fss = require('fs');
+      const crypto = require('crypto');
+
+      // FIX #29: Write to /data/backups/ subdir
+      const backupDir = path.join(process.env.DATA_DIR || '/data', 'backups');
+      if (!fss.existsSync(backupDir)) {
+        fss.mkdirSync(backupDir, { recursive: true });
+      }
+
       const ts = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 10);
-      const backupPath = path.join(backupDir, `backup-daily-${ts}.db`);
+      const encKey = process.env.BACKUP_ENCRYPTION_KEY;
+      const useEnc = encKey && encKey.length >= 32;
+      const baseName = `backup-daily-${ts}.db${useEnc ? '.enc' : ''}`;
+      const backupPath = path.join(backupDir, baseName);
 
-      db.backup(backupPath).then(() => {
-        const stat = fs.statSync(backupPath);
-        log.info('Daily backup completed', { path: backupPath, size: stat.size });
+      // FIX #29: Disk-space check before backup
+      const dbPath = process.env.DB_PATH || '/data/docker-dash.db';
+      let dbSize = 0;
+      try { dbSize = fss.statSync(dbPath).size; } catch { /* DB may be :memory: */ }
 
-        // Keep only last 7 daily backups
-        const backups = fs.readdirSync(backupDir)
-          .filter(f => f.startsWith('backup-daily-') && f.endsWith('.db'))
-          .sort()
-          .reverse();
-        for (const old of backups.slice(7)) {
-          fs.unlinkSync(path.join(backupDir, old));
-          log.debug('Old backup removed', { file: old });
+      if (dbSize > 0) {
+        let freeBytes = Infinity;
+        try {
+          const stats = fss.statfsSync(backupDir);
+          freeBytes = stats.bfree * stats.bsize;
+        } catch {
+          // statfsSync not available (Node < 18.15) — skip check
+        }
+        if (freeBytes < dbSize * 2) {
+          log.warn('Daily backup skipped: insufficient disk space', {
+            required: dbSize * 2,
+            available: freeBytes,
+          });
+          return;
+        }
+      }
+
+      // Write backup to temp path first, then finalize
+      const tempPath = backupPath + '.tmp';
+
+      db.backup(tempPath).then(() => {
+        try {
+          if (useEnc) {
+            // AES-256-GCM encryption: 16-byte salt + 12-byte nonce + 16-byte tag + ciphertext
+            const salt = crypto.randomBytes(16);
+            const nonce = crypto.randomBytes(12);
+            const keyBytes = crypto.createHash('sha256').update(encKey).digest();
+            const cipher = crypto.createCipheriv('aes-256-gcm', keyBytes, nonce);
+            const plain = fss.readFileSync(tempPath);
+            const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
+            const tag = cipher.getAuthTag();
+            // Header: salt(16) + nonce(12) + tag(16) = 44 bytes
+            const out = Buffer.concat([salt, nonce, tag, ciphertext]);
+            fss.writeFileSync(backupPath, out);
+            fss.unlinkSync(tempPath);
+          } else {
+            fss.renameSync(tempPath, backupPath);
+          }
+
+          // FIX #29: chmod 600
+          try { fss.chmodSync(backupPath, 0o600); } catch { /* Windows — ignore */ }
+
+          const stat = fss.statSync(backupPath);
+          log.info('Daily backup completed', { path: backupPath, size: stat.size, encrypted: !!useEnc });
+
+          // Keep only last 7 daily backups
+          const ext = useEnc ? '.db.enc' : '.db';
+          const backups = fss.readdirSync(backupDir)
+            .filter(f => f.startsWith('backup-daily-') && f.endsWith(ext))
+            .sort()
+            .reverse();
+          for (const old of backups.slice(7)) {
+            fss.unlinkSync(path.join(backupDir, old));
+            log.debug('Old backup removed', { file: old });
+          }
+        } catch (e) {
+          log.error('Daily backup post-processing failed', e.message);
+          try { fss.unlinkSync(tempPath); } catch { /* cleanup */ }
         }
       }).catch(e => log.error('Daily backup failed', e.message));
     } catch (e) { log.error('Daily backup error', e.message); }
@@ -405,25 +466,52 @@ function cronMatchesNow(cronExpr, now) {
   // Simple cron match: minute hour day month weekday
   const parts = cronExpr.trim().split(/\s+/);
   if (parts.length < 5) return false;
+
+  // FIX #31: Sunday normalization — weekday position treats 7 as Sunday (same as 0)
+  const rawWeekday = parts[4];
+  const normalizedWeekday = rawWeekday === '7' ? '0'
+    : rawWeekday.replace(/\b7\b/g, '0'); // also covers lists like "0,7"
+
   const checks = [
     { val: now.getMinutes(), part: parts[0] },
     { val: now.getHours(), part: parts[1] },
     { val: now.getDate(), part: parts[2] },
     { val: now.getMonth() + 1, part: parts[3] },
-    { val: now.getDay(), part: parts[4] },
+    { val: now.getDay(), part: normalizedWeekday },
   ];
+
   return checks.every(({ val, part }) => {
     if (part === '*') return true;
+
+    // FIX #31: support range/step combos like "0-30/5" and bare "*/N"
     if (part.includes('/')) {
-      const step = parseInt(part.split('/')[1]);
-      return val % step === 0;
+      const [rangePart, stepStr] = part.split('/');
+      const step = parseInt(stepStr, 10);
+      if (isNaN(step) || step <= 0) return false;
+
+      if (rangePart === '*') {
+        // bare */N — every Nth value from 0
+        return val % step === 0;
+      }
+      if (rangePart.includes('-')) {
+        // range/step — e.g. "0-30/5"
+        const [min, max] = rangePart.split('-').map(Number);
+        if (val < min || val > max) return false;
+        return (val - min) % step === 0;
+      }
+      // numeric/step — treat base as starting point
+      const base = parseInt(rangePart, 10);
+      return (val - base) % step === 0 && val >= base;
     }
+
     if (part.includes(',')) return part.split(',').map(Number).includes(val);
+
     if (part.includes('-')) {
       const [min, max] = part.split('-').map(Number);
       return val >= min && val <= max;
     }
-    return parseInt(part) === val;
+
+    return parseInt(part, 10) === val;
   });
 }
 

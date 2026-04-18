@@ -1,42 +1,38 @@
 'use strict';
 
-const { execFileSync, spawnSync } = require('child_process');
+const { execFileSync } = require('child_process');
+const { X509Certificate, createHash } = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const log = require('../utils/logger')('certificates');
 
 /**
- * Parse a PEM certificate using openssl — returns an object with
+ * Parse a PEM certificate using Node's built-in crypto.X509Certificate — returns an object with
  * subject, issuer, sans, notBefore, notAfter, fingerprintSha256, selfSigned.
+ * No temp files, no shell-out — safe and fast.
  */
 function parsePem(pemContent) {
   if (!pemContent || typeof pemContent !== 'string') throw new Error('PEM content required');
   if (!pemContent.includes('BEGIN CERTIFICATE')) throw new Error('Not a PEM certificate');
 
-  const tmp = path.join(os.tmpdir(), 'dd-cert-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.pem');
-  fs.writeFileSync(tmp, pemContent, 'utf8');
-  try {
-    const text = execFileSync('openssl', ['x509', '-in', tmp, '-noout', '-subject', '-issuer', '-dates', '-fingerprint', '-sha256', '-ext', 'subjectAltName'],
-      { encoding: 'utf8', timeout: 5000 });
-    const info = { subject: '', issuer: '', sans: '', notBefore: '', notAfter: '', fingerprintSha256: '' };
-    const lines = text.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.startsWith('subject=')) info.subject = line.substring(8).trim();
-      else if (line.startsWith('issuer=')) info.issuer = line.substring(7).trim();
-      else if (line.startsWith('notBefore=')) info.notBefore = line.substring(10).trim();
-      else if (line.startsWith('notAfter=')) info.notAfter = line.substring(9).trim();
-      else if (line.includes('Fingerprint=')) info.fingerprintSha256 = line.split('=').slice(1).join('=').trim();
-      else if (line.trim().startsWith('X509v3 Subject Alternative Name')) {
-        info.sans = (lines[i + 1] || '').trim();
-      }
-    }
-    info.selfSigned = info.subject && info.subject === info.issuer;
-    return info;
-  } finally {
-    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
-  }
+  const cert = new X509Certificate(pemContent);
+  const fp = createHash('sha256')
+    .update(cert.raw)
+    .digest('hex')
+    .match(/.{2}/g)
+    .join(':')
+    .toUpperCase();
+
+  return {
+    subject: cert.subject.replace(/\n/g, ', '),
+    issuer: cert.issuer.replace(/\n/g, ', '),
+    sans: cert.subjectAltName || '',
+    notBefore: cert.validFrom,
+    notAfter: cert.validTo,
+    fingerprintSha256: 'SHA256 Fingerprint=' + fp,
+    selfSigned: cert.subject === cert.issuer,
+  };
 }
 
 /**

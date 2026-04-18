@@ -32,6 +32,7 @@ let adminToken = null;
 let viewerToken = null;
 
 beforeAll(async () => {
+  require('./helpers/seedTestAdmin').clearMustChange('admin');
   // Login as admin
   const res = await request(app)
     .post('/api/auth/login')

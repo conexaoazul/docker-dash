@@ -17,7 +17,64 @@ class WsServer {
   }
 
   attach(server) {
-    this.wss = new WebSocketServer({ server, path: '/ws' });
+    // ─── Per-IP connection tracking ──────────────────────────
+    const _ipCounts = new Map(); // ip → count
+    const _wsMaxPerIp = parseInt(process.env.WS_MAX_CONNECTIONS_PER_IP || '10', 10);
+    const _wsQueryTokenEnabled = process.env.WS_QUERY_TOKEN_ENABLED === 'true';
+
+    // ─── Origin allow-list ───────────────────────────────────
+    function _getAllowedOrigins(host) {
+      const raw = process.env.WS_ALLOWED_ORIGINS;
+      if (raw && raw.trim()) {
+        return new Set(raw.split(',').map(o => o.trim()).filter(Boolean));
+      }
+      // Default: same-host origins
+      return new Set([
+        `http://${host}`,
+        `https://${host}`,
+      ]);
+    }
+
+    const verifyClient = ({ req }, cb) => {
+      const origin = req.headers.origin;
+      const host = req.headers.host || 'localhost';
+      const allowed = _getAllowedOrigins(host);
+
+      // Reject cross-origin connections
+      if (origin && !allowed.has(origin)) {
+        log.warn('WS rejected: origin not allowed', { origin, allowed: [...allowed] });
+        return cb(false, 403, 'Origin not allowed');
+      }
+
+      // Reject query token auth if not explicitly enabled
+      if (!_wsQueryTokenEnabled) {
+        const url = new URL(req.url, 'http://localhost');
+        if (url.searchParams.has('token')) {
+          log.warn('WS rejected: query token auth disabled (set WS_QUERY_TOKEN_ENABLED=true to enable)', { ip: req.socket?.remoteAddress });
+          return cb(false, 403, 'Query token auth disabled');
+        }
+      }
+
+      // Per-IP connection limit
+      const ip = req.socket?.remoteAddress || 'unknown';
+      const count = _ipCounts.get(ip) || 0;
+      if (count >= _wsMaxPerIp) {
+        log.warn('WS rejected: per-IP limit reached', { ip, limit: _wsMaxPerIp });
+        return cb(false, 429, 'Too many connections');
+      }
+      _ipCounts.set(ip, count + 1);
+
+      // Attach cleanup to socket close
+      req.socket.once('close', () => {
+        const cur = _ipCounts.get(ip) || 1;
+        if (cur <= 1) _ipCounts.delete(ip);
+        else _ipCounts.set(ip, cur - 1);
+      });
+
+      cb(true);
+    };
+
+    this.wss = new WebSocketServer({ server, path: '/ws', verifyClient });
 
     // Heartbeat: ping every 30s, terminate dead connections
     this._heartbeatInterval = setInterval(() => {

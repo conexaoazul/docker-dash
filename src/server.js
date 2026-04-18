@@ -29,7 +29,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://unpkg.com"],
+      scriptSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://unpkg.com"],
       scriptSrcAttr: ["'none'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
@@ -60,6 +60,7 @@ app.use((req, res, next) => {
 });
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(require('./middleware/csrf'));
 
 // Trust proxy — set to specific proxy IPs or 'loopback' for security
 // 'true' trusts ALL proxies (allows IP spoofing). Use specific IPs in production.
@@ -214,9 +215,19 @@ async function start() {
     if (config.admin.defaultPassword === 'admin') {
       log.warn('SECURITY: Default admin password is "admin". Change it immediately after first login.');
     }
+    // Refuse to boot with default admin password in production
+    if (process.env.ADMIN_PASSWORD === 'admin' && process.env.ALLOW_DEFAULT_ADMIN !== 'true') {
+      log.error('FATAL: ADMIN_PASSWORD is "admin" in production. Set a strong ADMIN_PASSWORD or ALLOW_DEFAULT_ADMIN=true to override.');
+      process.exit(1);
+    }
     if (!config.session.secureCookie) {
       log.warn('SECURITY: COOKIE_SECURE is false. Set COOKIE_SECURE=true when behind HTTPS.');
     }
+  }
+
+  // Warn if audit retention is below recommended minimum
+  if (config.retention.auditDays < 90) {
+    log.warn(`SECURITY: AUDIT_RETENTION_DAYS is ${config.retention.auditDays} (below recommended 90). Audit logs may be purged too aggressively.`);
   }
 
   // Log security mode

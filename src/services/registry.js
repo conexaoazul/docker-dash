@@ -5,8 +5,15 @@ const https = require('https');
 const http = require('http');
 const config = require('../config');
 const log = require('../utils/logger')('registry');
+const { encrypt, decrypt } = require('../utils/crypto');
 
 class RegistryService {
+  constructor() {
+    // Migrate legacy XOR-encrypted passwords to AES-GCM on first use.
+    // Deferred to next tick so DB is initialized before we query it.
+    setImmediate(() => this._rewrapLegacy());
+  }
+
   list() {
     return getDb().prepare('SELECT id, name, url, username, is_default, created_at, last_used_at FROM registries ORDER BY name').all();
   }
@@ -16,7 +23,7 @@ class RegistryService {
   }
 
   create({ name, url, username, password, createdBy }) {
-    const encrypted = password ? this._encrypt(password) : null;
+    const encrypted = password ? encrypt(password) : null;
     const result = getDb().prepare(
       'INSERT INTO registries (name, url, username, password_encrypted, created_by) VALUES (?, ?, ?, ?, ?)'
     ).run(name, url.replace(/\/+$/, ''), username || null, encrypted, createdBy);
@@ -27,7 +34,7 @@ class RegistryService {
     const db = getDb();
     if (password) {
       db.prepare('UPDATE registries SET name=?, url=?, username=?, password_encrypted=?, last_used_at=NULL WHERE id=?')
-        .run(name, url.replace(/\/+$/, ''), username || null, this._encrypt(password), id);
+        .run(name, url.replace(/\/+$/, ''), username || null, encrypt(password), id);
     } else {
       db.prepare('UPDATE registries SET name=?, url=?, username=? WHERE id=?')
         .run(name, url.replace(/\/+$/, ''), username || null, id);
@@ -73,7 +80,7 @@ class RegistryService {
       if (imageName.startsWith(host + '/') || imageName.startsWith(host + ':')) {
         return {
           username: reg.username,
-          password: reg.password_encrypted ? this._decrypt(reg.password_encrypted) : '',
+          password: reg.password_encrypted ? this._decryptLegacyOrNew(reg.password_encrypted) : '',
           serveraddress: reg.url,
         };
       }
@@ -81,31 +88,78 @@ class RegistryService {
     return null;
   }
 
-  _encrypt(text) {
-    if (!text) return null;
-    const key = config.security.encryptionKey;
-    if (!key || key === 'change-me-to-a-random-32-char-hex') return Buffer.from(text).toString('base64');
-    // Simple XOR encryption with the key (for simplicity; a real app would use AES)
-    const keyBuf = Buffer.from(key, 'utf8');
-    const textBuf = Buffer.from(text, 'utf8');
-    const encrypted = Buffer.alloc(textBuf.length);
-    for (let i = 0; i < textBuf.length; i++) {
-      encrypted[i] = textBuf[i] ^ keyBuf[i % keyBuf.length];
+  /**
+   * Decrypt a stored password — handles both new AES-GCM format and legacy XOR/base64 format.
+   * Legacy format: starts with 'x:' (XOR encrypted) or is plain base64 (no key was set).
+   */
+  _decryptLegacyOrNew(stored) {
+    if (!stored) return '';
+    // Try new AES-GCM first (format: iv:tag:data — three hex segments separated by colons)
+    // AES-GCM ciphertext has exactly 3 colon-delimited hex parts
+    const parts = stored.split(':');
+    if (parts.length === 3 && /^[0-9a-f]+$/i.test(parts[0])) {
+      try {
+        return decrypt(stored);
+      } catch {
+        // Fall through to legacy handling
+      }
     }
-    return 'x:' + encrypted.toString('base64');
+    // Legacy XOR format: 'x:<base64>'
+    if (stored.startsWith('x:')) {
+      const key = config.security.encryptionKey;
+      if (!key) return '';
+      const encBuf = Buffer.from(stored.slice(2), 'base64');
+      const keyBuf = Buffer.from(key, 'utf8');
+      const decrypted = Buffer.alloc(encBuf.length);
+      for (let i = 0; i < encBuf.length; i++) {
+        decrypted[i] = encBuf[i] ^ keyBuf[i % keyBuf.length];
+      }
+      return decrypted.toString('utf8');
+    }
+    // Legacy plain base64 (no key was configured at save time)
+    try {
+      return Buffer.from(stored, 'base64').toString('utf8');
+    } catch {
+      return '';
+    }
   }
 
-  _decrypt(encrypted) {
-    if (!encrypted) return '';
-    if (!encrypted.startsWith('x:')) return Buffer.from(encrypted, 'base64').toString('utf8');
-    const key = config.security.encryptionKey;
-    const encBuf = Buffer.from(encrypted.slice(2), 'base64');
-    const keyBuf = Buffer.from(key, 'utf8');
-    const decrypted = Buffer.alloc(encBuf.length);
-    for (let i = 0; i < encBuf.length; i++) {
-      decrypted[i] = encBuf[i] ^ keyBuf[i % keyBuf.length];
+  /**
+   * One-time migration: re-encrypt any legacy XOR/base64 passwords with AES-GCM.
+   * Safe to call on startup — skips rows already in AES-GCM format.
+   */
+  _rewrapLegacy() {
+    try {
+      const db = getDb();
+      const rows = db.prepare('SELECT id, password_encrypted FROM registries WHERE password_encrypted IS NOT NULL').all();
+      let rewrapped = 0;
+      for (const row of rows) {
+        const stored = row.password_encrypted;
+        if (!stored) continue;
+        // Check if already AES-GCM format (3 hex parts separated by colons)
+        const parts = stored.split(':');
+        if (parts.length === 3 && /^[0-9a-f]+$/i.test(parts[0])) {
+          // Already new format — try decrypting to confirm
+          try { decrypt(stored); continue; } catch { /* corrupted, try rewrap */ }
+        }
+        // Legacy format — decode and re-encrypt
+        try {
+          const plaintext = this._decryptLegacyOrNew(stored);
+          if (plaintext) {
+            const newEncrypted = encrypt(plaintext);
+            db.prepare('UPDATE registries SET password_encrypted = ? WHERE id = ?').run(newEncrypted, row.id);
+            rewrapped++;
+          }
+        } catch (err) {
+          log.warn(`Failed to rewrap registry password for id=${row.id}: ${err.message}`);
+        }
+      }
+      if (rewrapped > 0) {
+        log.info(`Registry legacy password migration: rewrapped ${rewrapped} row(s) to AES-GCM`);
+      }
+    } catch (err) {
+      log.warn(`Registry legacy rewrap skipped: ${err.message}`);
     }
-    return decrypted.toString('utf8');
   }
 
   _apiCall(reg, path) {
@@ -115,7 +169,7 @@ class RegistryService {
       const headers = { 'Accept': 'application/json' };
 
       if (reg.username && reg.password_encrypted) {
-        const pass = this._decrypt(reg.password_encrypted);
+        const pass = this._decryptLegacyOrNew(reg.password_encrypted);  // eslint-disable-line no-underscore-dangle
         headers['Authorization'] = 'Basic ' + Buffer.from(`${reg.username}:${pass}`).toString('base64');
       }
 

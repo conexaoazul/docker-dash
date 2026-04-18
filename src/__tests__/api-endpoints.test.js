@@ -35,6 +35,7 @@ let authToken = null;
 
 // Login before tests
 beforeAll(async () => {
+  require('./helpers/seedTestAdmin').clearMustChange('admin');
   const res = await request(app)
     .post('/api/auth/login')
     .send({ username: 'admin', password: 'IntegrationTest123!' });

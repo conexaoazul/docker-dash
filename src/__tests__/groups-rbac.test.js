@@ -30,6 +30,7 @@ let viewerToken = null;
 let testGroupId = null;
 
 beforeAll(async () => {
+  require('./helpers/seedTestAdmin').clearMustChange('admin');
   // Login as admin
   const adminRes = await request(app)
     .post('/api/auth/login')
@@ -40,24 +41,24 @@ beforeAll(async () => {
   await request(app)
     .post('/api/auth/users')
     .set('Authorization', `Bearer ${adminToken}`)
-    .send({ username: 'grp_operator', password: 'GrpOper123!', role: 'operator' });
+    .send({ username: 'grp_operator', password: 'GrpOper1234!', role: 'operator' });
 
   // Create viewer
   await request(app)
     .post('/api/auth/users')
     .set('Authorization', `Bearer ${adminToken}`)
-    .send({ username: 'grp_viewer', password: 'GrpView123!', role: 'viewer' });
+    .send({ username: 'grp_viewer', password: 'GrpView1234!', role: 'viewer' });
 
   // Login as operator
   const opRes = await request(app)
     .post('/api/auth/login')
-    .send({ username: 'grp_operator', password: 'GrpOper123!' });
+    .send({ username: 'grp_operator', password: 'GrpOper1234!' });
   operatorToken = opRes.body.token;
 
   // Login as viewer
   const viewRes = await request(app)
     .post('/api/auth/login')
-    .send({ username: 'grp_viewer', password: 'GrpView123!' });
+    .send({ username: 'grp_viewer', password: 'GrpView1234!' });
   viewerToken = viewRes.body.token;
 
   // Create a test group as admin for update/delete tests

@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        APP_VERSION: "${APP_VERSION:-6.3.0}"
-    image: docker-dash:${APP_VERSION:-6.3.0}
+        APP_VERSION: "${APP_VERSION:-6.4.0}"
+    image: docker-dash:${APP_VERSION:-6.4.0}
     container_name: docker-dash
     restart: unless-stopped
     env_file:
@@ -50,7 +50,9 @@ services:
       - caddy-certs:/data/certs:ro
       - caddy-data:/data
       - caddy-config:/config
-    command: caddy run --config /data/certs/Caddyfile --adapter caddyfile
+      # Bootstrap Caddyfile — used when no Caddyfile has been configured yet
+      - ./caddy-bootstrap:/bootstrap:ro
+    command: sh -c '[ -f /data/certs/Caddyfile ] || cp /bootstrap/Caddyfile.default /data/certs/Caddyfile; exec caddy run --config /data/certs/Caddyfile --adapter caddyfile'
     depends_on:
       - app
     profiles:

@@ -5,6 +5,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { getClientIp } = require('../utils/helpers');
 const auditService = require('../services/audit');
 const { getDb } = require('../db');
+const log = require('../utils/logger')('secretsRotations');
 
 const router = Router();
 
@@ -42,7 +43,7 @@ router.get('/', requireAuth, requireRole('admin', 'operator'), (req, res) => {
     });
     res.json(enriched);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -55,19 +56,24 @@ router.get('/summary', requireAuth, requireRole('admin', 'operator'), (req, res)
     for (const r of rows) summary[computeStatus(r.next_due_at)]++;
     res.json(summary);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // POST /bulk — register a list of secrets from the wizard (idempotent on unique key)
+// FIX #25 — honour force_update_intervals flag to preserve user-tuned rotation fields
 router.post('/bulk', requireAuth, requireRole('admin'), (req, res) => {
   try {
-    const { appName = '', hostId = 0, secrets = [] } = req.body;
+    const { appName = '', hostId = 0, secrets = [], force_update_intervals = false } = req.body;
     if (!Array.isArray(secrets) || secrets.length === 0) {
       return res.status(400).json({ error: 'secrets array required' });
     }
     const db = getDb();
-    const stmt = db.prepare(`
+
+    // Two prepared statements depending on whether the caller wants to clobber intervals.
+    // force_update_intervals = true  → full update (original behaviour)
+    // force_update_intervals = false → preserve rotation_interval_days, last_rotated_at, next_due_at, notes
+    const stmtFull = db.prepare(`
       INSERT INTO secret_rotations
         (app_name, host_id, env_key, secret_name, secret_type, label, action, rotation_interval_days, last_rotated_at, next_due_at, status, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'ok', ?)
@@ -79,39 +85,75 @@ router.post('/bulk', requireAuth, requireRole('admin'), (req, res) => {
         rotation_interval_days = excluded.rotation_interval_days,
         updated_at = datetime('now')
     `);
+
+    const stmtPreserve = db.prepare(`
+      INSERT INTO secret_rotations
+        (app_name, host_id, env_key, secret_name, secret_type, label, action, rotation_interval_days, last_rotated_at, next_due_at, status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'ok', ?)
+      ON CONFLICT(app_name, host_id, env_key) DO UPDATE SET
+        secret_name = excluded.secret_name,
+        label = excluded.label,
+        action = excluded.action,
+        secret_type = excluded.secret_type,
+        updated_at = datetime('now')
+    `);
+
     const now = new Date();
     const tx = db.transaction(() => {
       let inserted = 0;
+      let updated = 0;
+      let preserved = 0;
+
       for (const s of secrets) {
         const interval = Number(s.rotation_interval_days ?? s.rotation ?? 180);
         const nextDue = new Date(now.getTime() + interval * 86400000).toISOString().slice(0, 19).replace('T', ' ');
-        stmt.run(
-          String(appName),
-          Number(hostId) || 0,
-          String(s.envKey),
-          String(s.secretName || s.envKey),
-          String(s.type || 'generic_secret'),
-          String(s.label || ''),
-          String(s.action || 'manual'),
-          interval,
-          nextDue,
-          req.user.id,
-        );
-        inserted++;
+        const appNameStr = String(appName);
+        const hostIdNum = Number(hostId) || 0;
+        const envKey = String(s.envKey);
+
+        // Check whether this row already exists to track insert vs update counters
+        const existing = db.prepare(
+          'SELECT id FROM secret_rotations WHERE app_name = ? AND host_id = ? AND env_key = ?'
+        ).get(appNameStr, hostIdNum, envKey);
+
+        if (force_update_intervals) {
+          stmtFull.run(
+            appNameStr, hostIdNum, envKey,
+            String(s.secretName || s.envKey),
+            String(s.type || 'generic_secret'),
+            String(s.label || ''),
+            String(s.action || 'manual'),
+            interval, nextDue, req.user.id,
+          );
+          if (existing) { updated++; } else { inserted++; }
+        } else {
+          stmtPreserve.run(
+            appNameStr, hostIdNum, envKey,
+            String(s.secretName || s.envKey),
+            String(s.type || 'generic_secret'),
+            String(s.label || ''),
+            String(s.action || 'manual'),
+            interval, nextDue, req.user.id,
+          );
+          if (existing) { preserved++; } else { inserted++; }
+        }
       }
-      return inserted;
+
+      return { inserted, updated, preserved };
     });
-    const count = tx();
+
+    const counts = tx();
 
     auditService.log({
       userId: req.user.id, username: req.user.username,
       action: 'secret_rotation_register', targetType: 'secret_rotation', targetId: appName,
-      details: { appName, hostId, count },
+      details: { appName, hostId, force_update_intervals, ...counts },
       ip: getClientIp(req),
     });
-    res.json({ ok: true, count });
+    res.json({ ok: true, ...counts });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    log.error('secrets rotations bulk', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -144,7 +186,7 @@ router.post('/:id/mark-rotated', requireAuth, requireRole('admin'), (req, res) =
     });
     res.json({ ok: true, nextDueAt: nextDue });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -165,7 +207,7 @@ router.patch('/:id', requireAuth, requireRole('admin'), (req, res) => {
 
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -186,7 +228,7 @@ router.delete('/:id', requireAuth, requireRole('admin'), (req, res) => {
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -199,7 +241,7 @@ router.get('/:id/history', requireAuth, requireRole('admin', 'operator'), (req, 
     `).all(parseInt(req.params.id));
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

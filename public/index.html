@@ -39,9 +39,73 @@
         <button type="submit" class="btn btn-primary btn-block" id="login-btn">
           <i class="fas fa-sign-in-alt"></i> <span id="login-btn-text">Sign In</span>
         </button>
-        <p class="text-sm text-muted" id="login-forgot" style="margin-top:12px;text-align:center">
-          Forgot password? Contact your administrator to reset it from Settings &gt; Users.
-        </p>
+        <div id="login-forgot" style="margin-top:12px;text-align:center">
+          <a href="#" id="login-forgot-link" class="text-sm" style="color:var(--accent);text-decoration:none;cursor:pointer">Forgot password?</a>
+        </div>
+        <div id="login-reset-form" style="display:none;margin-top:12px;background:var(--surface2,#1e2433);border:1px solid var(--border,#2a3040);border-radius:8px;padding:14px">
+          <p class="text-sm text-muted" style="margin:0 0 10px">Enter your email address and we'll send you a reset link if an account exists.</p>
+          <div class="form-group" style="margin-bottom:10px">
+            <input type="email" id="login-reset-email" class="form-control" placeholder="your@email.com" autocomplete="email">
+          </div>
+          <div id="login-reset-error" style="display:none;color:var(--red,#f87171);font-size:12px;margin-bottom:8px"></div>
+          <div id="login-reset-success" style="display:none;color:var(--green,#4ade80);font-size:13px;padding:8px 0"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button type="button" id="login-reset-cancel" class="btn btn-secondary btn-sm">Cancel</button>
+            <button type="button" id="login-reset-submit" class="btn btn-primary btn-sm"><i class="fas fa-paper-plane"></i> Send reset link</button>
+          </div>
+        </div>
+        <script>
+          (function () {
+            var link = document.getElementById('login-forgot-link');
+            var form = document.getElementById('login-reset-form');
+            var cancelBtn = document.getElementById('login-reset-cancel');
+            var submitBtn = document.getElementById('login-reset-submit');
+            var emailInput = document.getElementById('login-reset-email');
+            var errorEl = document.getElementById('login-reset-error');
+            var successEl = document.getElementById('login-reset-success');
+
+            link.addEventListener('click', function (e) {
+              e.preventDefault();
+              form.style.display = 'block';
+              link.parentElement.style.display = 'none';
+              emailInput.focus();
+            });
+
+            cancelBtn.addEventListener('click', function () {
+              form.style.display = 'none';
+              link.parentElement.style.display = 'block';
+              emailInput.value = '';
+              errorEl.style.display = 'none';
+              successEl.style.display = 'none';
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send reset link';
+            });
+
+            submitBtn.addEventListener('click', async function () {
+              var email = emailInput.value.trim();
+              errorEl.style.display = 'none';
+              successEl.style.display = 'none';
+              if (!email) { errorEl.textContent = 'Please enter your email address.'; errorEl.style.display = 'block'; return; }
+              submitBtn.disabled = true;
+              submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+              try {
+                await fetch('/api/auth/request-password-reset', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email: email }),
+                });
+              } catch (e) { /* ignore network errors — show generic message regardless */ }
+              successEl.textContent = "If an account exists with that email, you'll receive a reset link.";
+              successEl.style.display = 'block';
+              submitBtn.style.display = 'none';
+              cancelBtn.textContent = 'Close';
+            });
+
+            emailInput.addEventListener('keydown', function (e) {
+              if (e.key === 'Enter') submitBtn.click();
+            });
+          })();
+        </script>
       </form>
       <div id="oidc-section" class="hidden" style="margin-top:16px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">

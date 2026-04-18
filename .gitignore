@@ -7,6 +7,9 @@ plans/
 .env.local
 .env.*.local
 
+# Local Docker Compose overrides (use docker-compose.dev.yml instead)
+docker-compose.override.yml
+
 # Database
 *.db
 *.db-wal

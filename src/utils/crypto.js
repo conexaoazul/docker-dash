@@ -13,7 +13,10 @@ let _derivedKey = null;
 
 function _getKey() {
   if (_derivedKey) return _derivedKey;
-  const secret = config.security.encryptionKey || config.app.secret || 'fallback-key';
+  const secret = config.security.encryptionKey;
+  if (!secret) {
+    throw new Error('ENCRYPTION_KEY environment variable is required');
+  }
   // Use scrypt to derive a proper 256-bit key
   // Salt is SHA-256 of the secret (deterministic per-installation)
   const salt = crypto.createHash('sha256').update('docker-dash-key-salt:' + secret).digest();

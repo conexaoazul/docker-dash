@@ -29,6 +29,7 @@ let authToken = null;
 let adminUserId = null;
 
 beforeAll(async () => {
+  require('./helpers/seedTestAdmin').clearMustChange('admin');
   const res = await request(app)
     .post('/api/auth/login')
     .send({ username: 'admin', password: 'NotifTest123!' });

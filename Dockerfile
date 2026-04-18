@@ -5,7 +5,7 @@ FROM node:20-alpine AS base
 RUN apk update && apk upgrade --no-cache
 
 # System tools + Docker CLI + gcompat (glibc compat for Docker Scout)
-RUN apk add --no-cache tini wget curl docker-cli gcompat git openssh-client
+RUN apk add --no-cache tini wget curl docker-cli gcompat git openssh-client openssl
 
 # Install Trivy vulnerability scanner
 # Pin version for reproducible builds. Update ARG to upgrade.
@@ -61,8 +61,9 @@ FROM base AS production
 COPY --from=deps /app/node_modules ./node_modules
 COPY src/ ./src/
 COPY public/ ./public/
+COPY entrypoint.sh ./
 COPY package.json README.md LICENSE CONTRIBUTING.md .env.example .gitignore ./
-RUN mkdir -p /data
+RUN mkdir -p /data && chmod +x /app/entrypoint.sh
 
 # Version label — read from package.json at build time
 ARG APP_VERSION=unknown
@@ -76,5 +77,5 @@ LABEL org.opencontainers.image.title="Docker Dash" \
 EXPOSE 8101
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
   CMD sh -c "wget --no-verbose --tries=1 --spider http://localhost:\${APP_PORT:-8101}/api/health || exit 1"
-ENTRYPOINT ["/sbin/tini", "--"]
+ENTRYPOINT ["/sbin/tini", "--", "/app/entrypoint.sh"]
 CMD ["node", "src/server.js"]

@@ -2,6 +2,76 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.4.0] - 2026-04-18 — "Hardening"
+
+This release closes 31 of 35 findings from the v6.3.0 pre-sale audit (`AUDIT_2026-04-18.md`).
+
+### Security — P0 sale-killers fixed
+- **Encryption key fail-fast** — `_getKey()` throws if `ENCRYPTION_KEY` env is missing (no `'fallback-key'` fallback, regardless of `APP_ENV`)
+- **Registry credentials now AES-256-GCM** — replaced XOR/base64 with `utils/crypto.encrypt`. Auto-rewraps legacy rows on startup
+- **SSH host configs encrypted at rest** — new `services/host-config-crypto.js`; migration `045_encrypt_ssh_configs` re-encrypts existing rows; reads accept legacy plaintext for backwards compat
+- **Database restore requires SHA-256 checksum** — `X-Backup-Sha256` header mandatory (escape: `ALLOW_UNCHECKED_DB_RESTORE=true`); 500MB cap; before/after audit entries
+- **Remote-deploy hardening** — appName regex validation, 1MB script cap, full SHA-256 in audit, suspicious-pattern scan, per-host `allowed_deploy_roles` RBAC (migration 047)
+- **Certificate `sourcePath` allow-list** — paths must be inside `CERT_ALLOWED_PATHS` env (defaults to `/etc/letsencrypt/live`, `/etc/ssl/certs`, `/etc/ssl/private`, `/data/certs`)
+- **`openssl` no longer required for cert parsing** — `parsePem` now uses Node 15+ `crypto.X509Certificate`. `openssl` still added to Dockerfile for `generateCsr`
+- **Default-admin boot guard** — production refuses to start with `ADMIN_PASSWORD=admin` unless `ALLOW_DEFAULT_ADMIN=true`
+- **`docker-compose.override.yml` removed from repo** — added to `.gitignore`. Dev mode now opt-in via `docker compose -f docker-compose.yml -f docker-compose.dev.yml up`
+- **Caddy bootstrap fixes chicken-and-egg** — new `caddy-bootstrap/Caddyfile.default` is copied into the volume on first start; `--profile tls up -d` now boots cleanly
+
+### Security — P1
+- **OIDC ID-token signature verified** — RS256 + JWKS fetch with 1h cache; validates `iss`/`aud`/`exp`/`nbf`; rejects `http://` discovery URLs
+- **SSO header trust gated** — requires `SSO_TRUSTED_PROXY_IPS` env (CSV); fail-closed when unset
+- **SSH `dockerSocket` injection blocked** — strict regex on host-config writes and SSH service reads
+- **`must_change_password` enforced server-side** — middleware blocks all routes except `me`/`change-password`/`logout`/`health` until password changed
+- **Bcrypt user-enumeration mitigated** — dummy compare on missing-user path
+- **LDAP-provisioned users** — secure random hash (cost 12) instead of predictable `Math.random()` cost-4
+- **CSRF protection** — new double-submit cookie middleware (`X-XSRF-TOKEN` header); frontend `api.js` reads cookie + sends header; bypass via `CSRF_DISABLED=true`
+- **WebSocket hardening** — Origin allow-list (default = `req.headers.host`), per-IP connection cap (default 10), query-token gated by `WS_QUERY_TOKEN_ENABLED`
+- **Audit retention default 7 → 365 days** — startup warns if < 90; migration 046 bumps existing setting
+- **Wizard rotation register** — `force_update_intervals` flag preserves user-tuned intervals by default
+- **Cert UNIQUE constraint** — returns 409 instead of leaking the SQLite error
+- **Mass error-message sanitization** — 99 `res.status(500).json({ error: err.message })` replaced with generic message + full detail in server logs
+
+### Frontend
+- **"Forgot password?" link** on login — opens inline form, POSTs `/auth/request-password-reset`, generic response (no enumeration)
+- **Wizard openssl preflight banner** — calls new `GET /system/secrets-wizard/preflight`, warns if openssl missing
+- **Wizard rotation re-register** — warns when secrets already tracked, offers "Labels only" vs "Force-update intervals"
+- **Helmet CSP** — `'unsafe-eval'` removed from `scriptSrc`
+
+### Backend additions
+- `POST /api/auth/request-password-reset` — self-service password reset (rate-limited 5/15min)
+- `GET /api/system/secrets-wizard/preflight` — probes openssl/ssh availability
+- `services/cert-paths.js` — shared cert path allow-list helper
+- `middleware/csrf.js` — CSRF double-submit cookie
+
+### Infrastructure
+- **`entrypoint.sh`** — auto-generates `APP_SECRET`/`ENCRYPTION_KEY` on first boot if defaults are present
+- **Daily backups hardened** — write to `/data/backups/`, `chmod 600`, optional AES-256-GCM with `BACKUP_ENCRYPTION_KEY`, disk-space preflight (require 2× DB size free)
+- **Caddy `reloadCaddy` resilient** — returns `{ ok: false, reason }` on 404/ENOENT instead of throwing
+- **Cron parser fixed** — Sunday=7→0 normalization, `*/N` inside ranges (e.g., `0-30/5 * * * *`)
+
+### Password policy
+- Min 12 chars; requires upper + lower + digit + symbol
+- Extended blacklist (`password`, `admin`, `docker`, `dashboard`, `qwerty`, `changeme`, …)
+- Optional HIBP k-anonymity check via `HIBP_API_ENABLED=true` (fail-open on network error)
+
+### Tests
+- 384 → **431 passing** (32 suites, 0 failing)
+- New: `cron-parser.test.js` (22 cases), `certificates.test.js` (12 cases), `secretsRotations.test.js` (10 cases)
+- `helpers/seedTestAdmin.js` — clears `must_change_password` for test admin
+- All 15 affected test suites updated to call `clearMustChange()` in `beforeAll`
+
+### Migrations added (with `down()` for first time)
+- `045_encrypt_ssh_configs.js`
+- `046_audit_retention_bump.js`
+- `047_host_permissions.js`
+
+### Deferred to v6.5
+- F16 — `ldapjs` decommissioned by upstream → migrate to `ldapts`
+- F20 — Add `down()` to retroactive migrations 001–044 (going forward only)
+- F27 — i18n missing ~25% keys in non-EN locales (needs translator)
+- F30 — In-memory rate limiter → Redis backend for horizontal scale
+
 ## [6.3.0] - 2026-04-18
 
 ### Added — Secrets Lifecycle Suite

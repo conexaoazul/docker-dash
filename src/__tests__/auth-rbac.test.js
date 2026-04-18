@@ -37,6 +37,7 @@ let operatorId = null;
 let viewerId = null;
 
 beforeAll(async () => {
+  require('./helpers/seedTestAdmin').clearMustChange('admin');
   // Login as admin
   const adminRes = await request(app)
     .post('/api/auth/login')
@@ -136,7 +137,7 @@ describe('Viewer cannot access admin endpoints', () => {
     await request(app)
       .post(`/api/auth/users/${operatorId}/reset-password`)
       .set('Authorization', `Bearer ${viewerToken}`)
-      .send({ password: 'NewPass123!' })
+      .send({ password: 'NewPass1234!X' })
       .expect(403);
   });
 });
@@ -173,7 +174,7 @@ describe('Admin can do everything', () => {
     const res = await request(app)
       .post('/api/auth/users')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ username: 'admin_created', password: 'AdminNew123!', role: 'viewer' })
+      .send({ username: 'admin_created', password: 'SysCreated123!', role: 'viewer' })
       .expect(201);
     expect(res.body.id).toBeTruthy();
   });
@@ -191,7 +192,7 @@ describe('Admin can do everything', () => {
     const tmpRes = await request(app)
       .post('/api/auth/users')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ username: 'reset_target', password: 'ResetTarget1!', role: 'viewer' });
+      .send({ username: 'reset_target', password: 'ResetTarget12!', role: 'viewer' });
     const tmpId = tmpRes.body.id;
 
     await request(app)
@@ -206,7 +207,7 @@ describe('Admin can do everything', () => {
     const createRes = await request(app)
       .post('/api/auth/users')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ username: 'to_delete', password: 'ToDelete123!', role: 'viewer' });
+      .send({ username: 'to_delete', password: 'ToDelete1234!', role: 'viewer' });
     const deleteId = createRes.body.id;
 
     await request(app)

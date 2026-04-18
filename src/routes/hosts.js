@@ -7,6 +7,10 @@ const { requireAuth, requireRole, writeable } = require('../middleware/auth');
 const { getClientIp } = require('../utils/helpers');
 const { getDb } = require('../db');
 const log = require('../utils/logger')('hosts');
+const { encryptSshConfig, decryptSshConfig } = require('../services/host-config-crypto');
+
+// Validate docker socket path — must be an absolute path with safe characters only
+const SOCKET_RE = /^\/[a-zA-Z0-9_./-]+$/;
 
 const router = Router();
 
@@ -38,7 +42,7 @@ router.get('/', requireAuth, async (req, res) => {
         // Include SSH host for display in cards (no credentials)
         sshHost: (() => {
           if (!h.ssh_config) return null;
-          try { return JSON.parse(h.ssh_config).host || null; } catch { return null; }
+          try { return (decryptSshConfig(h.ssh_config) || {}).host || null; } catch { return null; }
         })(),
       };
     });
@@ -77,12 +81,14 @@ router.get('/:id', requireAuth, async (req, res) => {
     // Include SSH config (without password/key) for editing
     if (host.ssh_config) {
       try {
-        const ssh = JSON.parse(host.ssh_config);
-        result.sshHost = ssh.host;
-        result.sshPort = ssh.port;
-        result.sshUsername = ssh.username;
-        result.sshAuthType = ssh.privateKey ? 'key' : 'password';
-        result.sshDockerSocket = ssh.dockerSocket;
+        const ssh = decryptSshConfig(host.ssh_config);
+        if (ssh) {
+          result.sshHost = ssh.host;
+          result.sshPort = ssh.port;
+          result.sshUsername = ssh.username;
+          result.sshAuthType = ssh.privateKey ? 'key' : 'password';
+          result.sshDockerSocket = ssh.dockerSocket;
+        }
       } catch { /* SSH config may not exist for this host */ }
     }
 
@@ -116,6 +122,12 @@ router.post('/', requireAuth, requireRole('admin'), writeable, async (req, res) 
     if (connectionType === 'tcp' && !host) return res.status(400).json({ error: 'Host address is required for TCP' });
     if (connectionType === 'ssh' && (!sshHost || !sshUsername)) return res.status(400).json({ error: 'SSH host and username are required' });
 
+    // Validate dockerSocket path (FIX #13)
+    const effectiveDockerSocket = sshDockerSocket || '/var/run/docker.sock';
+    if (connectionType === 'ssh' && !SOCKET_RE.test(effectiveDockerSocket)) {
+      return res.status(400).json({ error: 'Invalid dockerSocket path' });
+    }
+
     // Build config objects
     let tlsConfig = null;
     if (connectionType === 'tcp' && tlsCa) {
@@ -124,14 +136,14 @@ router.post('/', requireAuth, requireRole('admin'), writeable, async (req, res) 
 
     let sshConfig = null;
     if (connectionType === 'ssh') {
-      sshConfig = JSON.stringify({
+      sshConfig = encryptSshConfig({
         host: sshHost,
         port: sshPort || 22,
         username: sshUsername,
         password: sshPassword || undefined,
         privateKey: sshPrivateKey || undefined,
         passphrase: sshPassphrase || undefined,
-        dockerSocket: sshDockerSocket || '/var/run/docker.sock',
+        dockerSocket: effectiveDockerSocket,
       });
     }
 
@@ -185,14 +197,19 @@ router.put('/:id', requireAuth, requireRole('admin'), writeable, async (req, res
 
     let sshConfig = existing.ssh_config;
     if (connectionType === 'ssh' && sshHost !== undefined) {
-      sshConfig = JSON.stringify({
+      // Validate dockerSocket path (FIX #13)
+      const effectiveDockerSocketPut = sshDockerSocket || '/var/run/docker.sock';
+      if (!SOCKET_RE.test(effectiveDockerSocketPut)) {
+        return res.status(400).json({ error: 'Invalid dockerSocket path' });
+      }
+      sshConfig = encryptSshConfig({
         host: sshHost,
         port: sshPort || 22,
         username: sshUsername,
         password: sshPassword || undefined,
         privateKey: sshPrivateKey || undefined,
         passphrase: sshPassphrase || undefined,
-        dockerSocket: sshDockerSocket || '/var/run/docker.sock',
+        dockerSocket: effectiveDockerSocketPut,
       });
     }
 

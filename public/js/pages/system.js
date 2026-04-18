@@ -3571,7 +3571,28 @@ DB_PASS=secret"></textarea>
         }
       });
 
-      el.querySelector('#secrets-wizard-btn')?.addEventListener('click', () => this._showSecretsWizard());
+      el.querySelector('#secrets-wizard-btn')?.addEventListener('click', async () => {
+        // FIX #32 — run openssl preflight before opening wizard; default to allow on failure
+        let preflightOk = true;
+        try {
+          const pf = await Api.secretsWizardPreflight();
+          if (pf && pf.openssl === false) preflightOk = false;
+        } catch (_) { /* network/backend not ready — allow wizard to open */ }
+
+        if (!preflightOk) {
+          // Show a non-blocking warning banner above the wizard card and still open wizard
+          const existingBanner = el.querySelector('#wz-openssl-banner');
+          if (!existingBanner) {
+            const banner = document.createElement('div');
+            banner.id = 'wz-openssl-banner';
+            banner.style.cssText = 'background:var(--yellow-bg,rgba(234,179,8,.12));border:1px solid var(--yellow,#ca8a04);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;display:flex;align-items:center;gap:10px';
+            banner.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:var(--yellow,#ca8a04);flex-shrink:0"></i>'
+              + '<span>\u26a0 Certificate features (CSR generation, PEM parsing) require <code>openssl</code> in the runtime image. Wizard is still functional for script generation.</span>';
+            el.querySelector('.card')?.before(banner);
+          }
+        }
+        this._showSecretsWizard();
+      });
     } catch (err) {
       el.innerHTML = '<div class="empty-msg" style="color:var(--red)">Error: ' + err.message + '</div>';
     }
@@ -3806,11 +3827,44 @@ DB_PASS=secret"></textarea>
           const hostId = Number(mc.querySelector('#wz-track-host')?.value || 0);
           const tracked = mc.querySelector('#wz-track-rotation')?.checked;
           if (!tracked) { Toast.warning('Tracking disabled — check the box first'); return; }
+          feedback.textContent = 'Checking existing tracked secrets...';
+          feedback.style.color = 'var(--text-muted)';
+
+          // FIX #25 — warn if secrets for this app+host are already tracked
+          let forceUpdateIntervals = false;
+          try {
+            const existing = await Api.getSecretRotations();
+            const matches = (existing || []).filter(r => r.app_name === state.appName && Number(r.host_id) === hostId);
+            if (matches.length > 0) {
+              const answer = await new Promise(resolve => {
+                const msg = matches.length + ' secret' + (matches.length === 1 ? ' is' : 's are')
+                  + ' already tracked for this app. Update display labels (preserve intervals) or force-update intervals too?';
+                const dlg = document.createElement('div');
+                dlg.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center';
+                dlg.innerHTML = '<div style="background:var(--surface2,#1e2433);border:1px solid var(--border,#2a3040);border-radius:10px;padding:24px;max-width:420px;width:90%">'
+                  + '<h4 style="margin:0 0 12px"><i class="fas fa-exclamation-triangle" style="color:var(--yellow,#ca8a04);margin-right:8px"></i>Already tracked</h4>'
+                  + '<p style="margin:0 0 18px;font-size:13px;color:var(--text-muted)">' + msg + '</p>'
+                  + '<div style="display:flex;gap:10px;justify-content:flex-end">'
+                  + '<button id="wz-dup-cancel" class="btn btn-secondary btn-sm">Cancel</button>'
+                  + '<button id="wz-dup-labels" class="btn btn-secondary btn-sm">Labels only</button>'
+                  + '<button id="wz-dup-force" class="btn btn-primary btn-sm">Force-update intervals</button>'
+                  + '</div></div>';
+                document.body.appendChild(dlg);
+                dlg.querySelector('#wz-dup-cancel').addEventListener('click', () => { document.body.removeChild(dlg); resolve(null); });
+                dlg.querySelector('#wz-dup-labels').addEventListener('click', () => { document.body.removeChild(dlg); resolve(false); });
+                dlg.querySelector('#wz-dup-force').addEventListener('click', () => { document.body.removeChild(dlg); resolve(true); });
+              });
+              if (answer === null) { feedback.textContent = ''; return; } // cancelled
+              forceUpdateIntervals = answer;
+            }
+          } catch (_) { /* non-fatal — proceed without the check */ }
+
           feedback.textContent = 'Registering...';
           feedback.style.color = 'var(--text-muted)';
           const res = await Api.registerSecretRotations({
             appName: state.appName,
             hostId,
+            force_update_intervals: forceUpdateIntervals,
             secrets: state.analysis.secretFiles.map(s => ({
               envKey: s.envKey, secretName: s.secretName, type: s.type,
               label: s.label, action: s.action, rotation_interval_days: s.rotation || 180,

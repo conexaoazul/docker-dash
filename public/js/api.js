@@ -33,6 +33,12 @@ const Api = {
     return `${path}${sep}hostId=${this._currentHostId}`;
   },
 
+  /** Read XSRF cookie value (set by server on session creation, read by client for double-submit) */
+  _readXsrfToken() {
+    const m = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  },
+
   async request(method, path, body = null, opts = {}) {
     const options = {
       method,
@@ -43,6 +49,11 @@ const Api = {
     // Add Bearer token if cookies might be blocked
     if (this._bearerToken) {
       options.headers['Authorization'] = `Bearer ${this._bearerToken}`;
+    }
+    // CSRF double-submit: send XSRF cookie value as header on state-mutating methods
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      const xsrf = this._readXsrfToken();
+      if (xsrf) options.headers['X-XSRF-TOKEN'] = xsrf;
     }
     if (body && method !== 'GET') {
       options.body = JSON.stringify(body);
@@ -378,6 +389,9 @@ const Api = {
   updateSecretRotation(id, data) { return this.patch('/secrets-rotations/' + id, data); },
   deleteSecretRotation(id) { return this.delete('/secrets-rotations/' + id); },
   getSecretRotationHistory(id) { return this.get(`/secrets-rotations/${id}/history`); },
+
+  // ─── Secrets Wizard Preflight ────────────────────
+  secretsWizardPreflight() { return this.get('/system/secrets-wizard/preflight'); },
 
   // ─── Secrets Remote Deploy ───────────────────────
   deploySecretsRemote(data) { return this.post('/system/secrets-wizard/deploy-remote', data); },

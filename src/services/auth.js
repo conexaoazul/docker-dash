@@ -1,6 +1,7 @@
 'use strict';
 
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { getDb } = require('../db');
 const config = require('../config');
 const ldapService = require('./ldap');
@@ -8,6 +9,10 @@ const { generateToken, sha256, encrypt, decrypt } = require('../utils/crypto');
 const totp = require('../utils/totp');
 const { now, getClientIp } = require('../utils/helpers');
 const log = require('../utils/logger')('auth');
+
+// Pre-computed dummy hash used for timing-safe "user not found" path (FIX #18).
+// Cost 12, random string — this ensures bcrypt.compare always runs even for unknown usernames.
+const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 12);
 
 class AuthService {
   /** Seed default admin user if none exists */
@@ -44,14 +49,61 @@ class AuthService {
     return admin?.is_active === 1;
   }
 
-  /** Validate password strength */
+  /** Validate password strength (FIX #28) — synchronous, keeps original call signature */
   validatePassword(password) {
-    if (!password || password.length < 8) return 'Password must be at least 8 characters';
+    if (!password || password.length < 12) return 'Password must be at least 12 characters';
+    if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter';
+    if (!/[a-z]/.test(password)) return 'Password must contain at least one lowercase letter';
     if (!/\d/.test(password)) return 'Password must contain at least one number';
-    if (password.toLowerCase() === 'admin' || password.toLowerCase() === 'password' || password === '12345678') {
-      return 'Password is too common';
+    if (!/[^A-Za-z0-9]/.test(password)) return 'Password must contain at least one symbol';
+
+    // Common password blacklist
+    const lower = password.toLowerCase();
+    const BLACKLIST = [
+      'admin', 'password', 'docker', 'dashboard', 'qwerty', 'changeme',
+      'letmein', '123456', 'password123', '12345678', '123456789',
+      'iloveyou', 'sunshine', 'princess', 'welcome', 'monkey',
+    ];
+    if (BLACKLIST.some(b => lower.includes(b))) {
+      return 'Password is too common or contains a blacklisted word';
     }
-    return null; // valid
+
+    return null; // valid (sync checks passed)
+  }
+
+  /** HIBP k-anonymity breach check — async, fail-open (FIX #28) */
+  async checkHibp(password) {
+    if (process.env.HIBP_API_ENABLED !== 'true') return null;
+    try {
+      const sha1 = require('crypto').createHash('sha1').update(password).digest('hex').toUpperCase();
+      const prefix = sha1.substring(0, 5);
+      const suffix = sha1.substring(5);
+      const result = await new Promise((resolve, reject) => {
+        const https = require('https');
+        const req = https.get(
+          `https://api.pwnedpasswords.com/range/${prefix}`,
+          { headers: { 'User-Agent': 'docker-dash' }, timeout: 3000 },
+          (res) => {
+            let data = '';
+            res.on('data', chunk => { data += chunk; });
+            res.on('end', () => resolve(data));
+          }
+        );
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('HIBP timeout')); });
+      });
+      const lines = result.split('\n');
+      for (const line of lines) {
+        const [hash] = line.split(':');
+        if (hash && hash.trim() === suffix) {
+          return 'Password has been found in a data breach. Please choose a different password.';
+        }
+      }
+    } catch (err) {
+      log.warn('HIBP check failed (fail-open)', err.message);
+      // fail-open: allow the password
+    }
+    return null;
   }
 
   /** Authenticate user by username + password */
@@ -76,8 +128,10 @@ class AuthService {
         .run(ldapUser.displayName, ldapUser.email, existing.id);
       return db.prepare("SELECT * FROM users WHERE id = ?").get(existing.id);
     }
-    // Provision new user with a random unusable password (login only via LDAP)
-    const unusableHash = bcrypt.hashSync('!' + ldapUser.ldapDn + Math.random(), 4);
+    // FIX #26: Provision new user with a cryptographically unguessable unusable password (login only via LDAP).
+    // Cost 12 + 48 random bytes ensures the hash is never guessable or brute-forceable.
+    const unguessable = crypto.randomBytes(48).toString('hex');
+    const unusableHash = bcrypt.hashSync(unguessable, 12);
     const cfg = ldapService.getConfig();
     const defaultRole = cfg.defaultRole || 'viewer';
     db.prepare(`INSERT INTO users (username, display_name, email, password_hash, role, auth_source, is_active)
@@ -104,6 +158,8 @@ class AuthService {
         user = this._provisionLdapUser(db, ldapUser);
       }
       if (!user) {
+        // FIX #18: Run dummy bcrypt compare to prevent user-enumeration via timing side-channel.
+        await bcrypt.compare(password, DUMMY_HASH);
         this.logAttempt(ip, username, null, false, userAgent);
         return { error: 'Invalid credentials' };
       }
@@ -455,6 +511,8 @@ class AuthService {
 
     const pwErr = this.validatePassword(password);
     if (pwErr) return { error: pwErr };
+    const hibpErr = await this.checkHibp(password);
+    if (hibpErr) return { error: hibpErr };
 
     const hash = await bcrypt.hash(password, config.security.bcryptRounds);
     const result = db.prepare(

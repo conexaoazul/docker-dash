@@ -49,8 +49,9 @@ class DockerService {
     let tlsConfig = null;
     let sshConfig = null;
     const { tryParseJson } = require('../utils/helpers');
+    const { decryptSshConfig } = require('./host-config-crypto');
     tlsConfig = tryParseJson(row.tls_config);
-    sshConfig = tryParseJson(row.ssh_config);
+    sshConfig = row.ssh_config ? decryptSshConfig(row.ssh_config) : null;
     return {
       id: row.id,
       name: row.name,

@@ -61,7 +61,7 @@ module.exports = {
     retention1hDays: int('STATS_1H_RETENTION_DAYS', 7),
   },
   retention: {
-    auditDays: int('AUDIT_RETENTION_DAYS', 7),
+    auditDays: int('AUDIT_RETENTION_DAYS', 365),
     eventDays: int('EVENT_RETENTION_DAYS', 7),
   },
   features: {

@@ -30,6 +30,7 @@ let adminToken = null;
 let testUserId = null;
 
 beforeAll(async () => {
+  require('./helpers/seedTestAdmin').clearMustChange('admin');
   // Login as admin
   const res = await request(app)
     .post('/api/auth/login')
@@ -45,23 +46,30 @@ beforeAll(async () => {
 });
 
 describe('validatePassword service-level checks', () => {
-  it('should reject passwords shorter than 8 chars', () => {
-    expect(authService.validatePassword('Short1')).toMatch(/8 characters/);
+  it('should reject passwords shorter than 12 chars', () => {
+    expect(authService.validatePassword('Short1!')).toMatch(/12 characters/);
+  });
+
+  it('should reject passwords without uppercase', () => {
+    expect(authService.validatePassword('nouppercase1!')).toMatch(/uppercase/);
   });
 
   it('should reject passwords without digits', () => {
     expect(authService.validatePassword('NoDigitsHere!')).toMatch(/number/);
   });
 
+  it('should reject passwords without symbols', () => {
+    expect(authService.validatePassword('NoSymbolsHere1')).toMatch(/symbol/);
+  });
+
   it('should reject common passwords', () => {
-    expect(authService.validatePassword('admin')).toBeTruthy();
-    expect(authService.validatePassword('password')).toBeTruthy();
-    expect(authService.validatePassword('12345678')).toBeTruthy();
+    expect(authService.validatePassword('Admin123!Xx#')).toBeTruthy(); // contains 'admin'
+    expect(authService.validatePassword('Password123!')).toBeTruthy(); // contains 'password'
   });
 
   it('should accept valid passwords', () => {
-    expect(authService.validatePassword('SecureP4ss!')).toBeNull();
-    expect(authService.validatePassword('MyStr0ngPwd')).toBeNull();
+    expect(authService.validatePassword('SecureP4ss!XY')).toBeNull();
+    expect(authService.validatePassword('MyStr0ng#Pwd!')).toBeNull();
   });
 });
 
@@ -70,16 +78,16 @@ describe('POST /api/auth/users — create user password policy', () => {
     const res = await request(app)
       .post('/api/auth/users')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ username: 'weakuser1', password: 'Sh0rt', role: 'viewer' })
+      .send({ username: 'weakuser1', password: 'Sh0rt!', role: 'viewer' })
       .expect(400);
-    expect(res.body.error).toMatch(/8 characters/);
+    expect(res.body.error).toMatch(/12 characters/);
   });
 
   it('should reject password without digit', async () => {
     const res = await request(app)
       .post('/api/auth/users')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ username: 'weakuser2', password: 'NoDigitsHere!', role: 'viewer' })
+      .send({ username: 'weakuser2', password: 'NoDigitsHere!XY', role: 'viewer' })
       .expect(400);
     expect(res.body.error).toMatch(/number/);
   });
@@ -97,7 +105,7 @@ describe('POST /api/auth/users — create user password policy', () => {
     const res = await request(app)
       .post('/api/auth/users')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ username: 'stronguser', password: 'SecureP4ss!', role: 'viewer' })
+      .send({ username: 'stronguser', password: 'SecureP4ss!XY', role: 'viewer' })
       .expect(201);
     expect(res.body.id).toBeTruthy();
   });
@@ -107,6 +115,7 @@ describe('POST /api/auth/change-password — password policy', () => {
   let userToken = null;
 
   beforeAll(async () => {
+    require('./helpers/seedTestAdmin').clearMustChange('pwtest');
     // Login as the test user
     const res = await request(app)
       .post('/api/auth/login')
@@ -118,16 +127,16 @@ describe('POST /api/auth/change-password — password policy', () => {
     const res = await request(app)
       .post('/api/auth/change-password')
       .set('Authorization', `Bearer ${userToken}`)
-      .send({ currentPassword: 'PwTestUser1!', newPassword: 'Sh0rt' })
+      .send({ currentPassword: 'PwTestUser1!', newPassword: 'Sh0rt!' })
       .expect(400);
-    expect(res.body.error).toMatch(/8 characters/);
+    expect(res.body.error).toMatch(/12 characters/);
   });
 
   it('should reject new password without digit', async () => {
     const res = await request(app)
       .post('/api/auth/change-password')
       .set('Authorization', `Bearer ${userToken}`)
-      .send({ currentPassword: 'PwTestUser1!', newPassword: 'NoDigitsAtAll!' })
+      .send({ currentPassword: 'PwTestUser1!', newPassword: 'NoDigitsAtAll!XY' })
       .expect(400);
     expect(res.body.error).toMatch(/number/);
   });
@@ -136,7 +145,7 @@ describe('POST /api/auth/change-password — password policy', () => {
     const res = await request(app)
       .post('/api/auth/change-password')
       .set('Authorization', `Bearer ${userToken}`)
-      .send({ currentPassword: 'PwTestUser1!', newPassword: 'SecureP4ss!' })
+      .send({ currentPassword: 'PwTestUser1!', newPassword: 'SecureP4ss!XY' })
       .expect(200);
     expect(res.body.ok).toBe(true);
   });
@@ -147,16 +156,16 @@ describe('POST /api/auth/users/:id/reset-password — password policy', () => {
     const res = await request(app)
       .post(`/api/auth/users/${testUserId}/reset-password`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ password: 'weak' })
+      .send({ password: 'Weak1!' })
       .expect(400);
-    expect(res.body.error).toMatch(/8 characters/);
+    expect(res.body.error).toMatch(/12 characters/);
   });
 
   it('should reject password without digit on admin reset', async () => {
     const res = await request(app)
       .post(`/api/auth/users/${testUserId}/reset-password`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ password: 'NoDigitsHere!' })
+      .send({ password: 'NoDigitsHere!XY' })
       .expect(400);
     expect(res.body.error).toMatch(/number/);
   });
@@ -165,7 +174,7 @@ describe('POST /api/auth/users/:id/reset-password — password policy', () => {
     const res = await request(app)
       .post(`/api/auth/users/${testUserId}/reset-password`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ password: 'SecureP4ss!' })
+      .send({ password: 'SecureP4ss!XY' })
       .expect(200);
     expect(res.body.ok).toBe(true);
   });
@@ -186,15 +195,15 @@ describe('POST /api/auth/reset-password-token — password policy', () => {
   it('should reject weak password on token reset', async () => {
     const res = await request(app)
       .post('/api/auth/reset-password-token')
-      .send({ token: resetToken, newPassword: 'weak' })
+      .send({ token: resetToken, newPassword: 'Weak1!' })
       .expect(400);
-    expect(res.body.error).toMatch(/8 characters/);
+    expect(res.body.error).toMatch(/12 characters/);
   });
 
   it('should reject password without digit on token reset', async () => {
     const res = await request(app)
       .post('/api/auth/reset-password-token')
-      .send({ token: resetToken, newPassword: 'NoDigitsHere!' })
+      .send({ token: resetToken, newPassword: 'NoDigitsHere!XY' })
       .expect(400);
     expect(res.body.error).toMatch(/number/);
   });
@@ -202,7 +211,7 @@ describe('POST /api/auth/reset-password-token — password policy', () => {
   it('should accept valid password on token reset', async () => {
     const res = await request(app)
       .post('/api/auth/reset-password-token')
-      .send({ token: resetToken, newPassword: 'SecureP4ss!' })
+      .send({ token: resetToken, newPassword: 'SecureP4ss!XY' })
       .expect(200);
     expect(res.body.ok).toBe(true);
   });

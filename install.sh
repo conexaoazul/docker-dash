@@ -149,6 +149,15 @@ generate_secrets() {
 patch_compose_for_remote() {
   # If installing remotely (not from git clone), replace build with image
   if [ ! -f "$INSTALL_DIR/Dockerfile" ]; then
+    # Verify the image is reachable before rewriting compose; fall back to git-clone+build if not
+    if ! docker pull ghcr.io/bogdanpricop/docker-dash:latest >/dev/null 2>&1; then
+      warn "Pre-built image ghcr.io/bogdanpricop/docker-dash:latest not available — falling back to git clone + build"
+      git clone --depth 1 https://github.com/bogdanpricop/docker-dash.git "$INSTALL_DIR/.src" 2>&1 | tail -3
+      cp -r "$INSTALL_DIR/.src/Dockerfile" "$INSTALL_DIR/.src/src" "$INSTALL_DIR/.src/public" "$INSTALL_DIR/.src/scripts" "$INSTALL_DIR/.src/entrypoint.sh" "$INSTALL_DIR/.src/package.json" "$INSTALL_DIR/.src/package-lock.json" "$INSTALL_DIR/" 2>/dev/null || true
+      rm -rf "$INSTALL_DIR/.src"
+      ok "Cloned source — will build locally"
+      return
+    fi
     # Replace build section with image reference
     local VERSION
     VERSION=$(grep 'APP_VERSION' "$INSTALL_DIR/docker-compose.yml" | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "latest")

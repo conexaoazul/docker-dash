@@ -1,0 +1,3 @@
+:80 {
+  respond "Docker Dash — configure HTTPS via UI (System → SSL/TLS)" 200
+}

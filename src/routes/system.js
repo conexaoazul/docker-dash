@@ -11,8 +11,11 @@ const { getDb } = require('../db');
 const config = require('../config');
 const sslService = require('../services/ssl');
 const cisBenchmark = require('../services/cis-benchmark');
+const log = require('../utils/logger')('system');
 
 const { extractHostId } = require('../middleware/hostId');
+
+const { isAllowedCertPath } = require('../services/cert-paths');
 
 const router = Router();
 router.use(extractHostId);
@@ -92,7 +95,7 @@ router.get('/database', requireAuth, requireRole('admin'), (req, res) => {
       retention,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -159,7 +162,7 @@ router.post('/database/cleanup', requireAuth, requireRole('admin'), writeable, (
 
     res.json({ ok: true, deleted, totalDeleted });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -203,7 +206,7 @@ router.post('/database/cleanup-aggressive', requireAuth, requireRole('admin'), w
 
     res.json({ ok: true, hours, deleted, totalDeleted });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -271,7 +274,7 @@ router.get('/database/diagnostics', requireAuth, requireRole('admin'), async (re
     res.setHeader('Content-Disposition', `attachment; filename="docker-dash-diagnostics-${new Date().toISOString().slice(0,10)}.json"`);
     res.json(bundle);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -295,25 +298,25 @@ router.post('/database/vacuum', requireAuth, requireRole('admin'), writeable, (r
 
     res.json({ ok: true, sizeBefore, sizeAfter, freed: sizeBefore - sizeAfter });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 router.get('/info', requireAuth, async (req, res) => {
   try { res.json(await dockerService.getInfo(req.hostId)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.get('/disk-usage', requireAuth, async (req, res) => {
   try { res.json(await dockerService.getDiskUsage(req.hostId)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.get('/events', requireAuth, (req, res) => {
   try {
     const { type, action, since, limit } = req.query;
     res.json(dockerEvents.query({ type, action, since, limit: parseInt(limit) || 100 }));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.post('/prune', requireAuth, requireRole('admin'), writeable, requireFeature('prune'), async (req, res) => {
@@ -323,7 +326,7 @@ router.post('/prune', requireAuth, requireRole('admin'), writeable, requireFeatu
     auditService.log({ userId: req.user.id, username: req.user.username,
       action: 'system_prune', details: req.body, ip: getClientIp(req) });
     res.json(results);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ─── Update Checks ───────────────────────────────────────────
@@ -399,7 +402,7 @@ router.get('/check-updates', requireAuth, async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -466,7 +469,7 @@ router.get('/firewall', requireAuth, requireRole('admin'), (req, res) => {
       raw: statusRaw,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -510,7 +513,7 @@ router.post('/firewall/rule', requireAuth, requireRole('admin'), writeable, (req
 
     res.json({ ok: true, result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -529,7 +532,7 @@ router.delete('/firewall/rule/:number', requireAuth, requireRole('admin'), write
 
     res.json({ ok: true, result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -564,7 +567,7 @@ router.get('/health-overview', requireAuth, async (req, res) => {
 
     res.json({ containers: healthData });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -709,7 +712,7 @@ router.get('/compose/:stack/config', requireAuth, async (req, res) => {
 
     res.json({ stack: req.params.stack, workingDir, configFile, config, generated });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -739,7 +742,7 @@ router.post('/stacks/:name/validate', requireAuth, async (req, res) => {
       try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -931,10 +934,10 @@ router.post('/schedules/:id/run-now', requireAuth, requireRole('admin', 'operato
       const duration = Date.now() - start;
       db.prepare(`INSERT INTO schedule_history (schedule_id, container_id, action, status, error_message, duration_ms) VALUES (?, ?, ?, 'error', ?, ?)`).run(schedule.id, schedule.container_id, schedule.action, err.message, duration);
       db.prepare(`UPDATE scheduled_actions SET last_run_at = datetime('now'), last_run_status = 'error', last_run_error = ? WHERE id = ?`).run(err.message, schedule.id);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Internal server error' });
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -981,7 +984,7 @@ router.get('/backup/config', requireAuth, requireRole('admin'), (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="docker-dash-backup-${new Date().toISOString().substring(0, 10)}.json"`);
     res.send(JSON.stringify(backup, null, 2));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1025,7 +1028,7 @@ router.post('/backup/restore', requireAuth, requireRole('admin'), writeable, (re
 
     res.json({ ok: true, restored });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1051,7 +1054,7 @@ router.put('/containers/:id/resources', requireAuth, requireRole('admin'), write
 
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1106,7 +1109,7 @@ router.get('/containers/:id/health-logs', requireAuth, async (req, res) => {
       })),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1147,7 +1150,7 @@ router.get('/topology', requireAuth, async (req, res) => {
 
     res.json({ nodes, links, networks: Object.values(networkMap) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1176,7 +1179,7 @@ router.get('/stacks', requireAuth, async (req, res) => {
 
     res.json(Object.values(stacks));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1216,7 +1219,7 @@ router.get('/stacks/:name', requireAuth, async (req, res) => {
       envFile,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1284,7 +1287,7 @@ router.put('/stacks/:name/config', requireAuth, requireRole('admin'), writeable,
 
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1303,7 +1306,7 @@ router.post('/stacks/:name/env', requireAuth, requireRole('admin'), writeable, (
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1331,7 +1334,7 @@ router.get('/backup/s3-status', requireAuth, requireRole('admin'), (req, res) =>
     const s3Backup = require('../services/s3-backup');
     res.json(s3Backup.getStatus());
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1341,7 +1344,7 @@ router.post('/backup/s3-test', requireAuth, requireRole('admin'), async (req, re
     const result = await s3Backup.testConnection();
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1351,7 +1354,7 @@ router.post('/backup/s3-upload', requireAuth, requireRole('admin'), async (req, 
     const result = await s3Backup.uploadBackup();
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1376,7 +1379,7 @@ router.put('/backup/s3-config', requireAuth, requireRole('admin'), writeable, (r
 
     res.json({ ok: true, enabled: cfg.s3.enabled });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1462,7 +1465,7 @@ router.post('/backup/s3', requireAuth, requireRole('admin'), writeable, async (r
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1486,7 +1489,7 @@ router.get('/backup/list', requireAuth, requireRole('admin'), (req, res) => {
 
     res.json({ files, dir: backupDir });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1579,7 +1582,7 @@ router.get('/secrets-audit', requireAuth, requireRole('admin'), async (req, res)
 
     res.json({ containers: results, avgScore, criticalCount, warningCount, total: results.length });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1675,7 +1678,7 @@ router.post('/deploy-validate', requireAuth, requireRole('admin'), (req, res) =>
 
     res.json({ checks, summary: { total: checks.length, passed, failed, warned } });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1771,7 +1774,46 @@ router.post('/secrets-wizard/analyze', requireAuth, requireRole('admin'), (req, 
 
     res.json({ secretFiles, todoPlaceholders, summary });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /secrets-wizard/preflight — check tool availability on the server running docker-dash
+router.get('/secrets-wizard/preflight', requireAuth, requireRole('admin'), async (req, res) => {
+  const { execFile } = require('child_process');
+  const { promisify } = require('util');
+  const execFileAsync = promisify(execFile);
+
+  async function probeCommand(cmd, args) {
+    try {
+      const { stdout, stderr } = await execFileAsync(cmd, args, { timeout: 3000 });
+      return { available: true, version: (stdout || stderr || '').trim().split('\n')[0] };
+    } catch (err) {
+      if (err.code === 'ENOENT') return { available: false, version: '' };
+      // Some tools (like ssh -V) exit non-zero but still write version to stderr
+      if (err.stderr || err.stdout) {
+        return { available: true, version: ((err.stderr || err.stdout) + '').trim().split('\n')[0] };
+      }
+      return { available: false, version: '' };
+    }
+  }
+
+  try {
+    const [opensslResult, sshResult] = await Promise.all([
+      probeCommand('openssl', ['version']),
+      probeCommand('ssh', ['-V']),
+    ]);
+
+    res.json({
+      openssl: opensslResult.available,
+      opensslVersion: opensslResult.version,
+      ssh: sshResult.available,
+      sshVersion: sshResult.version,
+      sftp: sshResult.available, // sftp ships with OpenSSH, same binary set
+    });
+  } catch (err) {
+    log.error('secrets-wizard preflight', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1878,21 +1920,57 @@ router.post('/secrets-wizard/generate-script', requireAuth, requireRole('admin')
 
     res.type('text/plain').send(script);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // POST /secrets-wizard/deploy-remote — upload + execute script on a remote SSH host
 router.post('/secrets-wizard/deploy-remote', requireAuth, requireRole('admin'), async (req, res) => {
   try {
+    const crypto = require('crypto');
     const { hostId, appName = 'myapp', script, useSudo = true } = req.body;
     if (!hostId) return res.status(400).json({ error: 'hostId required' });
     if (!script || typeof script !== 'string') return res.status(400).json({ error: 'script required' });
+
+    // FIX #6.1 — validate appName against allowlist regex (prevents path traversal)
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(appName)) {
+      return res.status(400).json({ error: 'appName must match ^[a-zA-Z0-9_-]{1,64}$' });
+    }
+
+    // FIX #6.2 — cap script size at 1MB
+    if (Buffer.byteLength(script, 'utf8') > 1024 * 1024) {
+      return res.status(413).json({ error: 'script exceeds 1MB limit' });
+    }
+
+    // FIX #6.3 — compute scriptSha256 for audit log
+    const scriptSha256 = crypto.createHash('sha256').update(script).digest('hex');
+    const scriptPreviewFirst = script.slice(0, 200);
+    const scriptPreviewLast = script.length > 200 ? script.slice(-200) : '';
+
+    // FIX #6.4 — scan for suspicious shell patterns
+    const SUSPICIOUS_PATTERNS = [/\$\(/, /`/, /\beval\b/, /curl\s+[^|]+\|\s*sh/, /wget\s+[^|]+\|\s*sh/];
+    const scriptWarnings = [];
+    for (const pattern of SUSPICIOUS_PATTERNS) {
+      if (pattern.test(script)) scriptWarnings.push(pattern.toString());
+    }
 
     const db = getDb();
     const host = db.prepare('SELECT * FROM docker_hosts WHERE id = ?').get(parseInt(hostId));
     if (!host) return res.status(404).json({ error: 'Host not found' });
     if (host.connection_type !== 'ssh') return res.status(400).json({ error: 'Host does not have SSH configuration' });
+
+    // FIX #6.5 — per-host authorization via allowed_deploy_roles
+    if (host.allowed_deploy_roles) {
+      let allowedRoles;
+      try { allowedRoles = JSON.parse(host.allowed_deploy_roles); } catch { allowedRoles = []; }
+      if (Array.isArray(allowedRoles) && allowedRoles.length > 0) {
+        if (!allowedRoles.includes(req.user.role)) {
+          return res.status(403).json({
+            error: `Your role '${req.user.role}' is not authorized to deploy to this host. Allowed: ${allowedRoles.join(', ')}`,
+          });
+        }
+      }
+    }
 
     let sshConfig;
     try { sshConfig = JSON.parse(host.ssh_config || '{}'); }
@@ -1955,13 +2033,23 @@ router.post('/secrets-wizard/deploy-remote', requireAuth, requireRole('admin'), 
     auditService.log({
       userId: req.user.id, username: req.user.username,
       action: 'secrets_deploy_remote', targetType: 'host', targetId: String(hostId),
-      details: { appName, exitCode: result.exitCode, useSudo, outputLen: result.output.length },
+      details: {
+        appName,
+        exitCode: result.exitCode,
+        useSudo,
+        outputLen: result.output.length,
+        scriptSha256,
+        scriptPreviewFirst,
+        scriptPreviewLast,
+        scriptWarnings,
+      },
       ip: getClientIp(req),
     });
 
     res.json({ ok: result.exitCode === 0, exitCode: result.exitCode, output: result.output });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    log.error('secrets deploy-remote', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1988,7 +2076,7 @@ router.post('/secrets-wizard/generate-compose', requireAuth, requireRole('admin'
 
     res.type('text/plain').send(yaml);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2009,7 +2097,7 @@ router.get('/certificates', requireAuth, requireRole('admin', 'operator'), (req,
     });
     res.json(enriched);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2018,6 +2106,14 @@ router.post('/certificates', requireAuth, requireRole('admin'), writeable, (req,
   try {
     const { name, pemContent, sourcePath = '', hostId = 0, notes = '' } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name required' });
+
+    // FIX #14 — sourcePath allow-list check
+    if (sourcePath && !isAllowedCertPath(sourcePath)) {
+      return res.status(400).json({
+        error: `sourcePath '${sourcePath}' is not in the allowed certificate directories. ` +
+               'Configure CERT_ALLOWED_PATHS env var to extend the allow-list.',
+      });
+    }
 
     let pem = pemContent;
     let sourceType = 'uploaded';
@@ -2054,7 +2150,12 @@ router.post('/certificates', requireAuth, requireRole('admin'), writeable, (req,
 
     res.status(201).json({ ok: true, id: result.lastInsertRowid, info });
   } catch (err) {
-    res.status(err.message.includes('UNIQUE') ? 409 : 500).json({ error: err.message });
+    // FIX #27 — UNIQUE constraint → 409
+    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || err.message.includes('UNIQUE')) {
+      return res.status(409).json({ error: `A certificate named "${req.body?.name}" is already tracked`, code: 'DUPLICATE_NAME' });
+    }
+    log.error('cert POST', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2064,6 +2165,14 @@ router.post('/certificates/:id/refresh', requireAuth, requireRole('admin'), writ
     const db = getDb();
     const row = db.prepare('SELECT * FROM tracked_certificates WHERE id = ?').get(parseInt(req.params.id));
     if (!row) return res.status(404).json({ error: 'Not found' });
+
+    // FIX #14 — validate stored source_path before reading it
+    if (row.source_type === 'file' && row.source_path && !isAllowedCertPath(row.source_path)) {
+      return res.status(400).json({
+        error: `Stored sourcePath '${row.source_path}' is not in the allowed certificate directories. ` +
+               'Update the certificate entry with an allowed path or configure CERT_ALLOWED_PATHS.',
+      });
+    }
 
     let pem = row.pem_content;
     if (row.source_type === 'file' && row.source_path && fs.existsSync(row.source_path)) {
@@ -2086,7 +2195,7 @@ router.post('/certificates/:id/refresh', requireAuth, requireRole('admin'), writ
       res.status(400).json({ error: 'Refresh failed: ' + e.message });
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2105,7 +2214,7 @@ router.delete('/certificates/:id', requireAuth, requireRole('admin'), writeable,
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2130,7 +2239,7 @@ router.post('/certificates/csr', requireAuth, requireRole('admin'), (req, res) =
 
     res.json({ ok: true, csr: result.csr, privateKey: result.privateKey });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2142,7 +2251,7 @@ router.get('/ssl/status', requireAuth, requireRole('admin'), (req, res) => {
     const status = sslService.getStatus();
     res.json(status);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2163,7 +2272,7 @@ router.post('/ssl/self-signed', requireAuth, requireRole('admin'), writeable, (r
 
     res.json({ ok: true, ...result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2184,7 +2293,7 @@ router.post('/ssl/caddy', requireAuth, requireRole('admin'), writeable, (req, re
 
     res.json({ ok: true, ...result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2214,7 +2323,7 @@ router.delete('/ssl', requireAuth, requireRole('admin'), writeable, (req, res) =
 
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2235,7 +2344,7 @@ router.get('/cis-benchmark', requireAuth, requireRole('admin'), async (req, res)
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2387,7 +2496,7 @@ router.get('/cis/container/:name/hardened-compose', requireAuth, requireRole('ad
 
     res.json({ compose: lines.join('\n'), changes });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2397,7 +2506,7 @@ router.get('/ssl/caddy-status', requireAuth, requireRole('admin'), async (req, r
     const status = await sslService.getCaddyStatus();
     res.json(status);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2424,7 +2533,7 @@ router.post('/ssl/enable', requireAuth, requireRole('admin'), writeable, async (
         hint: 'Start Caddy first: docker compose --profile tls up -d',
       });
     }
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2476,7 +2585,7 @@ router.get('/ssl/certificates', requireAuth, requireRole('admin'), async (req, r
 
     res.json({ certificates: certs });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
