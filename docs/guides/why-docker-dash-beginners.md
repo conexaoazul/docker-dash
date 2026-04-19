@@ -3,7 +3,7 @@
 **Audience:** anyone who's heard of Docker but hasn't really used it.
 **Reading time:** ~4 minutes.
 
-> ⏪ [Back to README](../../README.md) · 🇷🇴 The Romanian version is available inside the app under *How-To Guides → Începători*.
+> ⏪ [Back to README](../../README.md) · 🇷🇴 [Versiunea română](why-docker-dash-beginners.ro.md)
 
 ---
 

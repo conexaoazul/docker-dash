@@ -3,7 +3,7 @@
 **Audience:** developers who use git daily, may not have fully bought into Docker yet, and want to know why Docker Dash specifically — not Portainer, not Dockge, not bash scripts.
 **Reading time:** ~5 minutes.
 
-> ⏪ [Back to README](../../README.md) · 🇷🇴 The Romanian version is available inside the app under *How-To Guides → Dev cu Git*.
+> ⏪ [Back to README](../../README.md) · 🇷🇴 [Versiunea română](why-docker-dash-developers.ro.md)
 
 ---
 
