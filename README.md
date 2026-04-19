@@ -201,7 +201,28 @@
 - **Watchtower Detection** — Auto-detect and migrate from Watchtower to native safe-pull
 - **Prometheus Metrics** — `/api/metrics` endpoint for Grafana integration
 - **Self-Reporting Footprint** — Docker Dash memory, uptime, DB size at `/api/footprint`
-- **384 Tests** — 29 test suites covering auth, RBAC, security, CRUD, services (100% passing)
+- **431 Tests** — 32 test suites covering auth, RBAC, security, CRUD, services (100% passing)
+
+## Where to start
+
+Two short reads, each tailored to a different background. Pick the one that matches you and skim before installing.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🚀 New to Docker?</h3>
+      <p>The recipe-and-kitchen metaphor, why containers fix <em>"works on my machine"</em>, what you see in the first 30 seconds of opening Docker Dash, and what you can do in your first hour. No jargon.</p>
+      <p><strong><a href="docs/guides/why-docker-dash-beginners.md">Read: Why Docker &amp; Docker Dash — Beginner's Guide →</a></strong></p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>⎇ Developer using Git?</h3>
+      <p>The git → Docker mental bridge (<code>commit</code> = image, <code>package.json</code> = compose), the 5 places dev-with-git gets stuck, and how Docker Dash compares against Portainer / Dockge / bash scripts. With a GitOps workflow.</p>
+      <p><strong><a href="docs/guides/why-docker-dash-developers.md">Read: Docker Dash for Developers Using Git →</a></strong></p>
+    </td>
+  </tr>
+</table>
+
+> Both guides are also available inside the app under <strong>How-To Guides</strong> with bilingual EN/RO content and surfaced as buttons in the page header.
 
 ## Quick Start
 
