@@ -16,6 +16,7 @@
     <img src="https://img.shields.io/badge/RAM-~50MB-blue" alt="RAM Usage">
   </p>
   <p align="center">
+    <a href="#where-to-start"><strong>Where to start</strong></a> &bull;
     <a href="#quick-start">Quick Start</a> &bull;
     <a href="#features">Features</a> &bull;
     <a href="#screenshots">Screenshots</a> &bull;
