@@ -44,6 +44,7 @@ jobs:
         run: npm test
         env:
           APP_SECRET: ci-test-secret-key-not-for-production
+          ENCRYPTION_KEY: ci-test-encryption-key-32-chars-min
           APP_ENV: test
 
       - name: Validate i18n completeness

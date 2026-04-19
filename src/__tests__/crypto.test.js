@@ -6,6 +6,7 @@
 
 // Need to set config before requiring crypto
 process.env.APP_SECRET = 'test-secret-key-for-jest-tests-only';
+process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'test-encryption-key-for-jest-32chars';
 
 const { encrypt, decrypt, generateToken, sha256, hmacSign } = require('../utils/crypto');
 
