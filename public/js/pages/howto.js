@@ -8,6 +8,10 @@ const HowToPage = {
   async render(container) {
     const isAdmin = App.user?.role === 'admin';
 
+    const isRo = (typeof i18n !== 'undefined' && i18n.currentLang === 'ro');
+    const beginnerLabel = isRo ? 'Începători — De ce Docker?' : 'Start here — Why Docker?';
+    const devLabel = isRo ? 'Dev cu Git — De ce Docker Dash?' : 'Dev with Git — Why Docker Dash?';
+
     container.innerHTML = `
       <div class="page-header">
         <h2><i class="fas fa-graduation-cap" style="color:var(--accent)"></i> How-To Guides</h2>
@@ -20,9 +24,31 @@ const HowToPage = {
           <button class="btn btn-sm btn-secondary" id="howto-refresh"><i class="fas fa-sync-alt"></i></button>
         </div>
       </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <button class="btn btn-primary howto-feature-btn" data-howto-open="why-docker-dash-beginners"
+          style="display:flex;align-items:center;gap:10px;padding:12px 16px;font-size:13px;text-align:left;flex:1;min-width:280px">
+          <i class="fas fa-rocket" style="font-size:18px"></i>
+          <span style="display:flex;flex-direction:column;line-height:1.3">
+            <strong>${Utils.escapeHtml(beginnerLabel)}</strong>
+            <span style="font-size:11px;opacity:.85">${isRo ? 'Citește prima oară dacă ești la început' : 'Read this first if you\'re new'}</span>
+          </span>
+        </button>
+        <button class="btn btn-secondary howto-feature-btn" data-howto-open="why-docker-dash-developers"
+          style="display:flex;align-items:center;gap:10px;padding:12px 16px;font-size:13px;text-align:left;flex:1;min-width:280px">
+          <i class="fab fa-git-alt" style="font-size:18px"></i>
+          <span style="display:flex;flex-direction:column;line-height:1.3">
+            <strong>${Utils.escapeHtml(devLabel)}</strong>
+            <span style="font-size:11px;opacity:.85">${isRo ? 'Punte mentală git → Docker, plus comparații' : 'git → Docker bridge, plus comparisons'}</span>
+          </span>
+        </button>
+      </div>
       <div id="howto-categories" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px"></div>
       <div id="howto-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px"></div>
     `;
+
+    container.querySelectorAll('.howto-feature-btn').forEach(btn => {
+      btn.addEventListener('click', () => this._openGuide(btn.dataset.howtoOpen));
+    });
 
     // Category pills
     this._renderCategories(container);
