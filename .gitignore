@@ -47,3 +47,8 @@ npm-debug.log*
 # Temporary
 tmp/
 temp/
+
+# Internal strategy & marketing drafts (not for public)
+POSITIONING.md
+GROWTH_PLAN.md
+docs/strategy/
