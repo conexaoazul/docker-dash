@@ -10,6 +10,30 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.8.0',
+      date: '2026-04-20',
+      title: 'Multi-host SSH exec — Remediation Wizard Apply mode works on remote hosts',
+      changes: [
+        { type: 'feature', text: 'Remediation Wizard Apply mode now works on SSH-connected remote hosts, not just the local Docker host. Previously composeFileExists always returned false for remote hosts (fs.existsSync is local-only), silently dropping compose-based remediations. Now compose files on remote hosts are detected, patched, and recreated via SSH exec transparently.' },
+        { type: 'feature', text: 'ssh-tunnel.js gains exec / fileExists / readFile / writeFile methods reusing the existing tunnel\'s ssh2 Client. Timeouts + shell-escape baked in. SFTP for read/write (path-safe, no shell injection surface).' },
+        { type: 'feature', text: 'New remote-fs service — thin dispatcher: hostId=0 → node fs, hostId>0 → ssh-tunnel. Uniform async interface. fileExists swallows tunnel errors as false for graceful degradation.' },
+        { type: 'feature', text: 'docker-runner.composeRecreate(file, service, hostId) — when hostId > 0, runs `docker compose up -d --no-deps --force-recreate <service>` via SSH exec on the target host instead of spawning docker locally. 120s timeout.' },
+        { type: 'feature', text: 'Snapshot blob now carries hostId per container — rollback returns to the correct host even in mixed-host plans. remediate.js and docker-runner.rollback updated.' },
+        { type: 'improvement', text: 'remediate.js uses composeDiff.diffYamlStrings (content-based) instead of diffComposeFile (path-based). Same result, works uniformly for local + remote without double-reading from disk.' },
+        { type: 'security', text: 'No new capabilities required on target host — reuses existing SSH credential flow. Docker Dash container still runs without NET_ADMIN / privileged / host network. Shell paths and service names are quoted/escaped; no injection surface.' },
+        { type: 'improvement', text: 'Tests: 648 → 664 passing / 45 suites. Mocks ssh2.Client entirely — no real SSH server needed for unit tests.' },
+      ],
+    },
+    {
+      version: '6.7.1',
+      date: '2026-04-20',
+      title: 'Hygiene — native deps refresh + zero lint warnings',
+      changes: [
+        { type: 'security', text: 'Native deps bumped: bcrypt ^5.1.1 → ^6.0.0, better-sqlite3 ^11.10.0 → ^12.9.0. Both API-compat for our usage, native bindings rebuild cleanly. `npm audit` at 0 vulnerabilities.' },
+        { type: 'improvement', text: 'Lint sweep: 49 → 34 → 0 warnings. `npm run lint` now exits 0 with no output. 14 source files touched (underscore-prefixed unused args, removed unused locals + stale eslint-disable directives).' },
+      ],
+    },
+    {
       version: '6.7.0',
       date: '2026-04-20',
       title: 'Outbound Network Filter — hostname allowlist enforcement per container or stack',

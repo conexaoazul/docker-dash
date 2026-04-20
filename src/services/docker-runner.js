@@ -108,7 +108,19 @@ async function waitHealthy(docker, containerId, timeoutMs = 30_000) {
  * @param {string} serviceName
  * @returns {Promise<{stdout: string, stderr: string}>}
  */
-function composeRecreate(composeFile, serviceName) {
+function composeRecreate(composeFile, serviceName, hostId = 0) {
+  // Remote host: run docker compose on the target host via SSH exec.
+  // POSIX quoting for paths with spaces; serviceName is constrained to
+  // `com.docker.compose.service` label chars so no injection surface.
+  if (hostId && hostId > 0) {
+    const sshTunnel = require('./ssh-tunnel');
+    const cmd = `cd '${path.dirname(composeFile).replace(/'/g, "'\\''")}' && docker compose -f '${composeFile.replace(/'/g, "'\\''")}' up -d --no-deps --force-recreate '${serviceName.replace(/'/g, "'\\''")}'`;
+    return sshTunnel.exec(hostId, cmd, { timeoutMs: 120000 }).then((r) => {
+      if (r.exitCode !== 0) throw new Error(`docker compose exited ${r.exitCode}: ${r.stderr || r.stdout}`);
+      return { stdout: r.stdout, stderr: r.stderr };
+    });
+  }
+
   return new Promise((resolve, reject) => {
     const cwd = path.dirname(composeFile);
     const args = ['compose', '-f', composeFile, 'up', '-d', '--no-deps', '--force-recreate', serviceName];
@@ -136,13 +148,13 @@ function composeRecreate(composeFile, serviceName) {
  * @param {number} args.hostId
  * @param {function(string)} args.onLog - log callback
  */
-async function recreateInOrder({ composeFile, composeDoc, services, docker, hostId: _hostId, onLog }) {
+async function recreateInOrder({ composeFile, composeDoc, services, docker, hostId, onLog }) {
   const order = topoOrder(composeDoc, services);
-  onLog(`[runner] Recreate order: ${order.join(' → ')}`);
+  onLog(`[runner] Recreate order${hostId ? ` (host ${hostId})` : ''}: ${order.join(' → ')}`);
 
   for (const service of order) {
     onLog(`[runner] Recreating ${service}...`);
-    await composeRecreate(composeFile, service);
+    await composeRecreate(composeFile, service, hostId);
 
     // Find the new container ID via compose project label
     const projectName = path.basename(path.dirname(composeFile));
@@ -191,9 +203,11 @@ async function recreateInOrder({ composeFile, composeDoc, services, docker, host
 async function rollback({ snapshots, onLog, hostId }) {
   const fs = require('fs');
   const YAML = require('yaml');
+  const remoteFs = require('./remote-fs');
   const docker = dockerService.getDocker(hostId || 0);
 
-  // Group snapshots by compose file
+  // Group snapshots by compose file. Each snapshot carries its own hostId
+  // (preserved from plan time) so rollback works even for mixed-host plans.
   const byComposeFile = {};
   for (const [containerId, snap] of Object.entries(snapshots)) {
     const composeFile = snap.inspect?.Config?.Labels?.['com.docker.compose.project.config_files']?.split(',')[0];
@@ -206,9 +220,14 @@ async function rollback({ snapshots, onLog, hostId }) {
   for (const [composeFile, entries] of Object.entries(byComposeFile)) {
     onLog(`[rollback] Restoring ${composeFile}`);
     try {
+      const snapHostId = entries[0].snap.hostId || hostId || 0;
       // Write pre-apply content back
-      fs.writeFileSync(composeFile + '.rollback-tmp', entries[0].snap.composeFileContent, 'utf8');
-      fs.renameSync(composeFile + '.rollback-tmp', composeFile);
+      if (snapHostId > 0) {
+        await remoteFs.writeFile(snapHostId, composeFile, entries[0].snap.composeFileContent);
+      } else {
+        fs.writeFileSync(composeFile + '.rollback-tmp', entries[0].snap.composeFileContent, 'utf8');
+        fs.renameSync(composeFile + '.rollback-tmp', composeFile);
+      }
 
       const doc = YAML.parse(entries[0].snap.composeFileContent);
       const services = entries.map(e => e.service).filter(Boolean);
@@ -217,7 +236,7 @@ async function rollback({ snapshots, onLog, hostId }) {
         composeDoc: doc,
         services,
         docker,
-        hostId,
+        hostId: snapHostId,
         onLog: (msg) => onLog('[rollback] ' + msg),
       });
       onLog(`[rollback] ✓ ${composeFile} restored`);

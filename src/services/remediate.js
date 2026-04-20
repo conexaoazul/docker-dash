@@ -12,6 +12,7 @@ const dockerService = require('../services/docker');
 const catalog = require('./remediation-catalog');
 const composeDiff = require('./compose-diff');
 const dockerRunner = require('./docker-runner');
+const remoteFs = require('./remote-fs');
 
 // WS publisher — injected at server boot via setWsBroadcaster().
 let _wsBroadcaster = null;
@@ -76,13 +77,13 @@ async function plan({ containers, findings }) {
       warnings.push(`Container ${inspect.Name} is part of a multi-file compose project; only the first file is supported in v6.6.`);
     }
 
-    const composeFileExists = composeFile ? fs.existsSync(composeFile) : false;
+    const composeFileExists = composeFile ? await remoteFs.fileExists(ref.hostId || 0, composeFile) : false;
     let composeServiceBlock = null;
     let parsedComposeBefore = null;
     if (composeFileExists && serviceName) {
       try {
         const YAML = require('yaml');
-        parsedComposeBefore = fs.readFileSync(composeFile, 'utf8');
+        parsedComposeBefore = await remoteFs.readFile(ref.hostId || 0, composeFile);
         const doc = YAML.parseDocument(parsedComposeBefore);
         composeServiceBlock = doc.getIn(['services', serviceName])?.toJSON?.() || null;
       } catch (e) {
@@ -138,10 +139,12 @@ async function plan({ containers, findings }) {
     totalDowntimeMs += estimatedDowntimeMs;
 
     // Generate diff if we have a compose file + non-empty patch
+    // Uses `diffYamlStrings` so the same code path works for local + remote:
+    // we already have `parsedComposeBefore` in memory from the read above.
     let diff = null;
-    if (composeFileExists && serviceName && Object.keys(compiledPatch).length > 0) {
+    if (composeFileExists && serviceName && Object.keys(compiledPatch).length > 0 && parsedComposeBefore) {
       try {
-        const diffResult = composeDiff.diffComposeFile(composeFile, { [serviceName]: compiledPatch });
+        const diffResult = composeDiff.diffYamlStrings(parsedComposeBefore, { [serviceName]: compiledPatch }, composeFile);
         diff = diffResult.unified;
       } catch (e) {
         warnings.push(`Cannot diff compose for ${inspect.Name}: ${e.message}`);
@@ -284,12 +287,11 @@ async function _applyLocal(jobId, plan) {
     try {
       const docker = dockerService.getDocker(step.hostId || 0);
       const inspect = await docker.getContainer(step.containerId).inspect();
-      snapshots[step.containerId] = {
-        inspect,
-        composeFileContent: step.composeFileExists && step.composeFile
-          ? fs.readFileSync(step.composeFile, 'utf8')
-          : null,
-      };
+      let composeFileContent = null;
+      if (step.composeFileExists && step.composeFile) {
+        composeFileContent = await remoteFs.readFile(step.hostId || 0, step.composeFile);
+      }
+      snapshots[step.containerId] = { inspect, composeFileContent, hostId: step.hostId || 0 };
     } catch (e) {
       appendLog(`[warn] Cannot snapshot ${step.containerId}: ${e.message}`);
     }
@@ -298,14 +300,23 @@ async function _applyLocal(jobId, plan) {
   db.prepare(`UPDATE remediation_jobs SET pre_apply_snapshot=? WHERE id=?`).run(snapshotBlob, jobId);
   appendLog(`✓ Snapshotted ${Object.keys(snapshots).length} container(s) for rollback`);
 
-  // Phase 1: live updates (zero downtime)
+  // Phase 1: live updates (zero downtime). Local → child_process;
+  // remote → SSH exec on the target host.
   for (const step of plan.steps) {
     if (!step.liveUpdate) continue;
     appendLog(`⏳ Live update: ${step.containerName} → ${step.liveUpdate}`);
     try {
-      const { execFileSync } = require('child_process');
-      const [cmd, ...args] = step.liveUpdate.split(' ');
-      execFileSync(cmd, args, { encoding: 'utf8' });
+      if (step.hostId && step.hostId > 0) {
+        const sshTunnel = require('./ssh-tunnel');
+        const result = await sshTunnel.exec(step.hostId, step.liveUpdate, { timeoutMs: 30000 });
+        if (result.exitCode !== 0) {
+          throw new Error(`SSH exec exit=${result.exitCode}: ${result.stderr || result.stdout}`);
+        }
+      } else {
+        const { execFileSync } = require('child_process');
+        const [cmd, ...args] = step.liveUpdate.split(' ');
+        execFileSync(cmd, args, { encoding: 'utf8' });
+      }
       appendLog(`✓ ${step.containerName} updated`);
     } catch (e) {
       throw new Error(`Live update failed for ${step.containerName}: ${e.message}`);
@@ -328,17 +339,26 @@ async function _applyLocal(jobId, plan) {
         patchesByService[step.serviceName] = step.composePatch;
       }
 
-      appendLog(`⏳ Writing updated compose file: ${composeFile}`);
-      const diffResult = composeDiff.diffComposeFile(composeFile, patchesByService);
-      fs.writeFileSync(composeFile + '.tmp', diffResult.after, 'utf8');
-      fs.renameSync(composeFile + '.tmp', composeFile);
+      const hostId = steps[0].hostId || 0;
+      appendLog(`⏳ Writing updated compose file: ${composeFile}${hostId ? ` (host ${hostId})` : ''}`);
+      // Read → patch via diffYamlStrings → atomic write (local fs OR SSH sftp)
+      const before = await remoteFs.readFile(hostId, composeFile);
+      const diffResult = composeDiff.diffYamlStrings(before, patchesByService, composeFile);
+      if (hostId > 0) {
+        // SFTP doesn't have an atomic rename on all platforms; for remote we
+        // write the file directly. Concurrent writers are not expected (we
+        // hold the remediate job lock per scope).
+        await remoteFs.writeFile(hostId, composeFile, diffResult.after);
+      } else {
+        fs.writeFileSync(composeFile + '.tmp', diffResult.after, 'utf8');
+        fs.renameSync(composeFile + '.tmp', composeFile);
+      }
       appendLog(`✓ Compose file updated (${steps.length} service(s))`);
 
       // Recreate in topo order with health check
       const YAML = require('yaml');
       const composeDoc = YAML.parse(diffResult.after);
       const services = steps.map(s => s.serviceName);
-      const hostId = steps[0].hostId || 0;
       const docker = dockerService.getDocker(hostId);
 
       await dockerRunner.recreateInOrder({

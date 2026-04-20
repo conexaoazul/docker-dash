@@ -291,6 +291,72 @@ class SshTunnelService {
       client.connect(opts);
     });
   }
+
+  // ─── Remote exec + fs (v6.8.0) ────────────────────────
+  //
+  // For features like the Remediation Wizard's apply-local mode on remote
+  // hosts — needs to read/write compose files over SSH + run shell commands.
+  // Reuses the existing tunnel's ssh2 Client instance. If no tunnel exists,
+  // returns a clear error (caller should ensure the host has a tunnel first).
+
+  async exec(hostId, cmd, { timeoutMs = 30000 } = {}) {
+    const tunnel = this._tunnels.get(hostId);
+    if (!tunnel || !tunnel.client) {
+      throw new Error(`No SSH tunnel for host ${hostId}. Initialize via initSshTunnels() first.`);
+    }
+    return new Promise((resolve, reject) => {
+      const to = setTimeout(() => reject(new Error(`SSH exec timeout after ${timeoutMs}ms: ${cmd}`)), timeoutMs);
+      tunnel.client.exec(cmd, (err, stream) => {
+        if (err) { clearTimeout(to); return reject(err); }
+        let stdout = '';
+        let stderr = '';
+        stream.on('data', (d) => { stdout += d.toString('utf8'); });
+        stream.stderr.on('data', (d) => { stderr += d.toString('utf8'); });
+        stream.on('close', (code) => {
+          clearTimeout(to);
+          resolve({ stdout, stderr, exitCode: typeof code === 'number' ? code : -1 });
+        });
+        stream.on('error', (e) => { clearTimeout(to); reject(e); });
+      });
+    });
+  }
+
+  async fileExists(hostId, remotePath) {
+    // POSIX `test -f` returns 0 if file exists, 1 if not. Quote the path to
+    // defend against spaces. Callers must pass an absolute, already-validated
+    // path — this is NOT a safe interface for user input.
+    const { exitCode } = await this.exec(hostId, `test -f '${remotePath.replace(/'/g, "'\\''")}'`);
+    return exitCode === 0;
+  }
+
+  async readFile(hostId, remotePath) {
+    const tunnel = this._tunnels.get(hostId);
+    if (!tunnel?.client) throw new Error(`No SSH tunnel for host ${hostId}`);
+    return new Promise((resolve, reject) => {
+      tunnel.client.sftp((err, sftp) => {
+        if (err) return reject(err);
+        const chunks = [];
+        const stream = sftp.createReadStream(remotePath);
+        stream.on('data', (c) => chunks.push(c));
+        stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+        stream.on('error', reject);
+      });
+    });
+  }
+
+  async writeFile(hostId, remotePath, content) {
+    const tunnel = this._tunnels.get(hostId);
+    if (!tunnel?.client) throw new Error(`No SSH tunnel for host ${hostId}`);
+    return new Promise((resolve, reject) => {
+      tunnel.client.sftp((err, sftp) => {
+        if (err) return reject(err);
+        const stream = sftp.createWriteStream(remotePath, { mode: 0o644 });
+        stream.on('close', resolve);
+        stream.on('error', reject);
+        stream.end(content, 'utf8');
+      });
+    });
+  }
 }
 
 module.exports = new SshTunnelService();

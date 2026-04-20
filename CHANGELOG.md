@@ -2,6 +2,45 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.8.0] - 2026-04-20 — "Multi-host SSH exec — Remediation Wizard Apply on remote hosts"
+
+Closes a long-standing gap: the Remediation Wizard's **Apply (local)** mode was restricted to the local Docker host. Remote hosts could only use Git-PR or artifact modes. v6.8.0 extends the SSH tunnel with `exec` + SFTP-based file operations, so Apply mode now works transparently on any SSH-connected host.
+
+### Added
+
+- **`src/services/ssh-tunnel.js`** gains 4 new methods on the existing tunnel's `ssh2` Client:
+  - `exec(hostId, cmd, opts)` — returns `{stdout, stderr, exitCode}`, 30s default timeout
+  - `fileExists(hostId, path)` — POSIX `test -f` with shell-escape
+  - `readFile(hostId, path)` — SFTP read, returns utf8 string
+  - `writeFile(hostId, path, content)` — SFTP write, 0o644 mode
+- **`src/services/remote-fs.js`** — thin dispatcher: `hostId=0` → node `fs`, `hostId>0` → ssh-tunnel. Uniform async interface. `fileExists` swallows tunnel errors as `false` for graceful degradation.
+- **`src/services/docker-runner.js`** `composeRecreate(file, service, hostId)` — when `hostId > 0`, runs `docker compose up -d --no-deps --force-recreate <service>` via SSH exec on the target host instead of spawning `docker` locally. 120s timeout.
+- **`src/services/remediate.js`** — `plan()` and `_applyLocal()` use `remote-fs` for compose read/write + `composeDiff.diffYamlStrings` (content-based) instead of `diffComposeFile` (path-based). Snapshot blob now carries `hostId` per container so rollback returns to the correct host even in mixed-host plans (though typical plans are single-host).
+- **`docker-runner.rollback`** — writes rollback content back via `remote-fs` using each snapshot's recorded `hostId`.
+
+### Behavior change (improvement)
+
+Before v6.8.0, `composeFileExists` always returned `false` for remote hosts because `fs.existsSync` only checks the local filesystem. This silently dropped every compose-based remediation on remote hosts (they fell through to "no patch applied"). After v6.8.0, remote compose files are detected and patched identically to local ones.
+
+### Security notes
+
+- Remote file paths are passed through SFTP directly (path-safe).
+- Shell commands in `composeRecreate` quote the compose file path + service name. Service name is constrained to `com.docker.compose.service` label chars at catalog time, no injection surface.
+- No new capabilities required on the target host — reuses the existing SSH credential flow.
+- Remote Docker Dash container still runs without `NET_ADMIN` / `privileged` / host network.
+
+### Tests
+
+- **`src/__tests__/remote-fs.test.js`** — 8 tests: local fs routing for hostId=0/null/undefined, SSH delegation for hostId>0, error-swallow on `fileExists`, error bubble on `readFile`.
+- **`src/__tests__/ssh-tunnel-exec.test.js`** — 8 tests: exec stdout/stderr/exitCode, fileExists true/false, quote-safe paths, readFile streaming, writeFile via SFTP. Mocks `ssh2.Client` — no real SSH server needed.
+- **Total: 664 passing / 45 suites** (+16 new).
+
+### Upgrade notes
+
+Safe drop-in for v6.7.x. No config change needed. Existing local-host Apply mode continues unchanged. Remote-host Apply mode now "just works" if the host is reachable via the standard SSH tunnel config in Multi-Host page.
+
+---
+
 ## [6.7.1] - 2026-04-20 — "Hygiene — native deps + zero lint warnings"
 
 Post-v6.7 housekeeping. No new features, no behavior changes. Two things land:

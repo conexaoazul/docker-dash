@@ -114,10 +114,7 @@ Available major upgrades, deliberately not taken:
 
 ### Multi-host SSH exec channel
 
-**Why deferred:** Preflight A10 flagged this. Current state: Remediation Wizard's Apply mode is local-host only. Remote hosts get Git-PR mode + artifact mode. Adding SSH exec for file read/write would enable local-apply on remote hosts.
-
-**Estimated effort:** 3-4 hours (requires extending `src/services/ssh-tunnel.js`).
-**Proposed approach:** v6.6.1 if user demand materializes.
+**Status (updated 2026-04-20):** ✅ Shipped in v6.8.0. `src/services/ssh-tunnel.js` gained `exec / fileExists / readFile / writeFile`; `src/services/remote-fs.js` dispatches local-vs-remote; `remediate.js` + `docker-runner.js` use remote paths transparently for any `hostId > 0`. Remediation Wizard Apply mode now works end-to-end on remote hosts.
 
 ---
 
