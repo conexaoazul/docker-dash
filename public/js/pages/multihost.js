@@ -10,7 +10,7 @@ const MultiHostPage = {
   _refreshTimer: null,
   _collapsed: {}, // track collapsed stack groups: key = "hostId:stackName" or "stack:stackName"
   _searchFilter: '', // current search string
-  _hostView: 'list', // 'list' | 'tabs'
+  _hostView: 'tabs', // 'list' | 'tabs' — Tab View is the default per user request 2026-04-20
 
   async render(container) {
     container.innerHTML = `

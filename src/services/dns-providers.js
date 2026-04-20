@@ -119,15 +119,210 @@ const PROVIDERS = {
     },
   },
 
-  // ─── Future Tier-1 providers (Route53, DigitalOcean, Hetzner, Linode) ──
-  // Skeleton for Session 2 — left here as documentation, NOT registered yet
-  // until validators + Caddy plugin keys are confirmed. Don't expose half-built
-  // providers in the UI.
-  //
-  // route53:      { ... },
-  // digitalocean: { ... },
-  // hetzner:      { ... },
-  // linode:       { ... },
+  // ─── DigitalOcean ──────────────────────────────────────
+  digitalocean: {
+    id: 'digitalocean',
+    name: 'DigitalOcean',
+    docsUrl: 'https://docs.digitalocean.com/reference/api/create-personal-access-token/',
+    instructionsKey: 'acme.providers.digitalocean.instructions',
+    fields: [
+      {
+        key: 'auth_token',
+        label: 'Personal Access Token (Read+Write scope)',
+        type: 'password',
+        required: true,
+        placeholder: 'dop_v1_...',
+        helpText: 'Create at DigitalOcean Cloud → API → Tokens. Needs the "Write" scope to create DNS records.',
+      },
+    ],
+    caddyConfigKey: 'digitalocean',
+    supportsValidation: true,
+
+    async validate(creds) {
+      if (!creds || !creds.auth_token) return { ok: false, message: 'auth_token is required' };
+      try {
+        const { status, body } = await httpsGetJson(
+          'https://api.digitalocean.com/v2/account',
+          { Authorization: `Bearer ${creds.auth_token}` },
+        );
+        if (status === 401 || status === 403) {
+          return { ok: false, message: 'Token invalid or insufficient permissions' };
+        }
+        if (status !== 200 || !body.account) {
+          return { ok: false, message: `Unexpected response (HTTP ${status})` };
+        }
+        return { ok: true, message: `Token valid (account: ${body.account.email || 'unknown'})` };
+      } catch (e) {
+        return { ok: false, message: `DigitalOcean API unreachable: ${e.message}` };
+      }
+    },
+
+    toCaddyConfig(credentialId) {
+      return {
+        name: 'digitalocean',
+        auth_token: `{file./etc/caddy/secrets/${credentialId}/auth_token}`,
+      };
+    },
+  },
+
+  // ─── Hetzner DNS ───────────────────────────────────────
+  hetzner: {
+    id: 'hetzner',
+    name: 'Hetzner DNS',
+    docsUrl: 'https://docs.hetzner.com/dns-console/dns/general/api-access-token/',
+    instructionsKey: 'acme.providers.hetzner.instructions',
+    fields: [
+      {
+        key: 'api_token',
+        label: 'API Token',
+        type: 'password',
+        required: true,
+        placeholder: '32-char token',
+        helpText: 'Create at Hetzner DNS Console → API tokens. Token has full DNS write access — store securely.',
+      },
+    ],
+    caddyConfigKey: 'hetzner',
+    supportsValidation: true,
+
+    async validate(creds) {
+      if (!creds || !creds.api_token) return { ok: false, message: 'api_token is required' };
+      try {
+        const { status, body } = await httpsGetJson(
+          'https://dns.hetzner.com/api/v1/zones?per_page=1',
+          { 'Auth-API-Token': creds.api_token },
+        );
+        if (status === 401 || status === 403) {
+          return { ok: false, message: 'Token invalid' };
+        }
+        if (status !== 200) {
+          return { ok: false, message: `Unexpected response (HTTP ${status})` };
+        }
+        const zoneCount = body.meta?.pagination?.total_entries ?? (body.zones?.length || 0);
+        return { ok: true, message: `Token valid (${zoneCount} zones accessible)` };
+      } catch (e) {
+        return { ok: false, message: `Hetzner DNS API unreachable: ${e.message}` };
+      }
+    },
+
+    toCaddyConfig(credentialId) {
+      return {
+        name: 'hetzner',
+        api_token: `{file./etc/caddy/secrets/${credentialId}/api_token}`,
+      };
+    },
+  },
+
+  // ─── Linode (Akamai) ───────────────────────────────────
+  linode: {
+    id: 'linode',
+    name: 'Linode (Akamai)',
+    docsUrl: 'https://www.linode.com/docs/products/tools/api/guides/manage-api-tokens/',
+    instructionsKey: 'acme.providers.linode.instructions',
+    fields: [
+      {
+        key: 'api_token',
+        label: 'Personal Access Token (Domains: Read/Write scope)',
+        type: 'password',
+        required: true,
+        placeholder: '64-char hex token',
+        helpText: 'Create at Cloud Manager → My Profile → API Tokens. Limit access to "Domains: Read/Write" only.',
+      },
+    ],
+    caddyConfigKey: 'linode',
+    supportsValidation: true,
+
+    async validate(creds) {
+      if (!creds || !creds.api_token) return { ok: false, message: 'api_token is required' };
+      try {
+        // Use /v4/domains?page_size=1 — proves the token has Domains scope specifically
+        // (rather than just "valid token" via /profile)
+        const { status, body } = await httpsGetJson(
+          'https://api.linode.com/v4/domains?page_size=1',
+          { Authorization: `Bearer ${creds.api_token}` },
+        );
+        if (status === 401) return { ok: false, message: 'Token invalid' };
+        if (status === 403) return { ok: false, message: 'Token lacks Domains:Read scope' };
+        if (status !== 200) return { ok: false, message: `Unexpected response (HTTP ${status})` };
+        return { ok: true, message: `Token valid (${body.results || 0} domains)` };
+      } catch (e) {
+        return { ok: false, message: `Linode API unreachable: ${e.message}` };
+      }
+    },
+
+    toCaddyConfig(credentialId) {
+      return {
+        name: 'linode',
+        api_token: `{file./etc/caddy/secrets/${credentialId}/api_token}`,
+      };
+    },
+  },
+
+  // ─── AWS Route53 ───────────────────────────────────────
+  // Note: Route53 needs AWS Signature V4 which is non-trivial. We delegate
+  // validation to a lighter-weight check that confirms the credentials
+  // PARSE correctly; full validation happens at issuance time when Caddy
+  // attempts to create the TXT record.
+  route53: {
+    id: 'route53',
+    name: 'AWS Route53',
+    docsUrl: 'https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/access-control-managing-permissions.html',
+    instructionsKey: 'acme.providers.route53.instructions',
+    fields: [
+      {
+        key: 'access_key_id',
+        label: 'AWS Access Key ID',
+        type: 'text',
+        required: true,
+        placeholder: 'AKIA...',
+        helpText: 'Create an IAM user with a policy granting route53:ListHostedZones, route53:GetChange, route53:ChangeResourceRecordSets on the specific hosted zone(s).',
+      },
+      {
+        key: 'secret_access_key',
+        label: 'AWS Secret Access Key',
+        type: 'password',
+        required: true,
+        placeholder: '40-char secret',
+      },
+      {
+        key: 'region',
+        label: 'AWS Region',
+        type: 'text',
+        required: false,
+        placeholder: 'us-east-1 (default)',
+        helpText: 'Route53 is global, but the SDK requires a region hint. us-east-1 works fine for most users.',
+      },
+    ],
+    caddyConfigKey: 'route53',
+    supportsValidation: true, // Format-level only — full AWS SigV4 check at issuance time
+
+    // No-op validator — returns ok if fields are non-empty + format-sane.
+    // Full validation happens at issuance time when Caddy tries to create the TXT record.
+    async validate(creds) {
+      if (!creds.access_key_id || !creds.secret_access_key) {
+        return { ok: false, message: 'access_key_id and secret_access_key are required' };
+      }
+      // AWS Access Key IDs start with AKIA (long-lived) or ASIA (session)
+      if (!/^(AKIA|ASIA)[A-Z0-9]{16}$/.test(creds.access_key_id)) {
+        return { ok: false, message: 'Access Key ID format looks wrong (expected AKIA... or ASIA... + 16 chars)' };
+      }
+      if (creds.secret_access_key.length < 30) {
+        return { ok: false, message: 'Secret Access Key looks too short (AWS secrets are 40 chars)' };
+      }
+      return {
+        ok: true,
+        message: 'Credentials parse correctly. Full validation will happen at first cert issuance (we cannot AWS-sign-v4 from here in v6.5).',
+      };
+    },
+
+    toCaddyConfig(credentialId) {
+      return {
+        name: 'route53',
+        access_key_id: `{file./etc/caddy/secrets/${credentialId}/access_key_id}`,
+        secret_access_key: `{file./etc/caddy/secrets/${credentialId}/secret_access_key}`,
+        region: `{file./etc/caddy/secrets/${credentialId}/region}`,
+      };
+    },
+  },
 };
 
 /**

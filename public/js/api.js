@@ -397,6 +397,19 @@ const Api = {
   deploySecretsRemote(data) { return this.post('/system/secrets-wizard/deploy-remote', data); },
   getSecretsDeployLog(jobId) { return this.get('/system/secrets-wizard/deploy-log/' + jobId); },
 
+  // ─── ACME / Let's Encrypt Wizard (v6.5) ──────────
+  acmeListProviders() { return this.get('/system/acme/providers'); },
+  acmeHealth() { return this.get('/system/acme/health'); },
+  acmeListCredentials() { return this.get('/system/acme/credentials'); },
+  acmeCreateCredential(data) { return this.post('/system/acme/credentials', data); },
+  acmeRotateCredential(id, credentials) { return this.patch(`/system/acme/credentials/${id}`, { credentials }); },
+  acmeDeleteCredential(id) { return this.delete(`/system/acme/credentials/${id}`); },
+  acmeValidateCredential(id) { return this.post(`/system/acme/credentials/${id}/validate`); },
+  acmeIssue(data) { return this.post('/system/acme/issue', data); },
+  acmeJob(jobId) { return this.get(`/system/acme/jobs/${jobId}`); },
+  acmeListManagedCerts() { return this.get('/system/acme/managed-certs'); },
+  acmeRemoveCert(domain) { return this.delete(`/system/acme/cert/${encodeURIComponent(domain)}`); },
+
   // ─── Certificate Management ──────────────────────
   getTrackedCertificates() { return this.get('/system/certificates'); },
   addTrackedCertificate(data) { return this.post('/system/certificates', data); },

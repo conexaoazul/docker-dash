@@ -86,6 +86,66 @@ describe('dns-providers — Cloudflare provider', () => {
   });
 });
 
+describe('dns-providers — Tier 1 coverage', () => {
+  const TIER1 = ['cloudflare', 'route53', 'digitalocean', 'hetzner', 'linode'];
+
+  it.each(TIER1)('Tier 1 provider %s is registered', (id) => {
+    const p = dnsProviders.get(id);
+    expect(p).toBeTruthy();
+    expect(p.id).toBe(id);
+  });
+
+  it.each(TIER1)('Tier 1 provider %s — toCaddyConfig produces valid file substitutions', (id) => {
+    const cfg = dnsProviders.toCaddyConfig(id, 99);
+    expect(cfg.name).toBe(id === 'linode' ? 'linode' : id);
+    // Every value must be a file substitution (no plaintext secrets in returned config)
+    for (const [key, value] of Object.entries(cfg)) {
+      if (key === 'name') continue;
+      expect(value).toMatch(/^\{file\.\/etc\/caddy\/secrets\/99\//);
+    }
+  });
+
+  it('list() includes all 5 Tier-1 providers', () => {
+    const ids = dnsProviders.list().map((p) => p.id).sort();
+    expect(ids).toEqual([...TIER1].sort());
+  });
+});
+
+describe('dns-providers — Route53 format checks (no live API)', () => {
+  it('rejects missing access_key_id', async () => {
+    const r = await dnsProviders.validate('route53', { secret_access_key: 'x'.repeat(40) });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/access_key_id/);
+  });
+
+  it('rejects bad-format access_key_id', async () => {
+    const r = await dnsProviders.validate('route53', {
+      access_key_id: 'INVALID-FORMAT',
+      secret_access_key: 'x'.repeat(40),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/Access Key ID format/);
+  });
+
+  it('rejects too-short secret_access_key', async () => {
+    const r = await dnsProviders.validate('route53', {
+      access_key_id: 'AKIAABCDEFGHIJKLMNOP',
+      secret_access_key: 'too-short',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/too short/);
+  });
+
+  it('accepts properly-formatted credentials (no live AWS check in v6.5)', async () => {
+    const r = await dnsProviders.validate('route53', {
+      access_key_id: 'AKIAABCDEFGHIJKLMNOP',
+      secret_access_key: 'a'.repeat(40),
+    });
+    expect(r.ok).toBe(true);
+    expect(r.message).toMatch(/parse correctly/);
+  });
+});
+
 describe('dns-providers — error paths', () => {
   it('toCaddyConfig throws on unknown provider', () => {
     expect(() => dnsProviders.toCaddyConfig('not-a-provider', 1)).toThrow();
