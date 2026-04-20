@@ -397,6 +397,14 @@ const Api = {
   deploySecretsRemote(data) { return this.post('/system/secrets-wizard/deploy-remote', data); },
   getSecretsDeployLog(jobId) { return this.get('/system/secrets-wizard/deploy-log/' + jobId); },
 
+  // ─── Remediation Wizard (v6.6) ────────────────────
+  remediateListCodes() { return this.get('/remediate/findings/codes'); },
+  remediatePlan(data) { return this.post('/remediate/plan', data); },
+  remediateApply(data) { return this.post('/remediate/apply', data); },
+  remediateJob(jobId) { return this.get(`/remediate/job/${jobId}`); },
+  remediateRollback(jobId) { return this.post(`/remediate/job/${jobId}/rollback`); },
+  remediateListJobs(limit) { return this.get(`/remediate/jobs${limit ? '?limit=' + limit : ''}`); },
+
   // ─── ACME / Let's Encrypt Wizard (v6.5) ──────────
   acmeListProviders() { return this.get('/system/acme/providers'); },
   acmeHealth() { return this.get('/system/acme/health'); },

@@ -1,0 +1,384 @@
+'use strict';
+
+// Remediation Orchestrator — v6.6
+// See docs/planning/v6.6/remediation-wizard/01-feature-spec.md §4 + 02-deep-spec.md §1-4
+
+const crypto = require('crypto');
+const fs = require('fs');
+const zlib = require('zlib');
+const log = require('../utils/logger')('remediate');
+const { getDb } = require('../db');
+const dockerService = require('../services/docker');
+const catalog = require('./remediation-catalog');
+const composeDiff = require('./compose-diff');
+
+// ─── Planning ──────────────────────────────────────────
+
+/**
+ * Build a remediation plan for one or more containers.
+ * @param {object} args
+ * @param {Array<{id: string, hostId: number}>} args.containers
+ * @param {string[]} args.findings - catalog codes to apply
+ * @returns {Promise<object>} plan
+ */
+async function plan({ containers, findings }) {
+  if (!Array.isArray(containers) || containers.length === 0) {
+    throw new Error('containers array required');
+  }
+  if (!Array.isArray(findings) || findings.length === 0) {
+    throw new Error('findings array required');
+  }
+
+  const steps = [];
+  const warnings = [];
+  let totalDowntimeMs = 0;
+  let gitBacked = false;
+
+  for (const ref of containers) {
+    const docker = dockerService.getDocker(ref.hostId || 0);
+    let inspect;
+    try {
+      inspect = await docker.getContainer(ref.id).inspect();
+    } catch (e) {
+      warnings.push(`Cannot inspect ${ref.id}: ${e.message}`);
+      continue;
+    }
+
+    // Augment with live stats for memory heuristics
+    try {
+      const statsStream = await docker.getContainer(ref.id).stats({ stream: false });
+      inspect._stats = statsStream;
+    } catch { /* stats optional */ }
+
+    const labels = inspect.Config?.Labels || {};
+    const composeFile = labels['com.docker.compose.project.config_files']?.split(',')[0] || null;
+    const serviceName = labels['com.docker.compose.service'] || null;
+    const stackName = labels['com.docker.compose.project'] || null;
+
+    // If multiple compose files, warn
+    if (labels['com.docker.compose.project.config_files']?.includes(',')) {
+      warnings.push(`Container ${inspect.Name} is part of a multi-file compose project; only the first file is supported in v6.6.`);
+    }
+
+    const composeFileExists = composeFile ? fs.existsSync(composeFile) : false;
+    let composeServiceBlock = null;
+    let parsedComposeBefore = null;
+    if (composeFileExists && serviceName) {
+      try {
+        const YAML = require('yaml');
+        parsedComposeBefore = fs.readFileSync(composeFile, 'utf8');
+        const doc = YAML.parseDocument(parsedComposeBefore);
+        composeServiceBlock = doc.getIn(['services', serviceName])?.toJSON?.() || null;
+      } catch (e) {
+        warnings.push(`Cannot parse compose file ${composeFile}: ${e.message}`);
+      }
+    }
+
+    // Collect patches + CLI commands for this container
+    const compiledPatch = {};
+    const cliCommands = [];
+    let liveUpdateCmd = null;
+    const appliedFindings = [];
+    let requiresRecreation = false;
+    let estimatedDowntimeMs = 0;
+
+    for (const code of findings) {
+      const entry = catalog.get(code);
+      if (!entry) continue;
+      if (!entry.applies(inspect)) continue;  // not applicable to this container
+
+      const result = entry.plan(inspect, composeServiceBlock);
+      appliedFindings.push({
+        code,
+        title: entry.title,
+        severity: entry.severity,
+        liveUpdatable: entry.liveUpdatable,
+        requiresRecreation: entry.requiresRecreation,
+        riskLevel: entry.riskLevel,
+        riskNotes: entry.riskNotes,
+        notes: result.notes,
+      });
+
+      // Merge compose patches
+      Object.assign(compiledPatch, mergePatch(compiledPatch, result.composePatch));
+
+      // CLI commands (live updates collated separately)
+      if (result.cliCommands) cliCommands.push(...result.cliCommands);
+      if (result.liveUpdate) {
+        if (liveUpdateCmd) {
+          // Merge multiple docker update flags into one command
+          liveUpdateCmd = mergeDockerUpdateFlags(liveUpdateCmd, result.liveUpdate);
+        } else {
+          liveUpdateCmd = result.liveUpdate;
+        }
+      }
+
+      if (entry.requiresRecreation) {
+        requiresRecreation = true;
+        estimatedDowntimeMs = Math.max(estimatedDowntimeMs, 3000);
+      }
+    }
+
+    totalDowntimeMs += estimatedDowntimeMs;
+
+    // Generate diff if we have a compose file + non-empty patch
+    let diff = null;
+    if (composeFileExists && serviceName && Object.keys(compiledPatch).length > 0) {
+      try {
+        const diffResult = composeDiff.diffComposeFile(composeFile, { [serviceName]: compiledPatch });
+        diff = diffResult.unified;
+      } catch (e) {
+        warnings.push(`Cannot diff compose for ${inspect.Name}: ${e.message}`);
+      }
+    }
+
+    // Git-backed detection (labels may include git info; fallback via stacks table)
+    const db = getDb();
+    if (stackName) {
+      try {
+        const stackRow = db.prepare('SELECT git_repo_id FROM git_stacks WHERE stack_name = ? LIMIT 1').get(stackName);
+        if (stackRow?.git_repo_id) gitBacked = true;
+      } catch { /* table may not exist pre-v6 */ }
+    }
+
+    steps.push({
+      containerId: inspect.Id,
+      containerName: inspect.Name?.replace(/^\//, ''),
+      hostId: ref.hostId || 0,
+      stackName,
+      serviceName,
+      composeFile,
+      composeFileExists,
+      findings: appliedFindings,
+      composePatch: compiledPatch,
+      cliCommands,
+      liveUpdate: liveUpdateCmd,
+      diff,
+      requiresRecreation,
+      estimatedDowntimeMs,
+    });
+  }
+
+  const planObj = {
+    planId: null,  // set by caller if persisting
+    steps,
+    totalDowntimeMs,
+    gitBacked,
+    warnings,
+    generatedAt: new Date().toISOString(),
+  };
+
+  // Assign a stable SHA-256 as planId
+  planObj.planId = crypto.createHash('sha256')
+    .update(JSON.stringify({ steps: planObj.steps, totalDowntimeMs }))
+    .digest('hex').substring(0, 16);
+
+  return planObj;
+}
+
+// ─── Apply ─────────────────────────────────────────────
+
+/**
+ * Create a remediation_jobs row + kick off async apply.
+ * @param {object} args { plan, mode, userId, hostId, scope }
+ * @returns {{jobId: number}}
+ */
+function createJob({ plan, mode, userId, hostId, scope }) {
+  const db = getDb();
+
+  // Concurrency: refuse if another job is running for the same scope
+  const existing = db.prepare(`
+    SELECT id FROM remediation_jobs
+    WHERE status IN ('pending', 'running')
+      AND scope_type = ?
+      AND scope_id = ?
+      AND host_id = ?
+    LIMIT 1
+  `).get(scope.type, scope.id, hostId || 0);
+  if (existing) {
+    const err = new Error(`A remediation is already in progress for ${scope.type}:${scope.id} (job ${existing.id})`);
+    err.code = 'CONCURRENT_JOB';
+    err.existingJobId = existing.id;
+    throw err;
+  }
+
+  const result = db.prepare(`
+    INSERT INTO remediation_jobs
+      (mode, scope_type, scope_id, host_id, plan_json, status, created_by)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?)
+  `).run(mode, scope.type, String(scope.id), hostId || 0, JSON.stringify(plan), userId || null);
+
+  return { jobId: result.lastInsertRowid };
+}
+
+/**
+ * Execute a remediation job asynchronously. Returns immediately with a runner promise.
+ * Caller should not await — the runner updates the DB as it progresses.
+ *
+ * NOTE: Session 1 scope — this is the SKELETON. Full recreate logic + health checks +
+ * rollback land in Session 2 alongside docker-runner.js.
+ */
+async function runJob(jobId) {
+  const db = getDb();
+  const job = db.prepare('SELECT * FROM remediation_jobs WHERE id = ?').get(jobId);
+  if (!job) throw new Error(`Job ${jobId} not found`);
+  if (job.status !== 'pending') throw new Error(`Job ${jobId} is ${job.status}, not pending`);
+
+  const plan = JSON.parse(job.plan_json);
+
+  db.prepare(`UPDATE remediation_jobs SET status='running', started_at=datetime('now') WHERE id=?`).run(jobId);
+  log.info('Remediation job started', { jobId, mode: job.mode });
+
+  try {
+    if (job.mode === 'apply-local') {
+      await _applyLocal(jobId, plan);
+    } else if (job.mode === 'pr') {
+      await _openPr(jobId, plan);
+    } else if (job.mode === 'artifact') {
+      // Artifact mode doesn't actually apply — just marks success so UI can download
+      db.prepare(`UPDATE remediation_jobs SET status='success', completed_at=datetime('now'), output='Artifact ready for download' WHERE id=?`).run(jobId);
+    } else {
+      throw new Error(`Unknown mode: ${job.mode}`);
+    }
+  } catch (e) {
+    log.error('Remediation job failed', { jobId, error: e.message });
+    db.prepare(`
+      UPDATE remediation_jobs
+      SET status='failed', error_class=?, output=?, completed_at=datetime('now')
+      WHERE id=?
+    `).run(_classifyError(e), (db.prepare('SELECT output FROM remediation_jobs WHERE id=?').get(jobId).output || '') + '\n[ERROR] ' + e.message, jobId);
+  }
+}
+
+async function _applyLocal(jobId, plan) {
+  const db = getDb();
+  const output = [];
+  const appendLog = (line) => {
+    output.push(line);
+    db.prepare(`UPDATE remediation_jobs SET output=?, current_step=? WHERE id=?`).run(output.join('\n'), line, jobId);
+  };
+
+  // Snapshot pre-apply state for rollback
+  const snapshots = {};
+  for (const step of plan.steps) {
+    try {
+      const docker = dockerService.getDocker(step.hostId || 0);
+      const inspect = await docker.getContainer(step.containerId).inspect();
+      snapshots[step.containerId] = {
+        inspect,
+        composeFileContent: step.composeFileExists && step.composeFile
+          ? fs.readFileSync(step.composeFile, 'utf8')
+          : null,
+      };
+    } catch (e) {
+      appendLog(`[warn] Cannot snapshot ${step.containerId}: ${e.message}`);
+    }
+  }
+  const snapshotBlob = zlib.gzipSync(JSON.stringify(snapshots)).toString('base64');
+  db.prepare(`UPDATE remediation_jobs SET pre_apply_snapshot=? WHERE id=?`).run(snapshotBlob, jobId);
+  appendLog(`✓ Snapshotted ${Object.keys(snapshots).length} container(s) for rollback`);
+
+  // Phase 1: live updates (zero downtime)
+  for (const step of plan.steps) {
+    if (!step.liveUpdate) continue;
+    appendLog(`⏳ Live update: ${step.containerName} → ${step.liveUpdate}`);
+    try {
+      const { execFileSync } = require('child_process');
+      const [cmd, ...args] = step.liveUpdate.split(' ');
+      execFileSync(cmd, args, { encoding: 'utf8' });
+      appendLog(`✓ ${step.containerName} updated`);
+    } catch (e) {
+      throw new Error(`Live update failed for ${step.containerName}: ${e.message}`);
+    }
+  }
+
+  // Phase 2: compose rewrite + recreate (TODO Session 2 — just write the files for now)
+  for (const step of plan.steps) {
+    if (!step.requiresRecreation || !step.composeFileExists) continue;
+    appendLog(`⏳ Writing updated compose file for ${step.containerName}: ${step.composeFile}`);
+    try {
+      const diffResult = composeDiff.diffComposeFile(step.composeFile, { [step.serviceName]: step.composePatch });
+      fs.writeFileSync(step.composeFile + '.tmp', diffResult.after, 'utf8');
+      fs.renameSync(step.composeFile + '.tmp', step.composeFile);
+      appendLog(`✓ Compose file updated`);
+      appendLog(`⚠ Container recreation not implemented in Session 1 — file on disk is updated. Run 'docker compose up -d --no-deps ${step.serviceName}' manually in ${step.composeFile.replace(/\/[^/]+$/, '')}.`);
+    } catch (e) {
+      throw new Error(`Compose update failed for ${step.containerName}: ${e.message}`);
+    }
+  }
+
+  db.prepare(`
+    UPDATE remediation_jobs
+    SET status='success', completed_at=datetime('now'),
+        rollback_deadline=datetime('now', '+60 seconds')
+    WHERE id=?
+  `).run(jobId);
+  appendLog(`✓ Job complete`);
+  log.info('Remediation job succeeded', { jobId });
+}
+
+async function _openPr(_jobId, _plan) {
+  throw new Error('Git-PR mode not yet implemented (Session 3)');
+}
+
+function _classifyError(err) {
+  const msg = (err.message || '').toLowerCase();
+  if (msg.includes('docker') && msg.includes('not found')) return 'docker';
+  if (msg.includes('compose')) return 'compose';
+  if (msg.includes('git')) return 'git';
+  if (msg.includes('timeout')) return 'timeout';
+  if (msg.includes('health')) return 'health';
+  return 'other';
+}
+
+// ─── Helpers ───────────────────────────────────────────
+
+/**
+ * Merge two patch objects. Used when multiple findings on the same container
+ * produce overlapping patches (e.g., both no-new-privileges and dangerous-caps
+ * touch `security_opt` / `cap_add`).
+ */
+function mergePatch(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const out = { ...a };
+  for (const [k, v] of Object.entries(b)) {
+    if (v === null) {
+      out[k] = null;
+    } else if (v && typeof v === 'object' && v.$add && out[k]?.$add) {
+      out[k] = { $add: [...new Set([...out[k].$add, ...v.$add])] };
+    } else if (v && typeof v === 'object' && v.$remove && out[k]?.$remove) {
+      out[k] = { $remove: [...new Set([...out[k].$remove, ...v.$remove])] };
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+/**
+ * Merge two `docker update ...` commands into one.
+ * Example: "docker update --memory 512m abc" + "docker update --cpus 1 abc"
+ *       → "docker update --memory 512m --cpus 1 abc"
+ */
+function mergeDockerUpdateFlags(cmdA, cmdB) {
+  const parseFlags = (cmd) => {
+    const parts = cmd.split(/\s+/);
+    const containerId = parts[parts.length - 1];
+    const flags = parts.slice(2, -1);  // skip "docker", "update", last (container ID)
+    return { flags, containerId };
+  };
+  const a = parseFlags(cmdA);
+  const b = parseFlags(cmdB);
+  if (a.containerId !== b.containerId) return cmdA;  // different containers, can't merge
+  return `docker update ${a.flags.join(' ')} ${b.flags.join(' ')} ${a.containerId}`;
+}
+
+module.exports = {
+  plan,
+  createJob,
+  runJob,
+  _classifyError,
+  mergePatch,
+  mergeDockerUpdateFlags,
+};
