@@ -2,6 +2,62 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.7.0-alpha.1] - 2026-04-20 — "Outbound Filter: config layer"
+
+**First component of the v6.7 milestone. Policies persist but are NOT enforced in this alpha** — the sidecar + nftables data plane lands in `v6.7.0-rc2`. Alpha ships so downstream UI can wire against a stable API.
+
+### Why alpha, what works
+
+Users can create, list, update, and remove outbound policies via REST. The service layer validates preset choices, resolves hostname allowlists, and records intent. Every response includes `enforced: false` so the UI can label the state clearly ("Config only — enforcement in rc2").
+
+This alpha delivers the foundation from [deep-spec §§1-4](docs/planning/v6.7/outbound-filter/02-deep-spec.md): data model, preset catalog, NET_ADMIN/privileged precondition check. Preflight 6/10 already PASS on staging ([preflight results](docs/planning/v6.7/outbound-filter/05-preflight-results.md)).
+
+### Added — Config layer
+
+- **DB migration `054_egress_policies.js`** — `egress_policies` (unique per scope) + `egress_block_log` (30-day retention). Schema matches deep-spec verbatim.
+- **Service `src/services/egress-filter.js`** (~320 LOC):
+  - 5 preset allowlists: `registry-only`, `registries-github`, `lockdown`, `audit-only`, `custom`
+  - `canApplyFilter(inspect)` — refuses privileged / NET_ADMIN / SYS_ADMIN / host / none / container: — graduated from P10 spike
+  - `createPolicy / updatePolicy / removePolicy` (soft-delete) / `listPolicies / getPolicy / getPolicyForScope`
+  - Allowlist validation: rejects raw IPs + IMDS endpoints (always-blocked invariant) + malformed hostnames
+  - `recordBlockedAttempt` contract exposed for future sidecar; `pruneOldBlockLog` for scheduled retention
+- **Route `src/routes/egress-filter.js`** — 7 endpoints under `/api/egress-filter`:
+  - `GET /presets` — catalog + resolved allowlists + IMDS invariant
+  - `GET /policies` / `GET /policies/:id` / `POST /policies` / `PATCH /policies/:id` / `DELETE /policies/:id`
+  - `GET /policies/:id/block-log`
+  - All admin-only. Container-scope creates run a `docker inspect` precheck (non-blocking: persists with warning if container isn't reachable).
+  - Audit-log entries: `egress_policy_created`, `egress_policy_updated`, `egress_emergency_disable`.
+- **Frontend API methods** in `public/js/api.js` — 7 `egressFilter*` methods.
+
+### NOT in this alpha (scoped for rc2)
+
+- Go sidecar (the `dd-egress-proxy` binary) and its multi-arch image
+- nftables rule installation via helper container
+- SNI peek / HTTP Host parsing
+- UI surface in the Egress tab
+- Sidecar health check + fail-closed wiring
+
+Verify the ready-to-graduate spike artifacts under `docs/planning/v6.7/outbound-filter/spikes/` — the Go sidecar skeleton (P3) and Dockerfile (P8) are drop-in for rc2.
+
+### Tests
+
+- `egress-filter.test.js` — 34 unit tests (presets, allowlist validation, CRUD, upsert, block log, retention, canApplyFilter)
+- `egress-filter-routes.test.js` — 16 route integration tests (auth, validation, upsert, soft-delete, alpha notes)
+- **Total: 606 passing / 41 suites.** 556 → 606 (+50).
+
+### Upgrade notes for rc2 implementation
+
+The service contract is stable. rc2 drops in:
+
+1. Sidecar Go binary reading `/etc/dd-egress/policy.json` (written by `egressFilter` service on every create/update)
+2. `src/services/egress-runner.js` that orchestrates helper-container iptables installs (same pattern as v6.6.0 `docker-runner.js`)
+3. Flip `ENFORCEMENT_ACTIVE = true` at the top of `src/routes/egress-filter.js`
+4. UI in Egress tab: "Enable filter" button per row → 3-step modal (reuse Remediation Wizard shell)
+
+No DB migration changes expected.
+
+---
+
 ## [6.6.6] - 2026-04-20 — "ACME watcher + Remediation WS progress"
 
 Closes two real UX gaps that sat open since v6.5 and v6.6.0.

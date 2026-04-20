@@ -365,6 +365,20 @@ const Api = {
   // ─── Egress Audit ─────────────────────────────────────
   getEgressAudit() { return this.get('/system/egress-audit'); },
 
+  // ─── Egress Filter (v6.7 alpha.1: config only, no enforcement yet) ──
+  egressFilterPresets()                { return this.get('/egress-filter/presets'); },
+  egressFilterListPolicies(hostId)     { return this.get(`/egress-filter/policies${hostId != null ? `?hostId=${hostId}` : ''}`); },
+  egressFilterGetPolicy(id)            { return this.get(`/egress-filter/policies/${id}`); },
+  egressFilterCreatePolicy(body)       { return this.post('/egress-filter/policies', body); },
+  egressFilterUpdatePolicy(id, body)   { return this.patch(`/egress-filter/policies/${id}`, body); },
+  egressFilterDeletePolicy(id, reason) { return this.delete(`/egress-filter/policies/${id}`, { reason }); },
+  egressFilterBlockLog(id, opts = {}) {
+    const q = [];
+    if (opts.limit != null) q.push(`limit=${opts.limit}`);
+    if (opts.sinceId != null) q.push(`sinceId=${opts.sinceId}`);
+    return this.get(`/egress-filter/policies/${id}/block-log${q.length ? '?' + q.join('&') : ''}`);
+  },
+
   // ─── Secrets Wizard ───────────────────────────────────
   analyzeSecretsWizard(envContent) { return this.post('/system/secrets-wizard/analyze', { envContent }); },
   generateSecretsScript(data) {

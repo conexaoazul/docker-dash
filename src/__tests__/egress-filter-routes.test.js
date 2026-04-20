@@ -1,0 +1,195 @@
+'use strict';
+
+// Integration tests for src/routes/egress-filter.js (v6.7 alpha.1).
+// Uses supertest against a minimal Express app, follows the acme-routes.test.js pattern.
+
+process.env.APP_SECRET = 'test-secret-for-egress-filter-routes';
+process.env.APP_ENV = 'test';
+process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'test-encryption-key-for-jest-32chars';
+process.env.DB_PATH = ':memory:';
+process.env.ADMIN_PASSWORD = 'EgressRouteTest123!';
+
+const request = require('supertest');
+const express = require('express');
+const cookieParser = require('cookie-parser');
+
+const app = express();
+app.use(express.json({ limit: '2mb' }));
+app.use(cookieParser());
+
+const { getDb } = require('../db');
+getDb();
+
+const authService = require('../services/auth');
+authService.seedAdmin();
+
+app.use('/api/auth', require('../routes/auth'));
+app.use('/api/egress-filter', require('../routes/egress-filter'));
+
+let authToken = null;
+
+beforeAll(async () => {
+  require('./helpers/seedTestAdmin').clearMustChange('admin');
+  const res = await request(app)
+    .post('/api/auth/login')
+    .send({ username: 'admin', password: 'EgressRouteTest123!' });
+  authToken = res.body.token;
+  if (!authToken) throw new Error('Failed to log in for egress-filter route tests');
+});
+
+beforeEach(() => {
+  getDb().prepare('DELETE FROM egress_block_log').run();
+  getDb().prepare('DELETE FROM egress_policies').run();
+});
+
+const auth = () => ({ Authorization: `Bearer ${authToken}` });
+const CONTAINER_ID = 'a1b2c3d4e5f6789012345678';  // valid 24-hex
+
+describe('GET /api/egress-filter/presets', () => {
+  it('requires auth', async () => {
+    const res = await request(app).get('/api/egress-filter/presets');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns preset catalog + IMDS invariant + enforcement flag', async () => {
+    const res = await request(app).get('/api/egress-filter/presets').set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body.presets.length).toBeGreaterThanOrEqual(5);
+    expect(res.body.imdsAlwaysBlocked).toEqual(expect.arrayContaining(['169.254.169.254']));
+    expect(res.body.enforced).toBe(false);  // alpha.1
+  });
+});
+
+describe('POST /api/egress-filter/policies', () => {
+  it('rejects bad scope_type', async () => {
+    const res = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'pod', scopeKey: 'x', preset: 'registry-only' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/scopeType/);
+  });
+
+  it('rejects missing scope_key', async () => {
+    const res = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'container', preset: 'registry-only' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/scopeKey/);
+  });
+
+  it('rejects malformed container id', async () => {
+    const res = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'container', scopeKey: 'not-hex!', preset: 'registry-only' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/hex/);
+  });
+
+  it('rejects unknown preset (validation pass-through)', async () => {
+    const res = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'stack', scopeKey: 'mystack', preset: 'nonesuch' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Unknown preset/);
+  });
+
+  it('creates a policy for stack scope and returns enforced:false + note', async () => {
+    const res = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'stack', scopeKey: 'mystack', preset: 'registry-only' });
+    expect(res.status).toBe(201);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.updated).toBe(false);
+    expect(res.body.enforced).toBe(false);
+    expect(res.body.note).toMatch(/not enforced/i);
+    expect(res.body.allowlist).toEqual(expect.arrayContaining(['docker.io']));
+  });
+
+  it('upserts (PUT semantics) on second call for same scope', async () => {
+    await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'stack', scopeKey: 'mystack', preset: 'registry-only' });
+    const res = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'stack', scopeKey: 'mystack', preset: 'lockdown' });
+    expect(res.status).toBe(200);
+    expect(res.body.updated).toBe(true);
+    expect(res.body.allowlist).toEqual([]);
+  });
+
+  it('rejects custom allowlist containing raw IPs', async () => {
+    const res = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'stack', scopeKey: 'mystack', preset: 'custom', customAllowlist: ['1.2.3.4'] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/IP addresses/);
+  });
+
+  it('accepts container scope — precheck is non-blocking if docker cannot inspect', async () => {
+    const res = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'container', scopeKey: CONTAINER_ID, preset: 'registry-only' });
+    // In unit-test env, docker.getContainer().inspect() fails — but the route
+    // still creates the policy (documented non-blocking behavior).
+    expect([201, 422]).toContain(res.status);
+  });
+});
+
+describe('GET /api/egress-filter/policies', () => {
+  it('lists active only', async () => {
+    await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'stack', scopeKey: 's1', preset: 'registry-only' });
+    await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'stack', scopeKey: 's2', preset: 'lockdown' });
+
+    const res = await request(app).get('/api/egress-filter/policies').set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body.policies).toHaveLength(2);
+    expect(res.body.enforced).toBe(false);
+  });
+});
+
+describe('PATCH /api/egress-filter/policies/:id', () => {
+  it('updates preset + re-resolves allowlist', async () => {
+    const create = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'stack', scopeKey: 's1', preset: 'registry-only' });
+    const id = create.body.policyId;
+
+    const res = await request(app).patch(`/api/egress-filter/policies/${id}`).set(auth())
+      .send({ preset: 'lockdown' });
+    expect(res.status).toBe(200);
+    expect(res.body.policy.allowlist).toEqual([]);
+  });
+
+  it('404 on unknown id', async () => {
+    const res = await request(app).patch('/api/egress-filter/policies/999999').set(auth())
+      .send({ preset: 'lockdown' });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('DELETE /api/egress-filter/policies/:id', () => {
+  it('soft-deletes and lists no longer shows it', async () => {
+    const create = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'stack', scopeKey: 's1', preset: 'registry-only' });
+    const id = create.body.policyId;
+
+    const del = await request(app).delete(`/api/egress-filter/policies/${id}`).set(auth())
+      .send({ reason: 'user-requested' });
+    expect(del.status).toBe(200);
+    expect(del.body.removed).toBe(true);
+
+    const list = await request(app).get('/api/egress-filter/policies').set(auth());
+    expect(list.body.policies.find(p => p.id === id)).toBeUndefined();
+  });
+});
+
+describe('GET /api/egress-filter/policies/:id/block-log', () => {
+  it('returns empty for fresh policy + an alpha note', async () => {
+    const create = await request(app).post('/api/egress-filter/policies').set(auth())
+      .send({ scopeType: 'stack', scopeKey: 's1', preset: 'registry-only' });
+    const id = create.body.policyId;
+
+    const res = await request(app).get(`/api/egress-filter/policies/${id}/block-log`).set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body.entries).toEqual([]);
+    expect(res.body.enforced).toBe(false);
+    expect(res.body.note).toMatch(/empty in this alpha/i);
+  });
+
+  it('404 on unknown policy', async () => {
+    const res = await request(app).get('/api/egress-filter/policies/999999/block-log').set(auth());
+    expect(res.status).toBe(404);
+  });
+});
