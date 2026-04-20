@@ -269,8 +269,27 @@ async function start() {
   wsServer.attach(server);
 
   // Wire WS broadcaster into services that publish job progress
-  require('./services/acme').setWsBroadcaster(
+  const acmeService = require('./services/acme');
+  acmeService.setWsBroadcaster(
     (channel, data) => wsServer.broadcast('acme:job:update', data, channel)
+  );
+
+  // ACME watcher: transitions stuck 'running' jobs to success/failed so the
+  // LE Wizard UI doesn't hang indefinitely.
+  const acmeWatcher = require('./services/acme-watcher');
+  acmeWatcher.setPublishUpdate((jobId) => {
+    try {
+      const row = require('./db').getDb().prepare(
+        'SELECT id, status, error_class, output, started_at, completed_at FROM acme_jobs WHERE id = ?'
+      ).get(jobId);
+      if (row) wsServer.broadcast('acme:job:update', row, `acme:job:${jobId}`);
+    } catch { /* non-fatal */ }
+  });
+  acmeWatcher.start();
+
+  // Remediation Wizard — per-job WS progress
+  require('./services/remediate').setWsBroadcaster(
+    (channel, data) => wsServer.broadcast('remediate:job:update', data, channel)
   );
 
   // Start stats collector

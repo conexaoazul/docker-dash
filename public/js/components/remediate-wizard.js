@@ -336,24 +336,38 @@ const RemediateWizard = {
 
     const _startPoll = () => {
       if (state.pollTimer) clearInterval(state.pollTimer);
+
+      const onUpdate = (job) => {
+        state.jobStatus = job.status;
+        state.jobOutput = job.output || state.jobOutput;
+        render();
+        if (['success', 'failed', 'rolled_back'].includes(job.status)) {
+          if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+          if (state.wsUnsub) { state.wsUnsub(); state.wsUnsub = null; }
+          const msg = job.status === 'success' ? 'Remediation succeeded'
+            : job.status === 'failed' ? 'Remediation failed: ' + (job.errorClass || job.error_class || 'unknown')
+            : 'Rollback complete';
+          (job.status === 'success' ? Toast.success : job.status === 'failed' ? Toast.error : Toast.warning)(msg);
+        }
+      };
+
+      // WS-first: subscribe to per-job channel so user sees live progress text.
+      if (typeof WS !== 'undefined' && WS.subscribe) {
+        WS.subscribe(`remediate:job:${state.jobId}`);
+        state.wsUnsub = WS.on('remediate:job:update', (data) => {
+          if (data && Number(data.id) === Number(state.jobId)) onUpdate(data);
+        });
+      }
+      // Fallback poll every 10s — safety net if WS drops.
       state.pollTimer = setInterval(async () => {
         try {
           const job = await Api.remediateJob(state.jobId);
-          state.jobStatus = job.status;
-          state.jobOutput = job.output || '';
-          render();
-          if (['success', 'failed', 'rolled_back'].includes(job.status)) {
-            clearInterval(state.pollTimer); state.pollTimer = null;
-            const msg = job.status === 'success' ? 'Remediation succeeded'
-              : job.status === 'failed' ? 'Remediation failed: ' + (job.errorClass || 'unknown')
-              : 'Rollback complete';
-            (job.status === 'success' ? Toast.success : job.status === 'failed' ? Toast.error : Toast.warning)(msg);
-          }
+          onUpdate(job);
         } catch (err) {
           state.jobOutput += '\n[poll error] ' + err.message;
           render();
         }
-      }, 2500);
+      }, 10000);
     };
 
     render();

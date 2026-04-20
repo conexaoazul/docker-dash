@@ -2,6 +2,31 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.6.6] - 2026-04-20 — "ACME watcher + Remediation WS progress"
+
+Closes two real UX gaps that sat open since v6.5 and v6.6.0.
+
+### Added — ACME watcher
+
+- **New background service** `src/services/acme-watcher.js` transitions stuck `running` LE jobs to `success` or `failed`. Previously the job status was set to `running` when Caddy accepted the policy but never moved forward — the UI sat waiting forever. Now:
+  - After a **60s grace period**, the watcher checks that the Caddy policy for this job's domains still exists (via the admin-API `findAcmePolicyIndex`). Present → `success`. Missing → `failed` with `error_class: policy-removed`.
+  - **Hard timeout at 10 min** → `failed` with `error_class: timeout`.
+  - Polls every 10s. Resilient to Caddy unreachability (leaves the job in `running`, retries next tick).
+  - Publishes each state change via the v6.6.5 WS channel so the frontend sees transitions in real time.
+- **7 new unit tests** in `src/__tests__/acme-watcher.test.js` covering every branch (grace period, success, policy-removed, timeout, non-running, Caddy-unreachable, publish-update callback).
+
+### Added — Remediation Wizard WS progress
+
+- **Per-job channel** `remediate:job:<jobId>` broadcasts on every state transition AND every live-log line. Users see the streaming output in real time (previously batched to 2.5s polling intervals).
+- **Frontend subscribes** on apply. Polling kept as a 10s fallback safety net.
+- Transitions covered: `pending → running → (success | failed | rolled_back)` for all three modes (`apply-local`, `pr`, `artifact`). Manual rollback from the wizard also publishes.
+
+### Tests
+
+- 549 → 556 passing (+7 watcher tests). No regressions.
+
+---
+
 ## [6.6.5] - 2026-04-20 — "LE Wizard WS progress + code hygiene"
 
 Housekeeping + a real UX polish on the Let's Encrypt Wizard.

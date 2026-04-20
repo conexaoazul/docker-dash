@@ -13,6 +13,21 @@ const catalog = require('./remediation-catalog');
 const composeDiff = require('./compose-diff');
 const dockerRunner = require('./docker-runner');
 
+// WS publisher — injected at server boot via setWsBroadcaster().
+let _wsBroadcaster = null;
+function setWsBroadcaster(fn) { _wsBroadcaster = fn; }
+function _publishJobUpdate(jobId) {
+  if (!_wsBroadcaster) return;
+  try {
+    const row = getDb().prepare(
+      'SELECT id, status, error_class, output, current_step, started_at, completed_at, git_branch, git_pr_url FROM remediation_jobs WHERE id = ?'
+    ).get(jobId);
+    if (row) _wsBroadcaster(`remediate:job:${jobId}`, row);
+  } catch (e) {
+    log.warn('WS publish failed (non-fatal)', { jobId, error: e.message });
+  }
+}
+
 // ─── Planning ──────────────────────────────────────────
 
 /**
@@ -229,6 +244,7 @@ async function runJob(jobId) {
 
   db.prepare(`UPDATE remediation_jobs SET status='running', started_at=datetime('now') WHERE id=?`).run(jobId);
   log.info('Remediation job started', { jobId, mode: job.mode });
+  _publishJobUpdate(jobId);
 
   try {
     if (job.mode === 'apply-local') {
@@ -238,6 +254,7 @@ async function runJob(jobId) {
     } else if (job.mode === 'artifact') {
       // Artifact mode doesn't actually apply — just marks success so UI can download
       db.prepare(`UPDATE remediation_jobs SET status='success', completed_at=datetime('now'), output='Artifact ready for download' WHERE id=?`).run(jobId);
+      _publishJobUpdate(jobId);
     } else {
       throw new Error(`Unknown mode: ${job.mode}`);
     }
@@ -248,6 +265,7 @@ async function runJob(jobId) {
       SET status='failed', error_class=?, output=?, completed_at=datetime('now')
       WHERE id=?
     `).run(_classifyError(e), (db.prepare('SELECT output FROM remediation_jobs WHERE id=?').get(jobId).output || '') + '\n[ERROR] ' + e.message, jobId);
+    _publishJobUpdate(jobId);
   }
 }
 
@@ -257,6 +275,7 @@ async function _applyLocal(jobId, plan) {
   const appendLog = (line) => {
     output.push(line);
     db.prepare(`UPDATE remediation_jobs SET output=?, current_step=? WHERE id=?`).run(output.join('\n'), line, jobId);
+    _publishJobUpdate(jobId);
   };
 
   // Snapshot pre-apply state for rollback
@@ -339,10 +358,12 @@ async function _applyLocal(jobId, plan) {
         db.prepare(`UPDATE remediation_jobs SET status='rolled_back', error_class=?, completed_at=datetime('now') WHERE id=?`)
           .run(_classifyError(e), jobId);
         appendLog(`✓ Rollback complete`);
+        _publishJobUpdate(jobId);
       } catch (rollbackErr) {
         db.prepare(`UPDATE remediation_jobs SET status='failed', error_class='rollback', output=?, completed_at=datetime('now') WHERE id=?`)
           .run(output.join('\n') + '\n[ROLLBACK FAILED] ' + rollbackErr.message, jobId);
         appendLog(`✗ ROLLBACK FAILED — manual intervention required`);
+        _publishJobUpdate(jobId);
       }
       throw e;
     }
@@ -355,6 +376,7 @@ async function _applyLocal(jobId, plan) {
     WHERE id=?
   `).run(jobId);
   appendLog(`✓ Job complete. Rollback available for 60 seconds.`);
+  _publishJobUpdate(jobId);
   log.info('Remediation job succeeded', { jobId });
 }
 
@@ -375,6 +397,7 @@ async function executeRollback(jobId) {
   const appendLog = (line) => {
     output.push(line);
     db.prepare(`UPDATE remediation_jobs SET output=?, current_step=? WHERE id=?`).run(output.join('\n'), line, jobId);
+    _publishJobUpdate(jobId);
   };
 
   appendLog(`⏳ Manual rollback initiated for job ${jobId}`);
@@ -387,11 +410,13 @@ async function executeRollback(jobId) {
     });
     db.prepare(`UPDATE remediation_jobs SET status='rolled_back', completed_at=datetime('now') WHERE id=?`).run(jobId);
     appendLog(`✓ Rollback complete`);
+    _publishJobUpdate(jobId);
     log.info('Manual rollback succeeded', { jobId });
     return { ok: true };
   } catch (e) {
     db.prepare(`UPDATE remediation_jobs SET status='failed', error_class='rollback' WHERE id=?`).run(jobId);
     appendLog(`✗ Rollback failed: ${e.message}`);
+    _publishJobUpdate(jobId);
     throw e;
   }
 }
@@ -406,6 +431,7 @@ async function _openPr(jobId, plan) {
   const appendLog = (line) => {
     output.push(line);
     db.prepare(`UPDATE remediation_jobs SET output=?, current_step=? WHERE id=?`).run(output.join('\n'), line, jobId);
+    _publishJobUpdate(jobId);
   };
 
   // Group steps by stack; for v1 we only support single-stack PRs
@@ -500,6 +526,7 @@ async function _openPr(jobId, plan) {
       SET status='success', git_branch=?, git_pr_url=?, completed_at=datetime('now')
       WHERE id=?
     `).run(branchName, prUrl, jobId);
+    _publishJobUpdate(jobId);
 
     log.info('Git-PR remediation pushed', { jobId, branchName, prUrl });
   } finally {
@@ -566,6 +593,7 @@ module.exports = {
   createJob,
   runJob,
   executeRollback,
+  setWsBroadcaster,
   _classifyError,
   mergePatch,
   mergeDockerUpdateFlags,

@@ -50,14 +50,12 @@ All of the above = 3-5 days of infra work. Out of scope for a single-box product
 
 ### LE Wizard: Background watcher for issuance completion
 
-**Why deferred:** Current code transitions `pending → running` when Caddy accepts the policy, but never flips to `success` — that would require polling Caddy for the actual cert appearance (in `/data/caddy/certificates/`) or subscribing to Caddy's events. Workaround today: users see "running" until they navigate away; the `acme_managed_certs` table does get populated so the cert is usable, just not reflected in the job status.
+**Status (updated 2026-04-20):** ✅ Shipped in v6.6.6. `src/services/acme-watcher.js` polls every 10s, 60s grace period, 10min hard timeout. 7 unit tests. Publishes via the v6.6.5 WS channel.
 
-**Estimated effort:** 3-4 hours (watcher service + tests).
-**Proposed approach:** `src/services/acme-watcher.js` polls Caddy admin socket every 5s for each `running` job older than 10s, calls the existing WS publisher on state change. Graceful timeout at 5 min → mark as `failed` with `error_class: 'timeout'`.
+### Remediation Wizard: WS progress for live log streaming
 
-### Remediation Wizard: WebSocket progress
+**Status (updated 2026-04-20):** ✅ Shipped in v6.6.6. Per-job channel `remediate:job:<id>` broadcasts on every state transition AND every log line. Polling kept as 10s safety net.
 
-Same as above. 2.5s polling works fine for sub-5-minute stack remediations. Defer.
 
 ### Remediation Wizard: entry points on security.js / stacks.js / cis.js
 
