@@ -201,11 +201,23 @@ router.post('/policies/:id/apply', requireAuth, requireRole('admin'), writeable,
     if (!policy) return res.status(404).json({ error: 'Policy not found' });
     if (!policy.active) return res.status(400).json({ error: 'Policy is soft-deleted — recreate to re-apply' });
 
-    if (policy.scopeType !== 'container') {
-      return res.status(501).json({ error: `Apply for scope '${policy.scopeType}' is not yet implemented — v6.7.0-rc1 adds stack scope.` });
+    if (policy.scopeType === 'stack') {
+      // Stack scope: runner does precondition check + transactional apply internally.
+      const result = await egressRunner.applyToStack({
+        stackName: policy.scopeKey,
+        hostId: policy.hostId || 0,
+      });
+      await auditService.log({
+        userId: req.user?.id,
+        username: req.user?.username,
+        ip: getClientIp(req),
+        action: 'egress_policy_applied',
+        details: { policyId: id, stackName: policy.scopeKey, hostId: policy.hostId, appliedCount: result.applied.length, skippedCount: result.skipped.length },
+      });
+      return res.json({ ok: true, scope: 'stack', ...result });
     }
 
-    // Precondition: can the filter even attach? (NET_ADMIN / privileged / host-mode → refuse)
+    // Container scope: precondition check
     try {
       const docker = dockerService.getDocker(policy.hostId || 0);
       const inspect = await docker.getContainer(policy.scopeKey).inspect();
@@ -228,7 +240,7 @@ router.post('/policies/:id/apply', requireAuth, requireRole('admin'), writeable,
       details: { policyId: id, containerId: policy.scopeKey, hostId: policy.hostId },
     });
 
-    res.json({ ok: true, applied: true, output: result.output });
+    res.json({ ok: true, scope: 'container', applied: true, output: result.output });
   } catch (err) {
     const msg = err.message || 'Internal server error';
     if (/DD_EGRESS_SIDECAR_ENDPOINT/.test(msg)) {
@@ -246,8 +258,19 @@ router.post('/policies/:id/unapply', requireAuth, requireRole('admin'), writeabl
     const policy = egressFilter.getPolicy(id);
     if (!policy) return res.status(404).json({ error: 'Policy not found' });
 
-    if (policy.scopeType !== 'container') {
-      return res.status(501).json({ error: `Unapply for scope '${policy.scopeType}' is not yet implemented.` });
+    if (policy.scopeType === 'stack') {
+      const result = await egressRunner.removeFromStack({
+        stackName: policy.scopeKey,
+        hostId: policy.hostId || 0,
+      });
+      await auditService.log({
+        userId: req.user?.id,
+        username: req.user?.username,
+        ip: getClientIp(req),
+        action: 'egress_policy_unapplied',
+        details: { policyId: id, stackName: policy.scopeKey, hostId: policy.hostId, removedCount: result.removed.length },
+      });
+      return res.json({ ok: true, scope: 'stack', ...result });
     }
 
     const result = await egressRunner.removeFromContainer({
@@ -263,7 +286,7 @@ router.post('/policies/:id/unapply', requireAuth, requireRole('admin'), writeabl
       details: { policyId: id, containerId: policy.scopeKey, hostId: policy.hostId },
     });
 
-    res.json({ ok: true, applied: false, output: result.output });
+    res.json({ ok: true, scope: 'container', applied: false, output: result.output });
   } catch (err) {
     log.error('unapply egress policy', err);
     res.status(500).json({ error: err.message || 'Internal server error' });
@@ -276,14 +299,18 @@ router.get('/policies/:id/status', requireAuth, requireRole('admin'), async (req
     const id = parseInt(req.params.id, 10);
     const policy = egressFilter.getPolicy(id);
     if (!policy) return res.status(404).json({ error: 'Policy not found' });
-    if (policy.scopeType !== 'container') {
-      return res.status(501).json({ error: `Status for scope '${policy.scopeType}' is not yet implemented.` });
+    if (policy.scopeType === 'stack') {
+      const result = await egressRunner.statusOfStack({
+        stackName: policy.scopeKey,
+        hostId: policy.hostId || 0,
+      });
+      return res.json({ policyId: id, scope: 'stack', ...result });
     }
     const result = await egressRunner.isApplied({
       containerId: policy.scopeKey,
       hostId: policy.hostId || 0,
     });
-    res.json({ policyId: id, applied: result.applied, details: result.details });
+    res.json({ policyId: id, scope: 'container', applied: result.applied, details: result.details });
   } catch (err) {
     log.error('status egress policy', err);
     res.status(500).json({ error: err.message || 'Internal server error' });

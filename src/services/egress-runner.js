@@ -180,9 +180,158 @@ async function isApplied({ containerId, hostId = 0 }) {
   return { applied, details: output.trim() };
 }
 
+// ─── Stack scope (v6.7.0-alpha.4) ────────────────────
+//
+// A compose "stack" is a set of containers sharing the
+// `com.docker.compose.project` label. The runner iterates containers,
+// applies/removes the filter per container, and aggregates results.
+//
+// Transactional semantics on apply: if ANY container fails canApplyFilter
+// precondition, the whole stack apply aborts WITHOUT touching any container.
+// If a helper fails mid-stream (docker error, rule-install failure), we
+// roll back the successful installs so the stack ends up in a consistent
+// pre-apply state.
+
+async function _listStackContainers({ stackName, hostId = 0 }) {
+  const docker = dockerService.getDocker(hostId || 0);
+  const containers = await docker.listContainers({
+    all: true,
+    filters: JSON.stringify({ label: [`com.docker.compose.project=${stackName}`] }),
+  });
+  return containers.map((c) => ({
+    id: c.Id,
+    name: (c.Names && c.Names[0] || '').replace(/^\//, ''),
+    service: (c.Labels || {})['com.docker.compose.service'] || null,
+    state: c.State,
+  }));
+}
+
+/**
+ * Apply the egress filter to every container in a compose stack.
+ * Transactional: on partial failure, rolls back the ones that succeeded.
+ * Returns { applied: [{id, name}], skipped: [{id, reason}], failed: [{id, error}] }.
+ */
+async function applyToStack({ stackName, hostId = 0 }) {
+  if (!stackName) throw new Error('stackName required');
+
+  const containers = await _listStackContainers({ stackName, hostId });
+  if (containers.length === 0) {
+    throw new Error(`No containers found for stack "${stackName}"`);
+  }
+
+  // Precondition check: refuse the WHOLE stack if any container can't be filtered.
+  // We inspect serially — small N (typical stack has 3-10 services).
+  const canApplyFilter = require('./egress-filter').canApplyFilter;
+  const docker = dockerService.getDocker(hostId || 0);
+  const skipped = [];
+  const eligible = [];
+  for (const c of containers) {
+    if (c.state !== 'running') {
+      skipped.push({ id: c.id, name: c.name, reason: `container is ${c.state}` });
+      continue;
+    }
+    try {
+      const inspect = await docker.getContainer(c.id).inspect();
+      const precheck = canApplyFilter(inspect);
+      if (!precheck.ok) {
+        throw new Error(precheck.reason);
+      }
+      eligible.push(c);
+    } catch (e) {
+      throw new Error(`Stack apply aborted — container ${c.name} (${c.id.slice(0, 12)}) failed precheck: ${e.message}`);
+    }
+  }
+
+  if (eligible.length === 0) {
+    return { applied: [], skipped, failed: [], stack: stackName };
+  }
+
+  log.info('Applying egress filter to stack', { stackName, eligibleCount: eligible.length, skippedCount: skipped.length });
+
+  // Apply in order; track successes so we can rollback on failure.
+  const applied = [];
+  const failed = [];
+  for (const c of eligible) {
+    try {
+      await applyToContainer({ containerId: c.id, hostId });
+      applied.push({ id: c.id, name: c.name });
+    } catch (e) {
+      failed.push({ id: c.id, name: c.name, error: e.message });
+      // Roll back everything applied so far
+      log.warn('Stack apply failed — rolling back', { stackName, successCount: applied.length, failedAt: c.name });
+      for (const succ of applied) {
+        try {
+          await removeFromContainer({ containerId: succ.id, hostId });
+        } catch (rollbackErr) {
+          log.error('Rollback failed for container', { stackName, id: succ.id, error: rollbackErr.message });
+        }
+      }
+      throw new Error(`Stack apply failed at ${c.name}: ${e.message}. Rolled back ${applied.length} already-applied container(s).`);
+    }
+  }
+
+  log.info('Stack apply complete', { stackName, appliedCount: applied.length });
+  return { applied, skipped, failed, stack: stackName };
+}
+
+/**
+ * Remove the egress filter from every container in a compose stack.
+ * Best-effort: collects per-container errors and reports them, doesn't abort.
+ */
+async function removeFromStack({ stackName, hostId = 0 }) {
+  if (!stackName) throw new Error('stackName required');
+
+  const containers = await _listStackContainers({ stackName, hostId });
+  if (containers.length === 0) {
+    return { removed: [], failed: [], stack: stackName };
+  }
+
+  const removed = [];
+  const failed = [];
+  for (const c of containers) {
+    if (c.state !== 'running') continue;  // no netns to clean
+    try {
+      await removeFromContainer({ containerId: c.id, hostId });
+      removed.push({ id: c.id, name: c.name });
+    } catch (e) {
+      failed.push({ id: c.id, name: c.name, error: e.message });
+    }
+  }
+
+  log.info('Stack remove complete', { stackName, removedCount: removed.length, failedCount: failed.length });
+  return { removed, failed, stack: stackName };
+}
+
+/**
+ * Report per-container applied state across a stack.
+ */
+async function statusOfStack({ stackName, hostId = 0 }) {
+  if (!stackName) throw new Error('stackName required');
+
+  const containers = await _listStackContainers({ stackName, hostId });
+  const results = [];
+  for (const c of containers) {
+    if (c.state !== 'running') {
+      results.push({ id: c.id, name: c.name, state: c.state, applied: false, skipped: true });
+      continue;
+    }
+    try {
+      const { applied } = await isApplied({ containerId: c.id, hostId });
+      results.push({ id: c.id, name: c.name, state: c.state, applied });
+    } catch (e) {
+      results.push({ id: c.id, name: c.name, state: c.state, applied: false, error: e.message });
+    }
+  }
+  const appliedCount = results.filter((r) => r.applied).length;
+  return { stack: stackName, containers: results, appliedCount, totalCount: results.length };
+}
+
 module.exports = {
   applyToContainer,
   removeFromContainer,
   isApplied,
-  _internals: { _applyScript, _removeScript, _inspectScript, _sidecarEndpoint, HELPER_IMAGE },
+  applyToStack,
+  removeFromStack,
+  statusOfStack,
+  _internals: { _applyScript, _removeScript, _inspectScript, _sidecarEndpoint, _listStackContainers, HELPER_IMAGE },
 };

@@ -2,6 +2,62 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.7.0-alpha.4] - 2026-04-20 — "Outbound Filter: stack scope"
+
+Extends alpha.3's container-scope enforcement to entire compose stacks. A single `POST /apply` now iterates every container with the same `com.docker.compose.project` label and installs the filter atomically.
+
+Previously `501 Not Implemented`, now real.
+
+### Added — Stack scope
+
+- **`egress-runner.applyToStack({stackName, hostId})`** — discovers containers by compose-project label, runs a precondition check on EVERY one before touching any (refuses the whole stack if one has NET_ADMIN / privileged / host mode), then applies the filter serially with transactional rollback on mid-stream failure.
+- **`egress-runner.removeFromStack({stackName, hostId})`** — best-effort removal across all stack containers. Per-container errors collected + reported, doesn't abort.
+- **`egress-runner.statusOfStack({stackName, hostId})`** — per-container applied-state report + summary `{appliedCount, totalCount}`.
+- **Routes** flipped from 501 → real calls:
+  - `POST /api/egress-filter/policies/:id/apply` (for stack-scoped policies) returns `{applied: [{id, name}], skipped: [{id, reason}], failed: [...]}`.
+  - `POST /api/egress-filter/policies/:id/unapply` returns `{removed, failed}`.
+  - `GET /api/egress-filter/policies/:id/status` returns `{containers: [{id, name, state, applied}], appliedCount, totalCount}`.
+- **Audit log** entries include per-stack counts: `appliedCount`, `skippedCount`, `removedCount`.
+
+### Transactional apply semantics
+
+- **Precondition phase** — inspects every eligible (running) container's HostConfig. If ANY fails `canApplyFilter` (privileged / NET_ADMIN / SYS_ADMIN / host / none / `container:<id>` mode), the whole stack apply aborts WITHOUT touching anything. Error message names the offending service.
+- **Apply phase** — installs filter per container serially. If a helper fails mid-stream, all previously-applied containers are rolled back via `removeFromContainer` before the error propagates to the caller.
+- **Non-running containers** (exited, paused, created) are skipped, NOT failed. Reported in the `skipped` array with `reason`.
+
+### Staging E2E verified (this release)
+
+Ephemeral 2-container stack (`ddtest` project, `web` + `db` services) on staging 2026-04-20:
+
+| Step | Result |
+|---|---|
+| Baseline: both containers reach example.com + httpbin.org | ✅ HTTP/2 200 |
+| Apply filter to web → apply filter to db (simulating `applyToStack`) | ✅ both "applied" |
+| After apply, web → example.com | ✅ blocked (sidecar logs `host=example.com port=443 reason=not-in-allowlist`) |
+| After apply, db → httpbin.org | ✅ HTTP/2 200 (allowed) |
+| Remove filter from both | ✅ both "removed" |
+
+### Tests
+
+- `egress-runner.test.js` — +9 stack scope tests:
+  - Input validation (`stackName` required)
+  - No containers found
+  - Apply-to-every-running + skip-non-running
+  - Whole-stack abort on any container failing precheck (no helpers spawned)
+  - Mid-stream failure → rollback of earlier successes
+  - `removeFromStack` per-container error collection (doesn't abort)
+  - `statusOfStack` aggregate counts
+- **Total: 637 passing / 42 suites** (628 → 637, +9).
+
+### What's left for v6.7.0 final
+
+- **UI** (System → Egress tab, 3-step modal, Apply / Remove / Emergency-disable buttons, block log viewer) — ~3-4h, pure UX work
+- **Per-container allowlist routing inside the sidecar** — architectural decision needed (source-IP lookup vs. named-sidecar vs. label inspection)
+- **Block log ingestion** from sidecar's local file → DB
+- **GHCR image publish** — one-click repo settings toggle
+
+---
+
 ## [6.7.0-alpha.3] - 2026-04-20 — "Outbound Filter: enforcement via egress-runner"
 
 Wires the alpha.2 sidecar into a one-click apply / remove flow via a short-lived `NET_ADMIN` helper container that installs nftables rules into the target's netns. Users no longer need to set `HTTP_PROXY` env manually — `POST /api/egress-filter/policies/:id/apply` handles it.

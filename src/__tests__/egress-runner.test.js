@@ -149,6 +149,157 @@ describe('removeFromContainer', () => {
   });
 });
 
+// ─── Stack scope (alpha.4) ─────────────────────────────
+
+describe('applyToStack', () => {
+  beforeEach(() => {
+    // listContainers mock
+    dockerService._mock.mockDocker.listContainers = jest.fn();
+    // getContainer().inspect() mock returning bridge-mode, no NET_ADMIN
+    const goodInspect = {
+      State: { Running: true },
+      HostConfig: { NetworkMode: 'bridge', CapAdd: [], Privileged: false },
+    };
+    dockerService._mock.mockDocker.getContainer = jest.fn().mockImplementation(() => ({
+      inspect: jest.fn().mockResolvedValue(goodInspect),
+    }));
+    // helper container mock (used by applyToContainer/removeFromContainer)
+    dockerService._mock.mockDocker.createContainer = jest.fn().mockResolvedValue(dockerService._mock.mockContainer);
+  });
+
+  it('requires stackName', async () => {
+    await expect(require('../services/egress-runner').applyToStack({})).rejects.toThrow(/stackName/);
+  });
+
+  it('throws when stack has no containers', async () => {
+    dockerService._mock.mockDocker.listContainers.mockResolvedValueOnce([]);
+    await expect(require('../services/egress-runner').applyToStack({ stackName: 'ghost' }))
+      .rejects.toThrow(/No containers found/);
+  });
+
+  it('applies to every running container + skips non-running', async () => {
+    dockerService._mock.mockDocker.listContainers.mockResolvedValueOnce([
+      { Id: 'aaa', Names: ['/web'], Labels: { 'com.docker.compose.service': 'web' }, State: 'running' },
+      { Id: 'bbb', Names: ['/db'], Labels: { 'com.docker.compose.service': 'db' }, State: 'running' },
+      { Id: 'ccc', Names: ['/migrations'], Labels: { 'com.docker.compose.service': 'migrations' }, State: 'exited' },
+    ]);
+    const result = await require('../services/egress-runner').applyToStack({ stackName: 's1' });
+    expect(result.applied).toHaveLength(2);
+    expect(result.applied.map(x => x.name)).toEqual(['web', 'db']);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].name).toBe('migrations');
+  });
+
+  it('refuses entire stack if any container fails precheck (privileged)', async () => {
+    dockerService._mock.mockDocker.listContainers.mockResolvedValueOnce([
+      { Id: 'aaa', Names: ['/web'], State: 'running' },
+      { Id: 'bbb', Names: ['/db'], State: 'running' },
+    ]);
+    let call = 0;
+    dockerService._mock.mockDocker.getContainer = jest.fn().mockImplementation(() => ({
+      inspect: jest.fn().mockResolvedValue(
+        ++call === 2
+          ? { State: { Running: true }, HostConfig: { NetworkMode: 'bridge', Privileged: true } }
+          : { State: { Running: true }, HostConfig: { NetworkMode: 'bridge', CapAdd: [] } }
+      ),
+    }));
+    await expect(require('../services/egress-runner').applyToStack({ stackName: 's1' }))
+      .rejects.toThrow(/Stack apply aborted.*db.*privileged/i);
+
+    // Zero helper containers created — we aborted before touching any
+    expect(dockerService._mock.mockDocker.createContainer).not.toHaveBeenCalled();
+  });
+
+  it('rolls back previously-applied containers on mid-stream failure', async () => {
+    dockerService._mock.mockDocker.listContainers.mockResolvedValueOnce([
+      { Id: 'aaa', Names: ['/web'], State: 'running' },
+      { Id: 'bbb', Names: ['/api'], State: 'running' },
+      { Id: 'ccc', Names: ['/db'], State: 'running' },
+    ]);
+    // Second apply helper fails
+    let applyCalls = 0;
+    dockerService._mock.mockContainer.wait = jest.fn().mockImplementation(() => {
+      applyCalls++;
+      if (applyCalls === 2) return Promise.resolve({ StatusCode: 1 });  // second apply fails
+      return Promise.resolve({ StatusCode: 0 });
+    });
+
+    await expect(require('../services/egress-runner').applyToStack({ stackName: 's1' }))
+      .rejects.toThrow(/Stack apply failed at api/);
+
+    // One success + one failure + one rollback = 3 helper spawns
+    expect(dockerService._mock.mockDocker.createContainer.mock.calls.length).toBe(3);
+  });
+});
+
+describe('removeFromStack', () => {
+  beforeEach(() => {
+    dockerService._mock.mockDocker.listContainers = jest.fn();
+    dockerService._mock.mockDocker.createContainer = jest.fn().mockResolvedValue(dockerService._mock.mockContainer);
+    dockerService._mock.mockContainer.wait = jest.fn().mockResolvedValue({ StatusCode: 0 });
+  });
+
+  it('removes from every running container, skips non-running', async () => {
+    dockerService._mock.mockDocker.listContainers.mockResolvedValueOnce([
+      { Id: 'aaa', Names: ['/web'], State: 'running' },
+      { Id: 'bbb', Names: ['/db'], State: 'exited' },
+    ]);
+    const r = await require('../services/egress-runner').removeFromStack({ stackName: 's1' });
+    expect(r.removed).toHaveLength(1);
+    expect(r.removed[0].name).toBe('web');
+  });
+
+  it('collects per-container errors, does not abort', async () => {
+    dockerService._mock.mockDocker.listContainers.mockResolvedValueOnce([
+      { Id: 'aaa', Names: ['/web'], State: 'running' },
+      { Id: 'bbb', Names: ['/db'], State: 'running' },
+    ]);
+    let call = 0;
+    dockerService._mock.mockContainer.wait = jest.fn().mockImplementation(() =>
+      Promise.resolve({ StatusCode: ++call === 1 ? 1 : 0 })
+    );
+    const r = await require('../services/egress-runner').removeFromStack({ stackName: 's1' });
+    expect(r.removed).toHaveLength(1);
+    expect(r.failed).toHaveLength(1);
+  });
+
+  it('returns empty for unknown stack', async () => {
+    dockerService._mock.mockDocker.listContainers.mockResolvedValueOnce([]);
+    const r = await require('../services/egress-runner').removeFromStack({ stackName: 'ghost' });
+    expect(r.removed).toEqual([]);
+  });
+});
+
+describe('statusOfStack', () => {
+  beforeEach(() => {
+    dockerService._mock.mockDocker.listContainers = jest.fn();
+    dockerService._mock.mockDocker.createContainer = jest.fn().mockResolvedValue(dockerService._mock.mockContainer);
+    dockerService._mock.mockContainer.wait = jest.fn().mockResolvedValue({ StatusCode: 0 });
+  });
+
+  it('reports per-container applied state + summary counts', async () => {
+    dockerService._mock.mockDocker.listContainers.mockResolvedValueOnce([
+      { Id: 'aaa', Names: ['/web'], State: 'running' },
+      { Id: 'bbb', Names: ['/db'], State: 'running' },
+      { Id: 'ccc', Names: ['/cron'], State: 'exited' },
+    ]);
+    // all isApplied calls return APPLIED
+    let callNum = 0;
+    dockerService._mock.mockContainer.logs = jest.fn().mockImplementation(() => Promise.resolve({
+      on: function (ev, cb) {
+        if (ev === 'data') setImmediate(() => cb(Buffer.concat([Buffer.alloc(8), Buffer.from(++callNum <= 2 ? 'APPLIED\n' : 'NOT_APPLIED\n')])));
+        else if (ev === 'end') setImmediate(cb);
+        return this;
+      },
+    }));
+    const r = await require('../services/egress-runner').statusOfStack({ stackName: 's1' });
+    expect(r.containers).toHaveLength(3);
+    expect(r.appliedCount).toBe(2);
+    expect(r.totalCount).toBe(3);
+    expect(r.containers.find(c => c.name === 'cron').skipped).toBe(true);  // exited → not checked
+  });
+});
+
 describe('isApplied', () => {
   it('reports applied when helper output contains APPLIED', async () => {
     const logsStream = { on: jest.fn(function (ev, cb) {
