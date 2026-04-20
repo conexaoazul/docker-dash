@@ -10,6 +10,83 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.7.0',
+      date: '2026-04-20',
+      title: 'Outbound Network Filter — hostname allowlist enforcement per container or stack',
+      changes: [
+        { type: 'feature', text: 'Outbound Network Filter (System → Egress tab). Pick a preset (Registry-only / Registries+GitHub / Lockdown / Audit-only / Custom), click Enable. Containers can now only reach hostnames on your allowlist. IMDS endpoints (169.254.169.254, metadata.google.internal, 169.254.170.2) always blocked regardless of policy — defense in depth.' },
+        { type: 'feature', text: 'Go sidecar `dd-egress-filter` (~2 MB scratch image, multi-arch): peeks TLS SNI + HTTP Host on every connection, compares to policy allowlist, forwards via splice or resets. No TLS decryption, no cert injection — containers see destinations\' real certs.' },
+        { type: 'feature', text: 'Two modes per policy: `enforce` (block denies) and `audit-only` (log but don\'t block). Use audit-only first during migration — run a day, check the deny log, then flip to enforce.' },
+        { type: 'feature', text: 'Container + stack scope. Stack apply is transactional: whole-stack precheck before touching anything; rollback on mid-stream failure. Preconditions refuse containers with NET_ADMIN / SYS_ADMIN / privileged / host / none / container:<id> — any of those make the filter bypassable.' },
+        { type: 'feature', text: 'Emergency disable — one-click red button on every filtered row. Unapplies filter + deletes policy. Container regains full outbound in <5s. Audit-logged with operator reason.' },
+        { type: 'feature', text: 'Deny log viewer — expandable per-row, shows last 25 block events with timestamp, hostname, port, reason. Background ingester tails the sidecar\'s log every 30s into egress_block_log table. 30-day / 10k-row retention.' },
+        { type: 'feature', text: 'One-command setup: `docker compose --profile egress up -d` brings the sidecar up alongside Docker Dash with shared volumes for policy.json + deny log. No manual `docker build` or `docker run` needed.' },
+        { type: 'feature', text: 'Bilingual How-To: "Enforce Outbound Allowlists with the Egress Filter" — threat model, setup, UI walkthrough, invariants table, gotchas, per-container vs per-stack, explicit non-goals.' },
+        { type: 'security', text: 'Every filter action (policy_created / _updated / _applied / _unapplied / emergency_disable) is hash-chained in the audit log with per-stack counts + operator reason where relevant.' },
+        { type: 'security', text: 'Helper-container pattern for iptables installs: Docker Dash stays CIS-compliant (no NET_ADMIN on the main app). A short-lived `alpine/nftables` container enters the target\'s netns, installs `ip ddout` rules, exits. Rules persist in the netns until removed (preflight P1 validated).' },
+        { type: 'improvement', text: 'Sidecar exposes Prometheus /metrics (allowed_total, blocked_total, audit_only_total, upstream_errors_total, policy_reloads_total) and /health (reports loaded policy version + allowlist size + mode). Opt-in via DD_EGRESS_METRICS_LISTEN env.' },
+        { type: 'improvement', text: 'CI: .github/workflows/egress-filter-image.yml builds + pushes the sidecar to GHCR. Multi-arch (amd64 + arm64) via buildx + QEMU, per-arch smoke tests (container starts, /health returns loaded policy), 10MB image-size guard. Activates once the repo Workflow Permissions toggle is flipped.' },
+        { type: 'improvement', text: 'Boot-time policy.json sync: Docker Dash writes the aggregate policy to disk at startup so the sidecar stays consistent across restarts — no more stale-until-someone-edits behavior.' },
+        { type: 'improvement', text: 'Tests: 538 → 648 passing (+110 net, 43 suites). Preflight: 6/10 spikes PASS on staging (rule persistence, Go SIGHUP reload, port isolation, atomic rename, multi-arch buildx, precondition logic).' },
+      ],
+    },
+    {
+      version: '6.6.6',
+      date: '2026-04-20',
+      title: 'ACME watcher + Remediation WS progress',
+      changes: [
+        { type: 'feature', text: 'ACME watcher — transitions stuck `running` Let\'s Encrypt jobs to `success` or `failed`. Previously jobs sat at `running` forever once Caddy accepted the policy. 60s grace + Caddy policy-still-present check + 10min hard timeout. Resilient to Caddy unreachability.' },
+        { type: 'feature', text: 'Remediation Wizard WS progress — per-job channel broadcasts on every state transition AND every live log line. UI streams output in real time instead of 2.5s-polling batches.' },
+      ],
+    },
+    {
+      version: '6.6.5',
+      date: '2026-04-20',
+      title: 'LE Wizard WS progress + lint hygiene',
+      changes: [
+        { type: 'feature', text: 'Let\'s Encrypt Wizard now streams state transitions via WebSocket (`acme:job:<jobId>` channel). UI updates instantly on pending→running→failed. Polling kept as 15s fallback.' },
+        { type: 'improvement', text: 'Lint: 3 `no-undef` errors fixed (setImmediate, URLSearchParams added to eslint globals). 12 unused top-level imports removed across routes + services. 49 → 34 warnings.' },
+      ],
+    },
+    {
+      version: '6.6.4',
+      date: '2026-04-20',
+      title: 'Dependency audit + nodemailer CVE patch',
+      changes: [
+        { type: 'security', text: 'nodemailer ^7.0.7 → ^8.0.5. Patches GHSA-c7w3-x93f-qmm8 + GHSA-vvjj-xcjg-gr5g (SMTP command injection). Not exploitable in our usage (admin-only SMTP config, server-generated templates, no user-controlled envelope/name fields) — upgraded for defense in depth.' },
+        { type: 'improvement', text: 'Safe minor bumps: dotenv, simple-git, eslint (dev), puppeteer (dev). `npm audit` reports 0 vulnerabilities.' },
+      ],
+    },
+    {
+      version: '6.6.3',
+      date: '2026-04-20',
+      title: 'Remediation Wizard entry points on CIS + stacks',
+      changes: [
+        { type: 'feature', text: 'CIS Benchmark per-container rows now show "Fix with Wizard" + stack shortcut buttons alongside the existing "Generate CIS-hardened compose". Clicking opens the Remediation Wizard pre-targeted at that scope.' },
+        { type: 'feature', text: 'Stacks page (compose stacks with ≥1 container) gains a Remediate action button alongside Up/Down/Restart/Pull. Opens the wizard in stack-mode.' },
+      ],
+    },
+    {
+      version: '6.6.2',
+      date: '2026-04-20',
+      title: 'Egress Audit — read-only outbound posture scanner',
+      changes: [
+        { type: 'feature', text: 'New System → Egress tab. Per-container table with risk badge, network mode, attached networks (internal vs bridge), internet + IMDS reachability verdict, 0-100 score. Expandable rows show findings detail, extra_hosts, custom DNS.' },
+        { type: 'feature', text: 'Findings catalog: `critical` for network_mode: host / IMDS-pinned extra_hosts; `warning` for non-internal bridge + NET_ADMIN/NET_RAW caps; `info` for internal-only networks / custom DNS / container:<id> mode.' },
+        { type: 'feature', text: 'Bilingual How-To: "Audit Container Outbound Network Posture" — explains IMDS threat model, compose recipes for network isolation, host-level iptables blocks, audit limitations.' },
+      ],
+    },
+    {
+      version: '6.6.1',
+      date: '2026-04-20',
+      title: 'DNS providers + credential rotation UX',
+      changes: [
+        { type: 'feature', text: '4 more DNS providers for the Let\'s Encrypt Wizard (Namecheap, Gandi, Porkbun, OVH) — 9 total. Added xcaddy plugins to docker/caddy/Dockerfile.' },
+        { type: 'feature', text: 'Credential rotation UX — "Rotate" button per row in Saved DNS Credentials. Rewrites encrypted vault + /etc/caddy/secrets/<id>/* in place, preserving credential id so existing bound certs keep working.' },
+        { type: 'fix', text: 'Multi-host rollback in Remediation Wizard uses correct host_id (was hardcoded 0 — TODO left from Session 2).' },
+      ],
+    },
+    {
       version: '6.6.0',
       date: '2026-04-20',
       title: 'Container Remediation Wizard — turn audit findings into actionable fixes',

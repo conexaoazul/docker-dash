@@ -2,6 +2,84 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.7.0] - 2026-04-20 — "Outbound Network Filter" 🎉
+
+Docker Dash's biggest security feature to date. Ships a production hostname-based outbound allowlist enforced by a lightweight Go sidecar (~2 MB scratch image) + nftables rules installed into target container netns via a short-lived `NET_ADMIN` helper. No TLS decryption, no cert injection — containers see their destinations' real certs.
+
+**The sales pitch in one line:** a compromised container on a Docker Dash host can't talk to IMDS, can't exfiltrate to attacker-controlled hosts, and can't pivot into your cloud account — without you ever breaking its TLS trust chain.
+
+### What shipped across v6.7 alphas and rcs (summary)
+
+See individual alpha/rc entries below for full detail. Feature highlights:
+
+- **5 presets** — `registry-only`, `registries-github`, `lockdown`, `audit-only`, `custom`. Wildcard hostnames supported (`*.github.com`).
+- **Two modes** — `enforce` (block denies) and `audit-only` (log but don't block, for migration). Per-policy.
+- **IMDS always blocked** — `169.254.169.254`, `metadata.google.internal`, `169.254.170.2`. Defense-in-depth invariant that no user policy can override.
+- **Container + stack scope** — apply to one container or to every service in a compose project. Stack apply is transactional: whole-stack precheck before touching anything, rollback on mid-stream failure.
+- **Preconditions** — refuses to attach to containers with `NET_ADMIN`, `SYS_ADMIN`, `privileged`, or `network_mode: host / none / container:<id>` — any of those make the filter bypassable.
+- **Emergency disable** — one-click red button, `< 5s` to restore full outbound, audit-logged with operator reason.
+- **Deny log** — sidecar writes to local append-only log, background ingester tails it into the DB every 30s. UI shows per-policy last-25 events.
+- **UI** — System → Egress tab gains Filter column, 3-step Enable/Manage modal, expandable deny log. End-to-end usable without touching REST.
+- **Metrics** — sidecar exposes Prometheus `/metrics` with `allowed_total`, `blocked_total`, `audit_only_total`, `upstream_errors_total`, `policy_reloads_total`.
+- **One-command setup** — `docker compose --profile egress up -d` brings the sidecar up alongside Docker Dash.
+
+### Components
+
+| Piece | Files | Purpose |
+|---|---|---|
+| DB schema | `src/db/migrations/054_egress_policies.js` | `egress_policies` + `egress_block_log` tables |
+| Service | `src/services/egress-filter.js` | CRUD, preset resolution, IMDS invariant, `canApplyFilter` precondition, `writePolicyFile` |
+| Runner | `src/services/egress-runner.js` | `applyToContainer`, `applyToStack` (transactional), `removeFromContainer`, `removeFromStack`, `isApplied`, `statusOfStack` |
+| Ingester | `src/services/egress-blocklog-ingester.js` | Tails sidecar deny log via `docker exec tail`, inserts to DB every 30s |
+| REST | `src/routes/egress-filter.js` | 9 admin-only endpoints |
+| Sidecar | `docker/egress-filter/main.go` + `Dockerfile` | 450-LOC Go binary: SNI peek + HTTP Host parser + hostname allowlist + splice-or-reset, SIGHUP reload |
+| UI | `public/js/pages/system.js` (Egress tab) | Filter column + 3-step modal + deny log viewer |
+| How-To | `src/db/migrations/055_howto_outbound_filter.js` | Bilingual EN + RO guide (threat model → setup → UI → invariants → gotchas) |
+| CI | `.github/workflows/egress-filter-image.yml` | Multi-arch (amd64 + arm64) buildx + GHCR push + per-arch smoke tests |
+| Planning | `docs/planning/v6.7/outbound-filter/` | feature-spec + deep-spec + assumption-audit + preflight + results (6/10 PASS on staging) |
+
+### Explicit non-goals (deliberately not in scope)
+
+Documented in deep-spec §4 and the How-To — read these before filing an issue:
+
+- **No TLS decryption.** SNI peek only. Never break the container's trust chain.
+- **No IPv6** — IPv4 only. IPv6 tracked for v6.8+.
+- **No per-process filtering** — one policy per container.
+- **No multi-host Swarm overlay awareness** — single-node Docker. Swarm tasks get their own per-node policies.
+- **No source-IP-keyed per-container routing inside a single sidecar** — for isolated per-container policies, run multiple named sidecars (`dd-egress-filter-api`, `dd-egress-filter-db`, …).
+
+### Upgrade from v6.6.x
+
+Safe to `docker compose pull app && docker compose up -d app`. Migration `054_egress_policies.js` + `055_howto_outbound_filter.js` apply cleanly on startup. If you don't opt into the egress profile, nothing changes operationally — the Egress tab just shows "sidecar not configured, read-only audit only".
+
+To opt in:
+```bash
+# 1. Add to .env:
+DD_EGRESS_SIDECAR_ENDPOINT=172.17.0.X:29193      # fill after first boot
+DD_EGRESS_SIDECAR_NAME=dd-egress-filter
+DD_EGRESS_BLOCKLOG_INGESTER=1
+
+# 2. Start sidecar alongside Docker Dash:
+docker compose --profile egress up -d
+
+# 3. Find sidecar's bridge IP (fills step 1):
+docker inspect dd-egress-filter --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+docker compose up -d app   # pick up the new env
+```
+
+### Tests
+
+- **648 passing / 43 suites** (up from 538 on the v6.6 line — +110 net across the v6.7 work)
+- Preflight: 6/10 spikes PASS on staging (P1 rule persistence, P3 Go SIGHUP reload, P4 port isolation, P6 atomic rename, P8 multi-arch buildx, P10 NET_ADMIN precondition logic). P5/P7/P9 gate at `v6.7.1` with real community + perf data.
+
+### Known limitations inherited from rc.2
+
+- Sidecar's aggregate policy = union of all DB policies (see "explicit non-goals" above for the multi-sidecar pattern)
+- Corporate proxy compatibility (preflight P5) not yet validated with a real Squid upstream
+- No live probe for "is IMDS actually blocked at the host level" — analysis is Docker-config-based
+
+---
+
 ## [6.7.0-rc.2] - 2026-04-20 — "Outbound Filter: operational polish"
 
 Second release candidate for v6.7.0. No new features — three operational improvements that reduce setup friction from "build + wire up manually" to "docker compose up".
