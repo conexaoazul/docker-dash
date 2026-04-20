@@ -7,6 +7,7 @@ process.env.APP_ENV = 'test';
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'test-encryption-key-for-jest-32chars';
 process.env.DB_PATH = ':memory:';
 process.env.ADMIN_PASSWORD = 'EgressTest123!';
+process.env.DD_EGRESS_POLICY_PATH = require('os').tmpdir() + '/dd-egress-test-' + Date.now() + '/policy.json';
 
 const { getDb } = require('../db');
 getDb();  // triggers migrations (including 054)
@@ -283,5 +284,69 @@ describe('block log', () => {
     const log = egressFilter.getBlockLog(policyId);
     expect(log).toHaveLength(1);
     expect(log[0].hostname).toBe('y.com');
+  });
+});
+
+// ─── Sidecar policy.json writer (v6.7.0-alpha.2) ───────
+
+describe('writePolicyFile + _buildAggregatePolicy', () => {
+  const fs = require('fs');
+  const path = require('path');
+
+  beforeEach(() => {
+    getDb().prepare('DELETE FROM egress_policies').run();
+    try { fs.unlinkSync(process.env.DD_EGRESS_POLICY_PATH); } catch {}
+  });
+
+  it('aggregates no policies → empty allowlist, enforce mode, version 0', () => {
+    const p = egressFilter._internals._buildAggregatePolicy();
+    expect(p.version).toBe(0);
+    expect(p.mode).toBe('enforce');
+    expect(p.allowlist).toEqual([]);
+  });
+
+  it('aggregates a single enforce policy', () => {
+    egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's1', preset: 'registry-only' });
+    const p = egressFilter._internals._buildAggregatePolicy();
+    expect(p.mode).toBe('enforce');
+    expect(p.allowlist).toEqual(expect.arrayContaining(['docker.io', 'registry.npmjs.org']));
+  });
+
+  it('union of allowlists + enforce wins if mixed', () => {
+    egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's1', preset: 'registry-only', mode: 'enforce' });
+    egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's2', preset: 'audit-only' });  // audit-only preset forces mode
+    const p = egressFilter._internals._buildAggregatePolicy();
+    expect(p.mode).toBe('enforce');  // one enforce is enough
+  });
+
+  it('all audit-only → audit-only mode', () => {
+    egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's1', preset: 'audit-only' });
+    egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's2', preset: 'audit-only' });
+    const p = egressFilter._internals._buildAggregatePolicy();
+    expect(p.mode).toBe('audit-only');
+  });
+
+  it('writes policy.json atomically and calls onPolicyWritten', () => {
+    const spy = jest.fn();
+    egressFilter.setOnPolicyWritten(spy);
+
+    egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's1', preset: 'lockdown' });
+
+    const onDisk = JSON.parse(fs.readFileSync(process.env.DD_EGRESS_POLICY_PATH, 'utf8'));
+    expect(onDisk.mode).toBe('enforce');
+    expect(onDisk.allowlist).toEqual([]);
+    expect(spy).toHaveBeenCalled();
+    egressFilter.setOnPolicyWritten(null);
+  });
+
+  it('rewrites after update + remove', () => {
+    const { policyId } = egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's1', preset: 'lockdown' });
+    egressFilter.updatePolicy(policyId, { preset: 'registry-only' });
+    let onDisk = JSON.parse(fs.readFileSync(process.env.DD_EGRESS_POLICY_PATH, 'utf8'));
+    expect(onDisk.allowlist.length).toBeGreaterThan(0);
+
+    egressFilter.removePolicy(policyId);
+    onDisk = JSON.parse(fs.readFileSync(process.env.DD_EGRESS_POLICY_PATH, 'utf8'));
+    expect(onDisk.allowlist).toEqual([]);
   });
 });

@@ -15,8 +15,22 @@
 // must label them as "config only" until the sidecar ships. This lets users
 // configure + review allowlists ahead of enforcement landing.
 
+const fs = require('fs');
+const path = require('path');
 const log = require('../utils/logger')('egress-filter');
 const { getDb } = require('../db');
+
+// Where the sidecar reads its policy from. Both the app container and the
+// sidecar mount the same `docker-dash-egress` volume; this path is inside
+// that volume. Read per-call so tests can override via env.
+function _policyPath() {
+  return process.env.DD_EGRESS_POLICY_PATH || '/data/egress-policy/policy.json';
+}
+
+// Emit a signal hint so the runtime knows to SIGHUP the sidecar after writing.
+// The actual kill happens in a hook registered by server.js (see rc1 wiring).
+let _onPolicyWritten = null;
+function setOnPolicyWritten(fn) { _onPolicyWritten = fn; }
 
 // ─── Preset allowlists ──────────────────────────────────
 // Each preset is a static list of hostnames (with wildcards). Users can
@@ -224,6 +238,7 @@ function createPolicy({ scopeType, scopeKey, hostId = 0, preset, customAllowlist
       WHERE id = ?
     `).run(preset, JSON.stringify(resolved), effectiveMode, existing.id);
     log.info('Egress policy updated', { policyId: existing.id, scopeType, scopeKey, preset, mode: effectiveMode });
+    writePolicyFile();
     return { policyId: existing.id, updated: true, allowlist: resolved, mode: effectiveMode };
   }
 
@@ -233,6 +248,7 @@ function createPolicy({ scopeType, scopeKey, hostId = 0, preset, customAllowlist
   `).run(scopeType, scopeKey, hostId, preset, JSON.stringify(resolved), effectiveMode, createdBy || null);
 
   log.info('Egress policy created', { policyId: res.lastInsertRowid, scopeType, scopeKey, preset, mode: effectiveMode });
+  writePolicyFile();
   return { policyId: res.lastInsertRowid, updated: false, allowlist: resolved, mode: effectiveMode };
 }
 
@@ -264,6 +280,7 @@ function updatePolicy(id, changes) {
   `).run(patched.preset, JSON.stringify(resolved), effectiveMode, id);
 
   log.info('Egress policy updated', { policyId: id, preset: patched.preset, mode: effectiveMode });
+  writePolicyFile();
   return getPolicy(id);
 }
 
@@ -272,6 +289,7 @@ function removePolicy(id, { reason = 'user-requested' } = {}) {
   if (!existing) throw new Error(`Policy ${id} not found`);
   getDb().prepare('UPDATE egress_policies SET active = 0, updated_at = datetime(\'now\') WHERE id = ?').run(id);
   log.info('Egress policy removed (soft-deleted)', { policyId: id, reason });
+  writePolicyFile();
   return { removed: true, policyId: id };
 }
 
@@ -296,6 +314,55 @@ function recordBlockedAttempt({ policyId, containerId, hostname, port, proto, re
     INSERT INTO egress_block_log (policy_id, container_id, hostname, port, proto, reason)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(policyId, containerId || '', String(hostname), Number(port), proto, reason || 'not-in-allowlist');
+}
+
+// ─── Sidecar policy.json writer (v6.7.0-alpha.2) ───────
+//
+// Alpha ships a single global policy.json for the sidecar. All active
+// policies' allowlists are merged (union). Mode = 'audit-only' only when
+// EVERY active policy is audit-only, else 'enforce'. Per-container policy
+// routing by source IP lands in rc1.
+
+function _buildAggregatePolicy() {
+  const policies = listPolicies();
+  const union = new Set();
+  let anyEnforce = false;
+  let maxUpdatedAt = '';
+  for (const p of policies) {
+    for (const h of p.allowlist) union.add(h);
+    if (p.mode === 'enforce') anyEnforce = true;
+    if (p.updatedAt > maxUpdatedAt) maxUpdatedAt = p.updatedAt;
+  }
+  return {
+    version: policies.length > 0 ? policies.reduce((max, p) => Math.max(max, p.id), 0) : 0,
+    mode: policies.length === 0 ? 'enforce' : (anyEnforce ? 'enforce' : 'audit-only'),
+    allowlist: Array.from(union).sort(),
+    updated_at: maxUpdatedAt || new Date().toISOString(),
+  };
+}
+
+/**
+ * Write the merged policy.json to disk atomically, then invoke the SIGHUP hook.
+ * Called after every create/update/remove. Safe to call even when the sidecar
+ * isn't running — write succeeds, SIGHUP hook silently skips.
+ */
+function writePolicyFile() {
+  const p = _buildAggregatePolicy();
+  const filePath = _policyPath();
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const tmp = filePath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(p, null, 2), { mode: 0o640 });
+    fs.renameSync(tmp, filePath);  // atomic on same filesystem (preflight P6)
+    log.info('Sidecar policy.json written', { path: filePath, version: p.version, mode: p.mode, allowlistSize: p.allowlist.length });
+  } catch (e) {
+    log.warn('Failed to write policy.json (non-fatal)', { path: filePath, error: e.message });
+    return false;
+  }
+  if (_onPolicyWritten) {
+    try { _onPolicyWritten(p); } catch (e) { log.warn('onPolicyWritten hook threw', { error: e.message }); }
+  }
+  return true;
 }
 
 function pruneOldBlockLog({ keepDays = 30, maxRows = 10_000 } = {}) {
@@ -344,6 +411,9 @@ module.exports = {
   getBlockLog,
   recordBlockedAttempt,
   pruneOldBlockLog,
+  // Sidecar wiring (v6.7.0-alpha.2)
+  writePolicyFile,
+  setOnPolicyWritten,
   // Internals for tests
-  _internals: { PRESETS, IMDS_ENDPOINTS, REFUSING_CAPS, resolvePreset, validateAllowlistEntry, dedupe },
+  _internals: { PRESETS, IMDS_ENDPOINTS, REFUSING_CAPS, resolvePreset, validateAllowlistEntry, dedupe, _buildAggregatePolicy },
 };

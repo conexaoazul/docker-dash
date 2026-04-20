@@ -2,6 +2,62 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.7.0-alpha.2] - 2026-04-20 — "Outbound Filter: sidecar ships"
+
+Ships the `dd-egress-proxy` Go sidecar — the real enforcement data plane for the v6.7 Outbound Network Filter. Validated end-to-end on staging: allow + block + SIGHUP-reload all work. rc1 wires it into the UI + iptables; alpha.2 is standalone (HTTP_PROXY mode).
+
+### Added — The sidecar
+
+- **`docker/egress-filter/main.go`** — 450 LOC Go sidecar. Static binary, scratch base, 2.2 MB final image. No CGO, cross-compiles cleanly to amd64 + arm64 (preflight P8 pattern).
+  - TLS SNI extraction from ClientHello (handcrafted parser, no dep on Go's tls package for peek)
+  - HTTP `Host:` header + `CONNECT host:port` parsing
+  - Hostname allowlist match with leading-wildcard support (`*.github.com` matches `a.github.com`)
+  - IMDS endpoints (`169.254.169.254`, `metadata.google.internal`, `169.254.170.2`) always blocked regardless of policy (deep-spec §13 decision 7 invariant)
+  - Atomic-pointer policy swap on `SIGHUP` — in-flight connections keep their snapshot (preflight P3 pattern)
+  - Two modes: `enforce` (block) and `audit-only` (log only, forward anyway)
+  - Append-only deny log at `/var/log/dd-egress/denied.log`
+  - Prometheus `/metrics` endpoint (opt-in via env): allowed/blocked/audit-only/upstream-errors/reloads counters
+  - `/health` endpoint reports policy version + allowlist size + mode
+- **`docker/egress-filter/Dockerfile`** — multi-arch build recipe. Graduates from P8 spike.
+- **`docker/egress-filter/README.md`** — complete operator guide with policy.json shape, env vars, HTTP_PROXY usage example.
+
+### Added — Docker Dash wiring to the sidecar
+
+- **`src/services/egress-filter.js`** gains `writePolicyFile()` + `setOnPolicyWritten()`:
+  - Aggregates ALL active DB policies into a single union allowlist + merged mode
+  - Writes `policy.json` atomically (tmp + rename — preflight P6)
+  - Calls a hook after every create/update/remove
+- **`src/server.js`** wires the hook: after `writePolicyFile()` completes, inspects the `dd-egress-filter` sidecar container (opt-in, name configurable via `DD_EGRESS_SIDECAR_NAME`) and sends SIGHUP if running. If absent → silent no-op (alpha users running without the sidecar don't see errors).
+
+### Staging smoke test (this release)
+
+Verified end-to-end on staging 2026-04-20:
+
+| Test | Result |
+|---|---|
+| Sidecar starts + loads policy v1 (2 hosts, enforce mode) | ✅ `ok policy_v1 allowlist=2 mode=enforce` |
+| httpbin.org (in allowlist) via sidecar as HTTPS_PROXY | ✅ forwarded |
+| example.com (NOT in allowlist) via sidecar | ✅ blocked — `reason=not-in-allowlist` in deny log |
+| SIGHUP with new policy v2 (adds example.com) | ✅ log: `reloaded policy v2 mode=enforce allowlist=3` |
+| Retry example.com after SIGHUP | ✅ forwarded |
+| Prometheus `/metrics` | ✅ `allowed_total=1, blocked_total=1, reloads_total=1` |
+| Image size | 2.2 MB (scratch + static Go binary) |
+| Multi-arch buildx (amd64 + arm64) | ✅ both built |
+
+### What alpha.2 does NOT ship (saved for rc1)
+
+- **No UI.** Users create policies via `/api/egress-filter/policies` REST (shipped in alpha.1).
+- **No automatic iptables redirect.** Users wire via HTTP_PROXY env or manual iptables. rc1 ships `src/services/egress-runner.js` that installs redirect rules via a short-lived `NET_ADMIN` helper container (preflight P1 validated).
+- **No per-container allowlist routing.** Alpha's sidecar uses one global policy (union of all active DB policies). rc1 adds source-IP-keyed per-container policies.
+- **Image not published to GHCR.** Users build locally with the provided Dockerfile. GHCR publishing waits for the repo settings toggle (BACKLOG P3).
+
+### Tests
+
+- `egress-filter.test.js` gains 6 writer tests: aggregate empty, single enforce, mixed modes, all audit-only, atomic write + hook call, update+remove rewrite.
+- **Total: 612 passing / 41 suites** (606 → 612, +6).
+
+---
+
 ## [6.7.0-alpha.1] - 2026-04-20 — "Outbound Filter: config layer"
 
 **First component of the v6.7 milestone. Policies persist but are NOT enforced in this alpha** — the sidecar + nftables data plane lands in `v6.7.0-rc2`. Alpha ships so downstream UI can wire against a stable API.

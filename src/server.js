@@ -293,6 +293,28 @@ async function start() {
     (channel, data) => wsServer.broadcast('remediate:job:update', data, channel)
   );
 
+  // Egress Filter (v6.7.0-alpha.2): after each policy write, SIGHUP the sidecar.
+  // The sidecar is opt-in — user runs a container named `dd-egress-filter`. If it's
+  // absent, this hook silently succeeds (alpha testing without the sidecar is fine).
+  const egressFilter = require('./services/egress-filter');
+  const SIDECAR_CONTAINER = process.env.DD_EGRESS_SIDECAR_NAME || 'dd-egress-filter';
+  egressFilter.setOnPolicyWritten(async () => {
+    try {
+      const docker = dockerService.getDocker(0);
+      const container = docker.getContainer(SIDECAR_CONTAINER);
+      // inspect first so we only signal a running sidecar
+      const info = await container.inspect();
+      if (info?.State?.Running) {
+        await container.kill({ signal: 'SIGHUP' });
+      }
+    } catch (e) {
+      // Sidecar not running or not present — fine for alpha.
+      if (!/no such container/i.test(e.message || '')) {
+        require('./utils/logger')('egress-filter').debug('sidecar SIGHUP skipped', { error: e.message });
+      }
+    }
+  });
+
   // Start stats collector
   const statsService = require('./services/stats');
   statsService.start();
