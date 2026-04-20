@@ -7,7 +7,6 @@ const alertService = require('../services/alerts');
 const auditService = require('../services/audit');
 const authService = require('../services/auth');
 const dockerService = require('../services/docker');
-const { dockerEvents } = require('../services/misc');
 const { getDb } = require('../db');
 const config = require('../config');
 const log = require('../utils/logger')('jobs');

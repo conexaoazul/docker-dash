@@ -10,7 +10,7 @@ const dockerService = require('../services/docker');
 const auditService = require('../services/audit');
 const permService = require('../services/permissions');
 const { requireAuth, requireRole, writeable, requireFeature } = require('../middleware/auth');
-const { getClientIp, sanitizeId, sanitizeShellArg, formatBytes } = require('../utils/helpers');
+const { getClientIp, sanitizeShellArg, formatBytes } = require('../utils/helpers');
 const { getDb } = require('../db');
 
 const { extractHostId } = require('../middleware/hostId');

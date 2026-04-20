@@ -3,7 +3,7 @@
 const { Router } = require('express');
 const dockerService = require('../services/docker');
 const auditService = require('../services/audit');
-const { requireAuth, requireRole, writeable, requireFeature } = require('../middleware/auth');
+const { requireAuth, requireRole, writeable } = require('../middleware/auth');
 const { getClientIp } = require('../utils/helpers');
 
 const { getDb } = require('../db');

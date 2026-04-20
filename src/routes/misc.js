@@ -9,7 +9,6 @@ const statsService = require('../services/stats');
 const { requireAuth, optionalAuth, requireRole, writeable } = require('../middleware/auth');
 const { getClientIp, formatBytes } = require('../utils/helpers');
 const { getDb } = require('../db');
-const config = require('../config');
 const dockerService = require('../services/docker');
 const log = require('../utils/logger')('misc');
 

@@ -5,7 +5,6 @@ const { X509Certificate, createHash } = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const log = require('../utils/logger')('certificates');
 
 /**
  * Parse a PEM certificate using Node's built-in crypto.X509Certificate — returns an object with

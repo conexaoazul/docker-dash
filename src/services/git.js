@@ -5,7 +5,7 @@ const fs = require('fs');
 // child_process used via _execFile method (execFileSync)
 const simpleGit = require('simple-git');
 const { getDb } = require('../db');
-const { encrypt, decrypt, generateToken, hmacSign } = require('../utils/crypto');
+const { encrypt, decrypt, generateToken } = require('../utils/crypto');
 const { now } = require('../utils/helpers');
 const log = require('../utils/logger')('git');
 

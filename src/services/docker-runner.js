@@ -8,7 +8,7 @@
 //
 // Spec: docs/planning/v6.6/remediation-wizard/02-deep-spec.md §3-4
 
-const { execFileSync, spawn } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const log = require('../utils/logger')('docker-runner');
 const dockerService = require('./docker');

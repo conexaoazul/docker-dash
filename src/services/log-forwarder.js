@@ -5,7 +5,7 @@ const https = require('https');
 const dgram = require('dgram');
 const net = require('net');
 const { getDb } = require('../db');
-const { encrypt, decrypt } = require('../utils/crypto');
+const { decrypt } = require('../utils/crypto');
 const log = require('../utils/logger')('log-forwarder');
 
 // ─── Batch buffer per forwarder ─────────────────────────

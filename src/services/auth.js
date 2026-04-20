@@ -7,7 +7,7 @@ const config = require('../config');
 const ldapService = require('./ldap');
 const { generateToken, sha256, encrypt, decrypt } = require('../utils/crypto');
 const totp = require('../utils/totp');
-const { now, getClientIp } = require('../utils/helpers');
+const { now } = require('../utils/helpers');
 const log = require('../utils/logger')('auth');
 
 // Pre-computed dummy hash used for timing-safe "user not found" path (FIX #18).

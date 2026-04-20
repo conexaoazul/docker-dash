@@ -2,7 +2,6 @@
 
 const dockerService = require('./docker');
 const log = require('../utils/logger')('stack-bundle');
-const { now } = require('../utils/helpers');
 
 class StackBundleService {
   /**

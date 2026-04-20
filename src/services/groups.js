@@ -1,7 +1,6 @@
 'use strict';
 
 const { getDb } = require('../db');
-const { now } = require('../utils/helpers');
 
 const groups = {
   list(userId) {

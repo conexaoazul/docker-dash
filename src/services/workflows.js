@@ -1,7 +1,7 @@
 'use strict';
 
 const { getDb } = require('../db');
-const { now, tryParseJson } = require('../utils/helpers');
+const { now } = require('../utils/helpers');
 const log = require('../utils/logger')('workflows');
 
 class WorkflowService {
