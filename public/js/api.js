@@ -372,6 +372,9 @@ const Api = {
   egressFilterCreatePolicy(body)       { return this.post('/egress-filter/policies', body); },
   egressFilterUpdatePolicy(id, body)   { return this.patch(`/egress-filter/policies/${id}`, body); },
   egressFilterDeletePolicy(id, reason) { return this.delete(`/egress-filter/policies/${id}`, { reason }); },
+  egressFilterApply(id)                { return this.post(`/egress-filter/policies/${id}/apply`); },
+  egressFilterUnapply(id)              { return this.post(`/egress-filter/policies/${id}/unapply`); },
+  egressFilterStatus(id)               { return this.get(`/egress-filter/policies/${id}/status`); },
   egressFilterBlockLog(id, opts = {}) {
     const q = [];
     if (opts.limit != null) q.push(`limit=${opts.limit}`);

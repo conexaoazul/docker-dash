@@ -13,12 +13,13 @@ const { getClientIp } = require('../utils/helpers');
 const auditService = require('../services/audit');
 const dockerService = require('../services/docker');
 const egressFilter = require('../services/egress-filter');
+const egressRunner = require('../services/egress-runner');
 const log = require('../utils/logger')('egress-filter');
 
 const router = Router();
 
-// v6.7-rc2 flips this to true once the sidecar ships.
-const ENFORCEMENT_ACTIVE = false;
+// Enforcement became real in v6.7.0-alpha.3 — opt-in via `apply` API.
+const ENFORCEMENT_ACTIVE = true;
 
 // ─── Presets ────────────────────────────────────────────
 
@@ -121,9 +122,7 @@ router.post('/policies', requireAuth, requireRole('admin'), writeable, async (re
       allowlist: result.allowlist,
       mode: result.mode,
       enforced: ENFORCEMENT_ACTIVE,
-      note: ENFORCEMENT_ACTIVE
-        ? undefined
-        : 'Policy persisted but not enforced in this alpha. Enforcement lands in v6.7.0-rc2 (sidecar).',
+      note: 'Policy persisted. Call POST /apply to install the iptables redirect into the target container\'s netns.',
     });
   } catch (err) {
     // Validation errors come from the service layer as regular Error
@@ -191,6 +190,106 @@ router.delete('/policies/:id', requireAuth, requireRole('admin'), writeable, asy
 
 // ─── Block log ──────────────────────────────────────────
 
+// ─── Enforcement (v6.7.0-alpha.3) ───────────────────────
+
+// POST /policies/:id/apply — install iptables redirect for this policy's scope.
+// Requires DD_EGRESS_SIDECAR_ENDPOINT env to be set on the Docker Dash container.
+router.post('/policies/:id/apply', requireAuth, requireRole('admin'), writeable, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const policy = egressFilter.getPolicy(id);
+    if (!policy) return res.status(404).json({ error: 'Policy not found' });
+    if (!policy.active) return res.status(400).json({ error: 'Policy is soft-deleted — recreate to re-apply' });
+
+    if (policy.scopeType !== 'container') {
+      return res.status(501).json({ error: `Apply for scope '${policy.scopeType}' is not yet implemented — v6.7.0-rc1 adds stack scope.` });
+    }
+
+    // Precondition: can the filter even attach? (NET_ADMIN / privileged / host-mode → refuse)
+    try {
+      const docker = dockerService.getDocker(policy.hostId || 0);
+      const inspect = await docker.getContainer(policy.scopeKey).inspect();
+      const precheck = egressFilter.canApplyFilter(inspect);
+      if (!precheck.ok) return res.status(422).json({ error: precheck.reason });
+    } catch (e) {
+      return res.status(404).json({ error: `Container ${policy.scopeKey} not found or unreachable: ${e.message}` });
+    }
+
+    const result = await egressRunner.applyToContainer({
+      containerId: policy.scopeKey,
+      hostId: policy.hostId || 0,
+    });
+
+    await auditService.log({
+      userId: req.user?.id,
+      username: req.user?.username,
+      ip: getClientIp(req),
+      action: 'egress_policy_applied',
+      details: { policyId: id, containerId: policy.scopeKey, hostId: policy.hostId },
+    });
+
+    res.json({ ok: true, applied: true, output: result.output });
+  } catch (err) {
+    const msg = err.message || 'Internal server error';
+    if (/DD_EGRESS_SIDECAR_ENDPOINT/.test(msg)) {
+      return res.status(503).json({ error: msg });
+    }
+    log.error('apply egress policy', err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// POST /policies/:id/unapply — remove iptables redirect for this policy's scope.
+router.post('/policies/:id/unapply', requireAuth, requireRole('admin'), writeable, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const policy = egressFilter.getPolicy(id);
+    if (!policy) return res.status(404).json({ error: 'Policy not found' });
+
+    if (policy.scopeType !== 'container') {
+      return res.status(501).json({ error: `Unapply for scope '${policy.scopeType}' is not yet implemented.` });
+    }
+
+    const result = await egressRunner.removeFromContainer({
+      containerId: policy.scopeKey,
+      hostId: policy.hostId || 0,
+    });
+
+    await auditService.log({
+      userId: req.user?.id,
+      username: req.user?.username,
+      ip: getClientIp(req),
+      action: 'egress_policy_unapplied',
+      details: { policyId: id, containerId: policy.scopeKey, hostId: policy.hostId },
+    });
+
+    res.json({ ok: true, applied: false, output: result.output });
+  } catch (err) {
+    log.error('unapply egress policy', err);
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+// GET /policies/:id/status — is the filter currently installed in the target's netns?
+router.get('/policies/:id/status', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const policy = egressFilter.getPolicy(id);
+    if (!policy) return res.status(404).json({ error: 'Policy not found' });
+    if (policy.scopeType !== 'container') {
+      return res.status(501).json({ error: `Status for scope '${policy.scopeType}' is not yet implemented.` });
+    }
+    const result = await egressRunner.isApplied({
+      containerId: policy.scopeKey,
+      hostId: policy.hostId || 0,
+    });
+    res.json({ policyId: id, applied: result.applied, details: result.details });
+  } catch (err) {
+    log.error('status egress policy', err);
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
 // GET /policies/:id/block-log — paginated deny log for this policy
 router.get('/policies/:id/block-log', requireAuth, requireRole('admin'), (req, res) => {
   try {
@@ -206,9 +305,9 @@ router.get('/policies/:id/block-log', requireAuth, requireRole('admin'), (req, r
       entries,
       policyId: id,
       enforced: ENFORCEMENT_ACTIVE,
-      note: ENFORCEMENT_ACTIVE
-        ? undefined
-        : 'Block log is empty in this alpha — no enforcement yet, nothing to log. Sidecar lands in v6.7.0-rc2.',
+      note: entries.length === 0
+        ? 'No deny events logged yet. If enforcement is applied (see /status), either traffic is all allowed, nothing has tried to exfiltrate, or the sidecar\'s local deny log hasn\'t been ingested to the DB yet (ingestion pipeline lands in rc1).'
+        : undefined,
     });
   } catch (err) {
     log.error('block log', err);

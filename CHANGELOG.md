@@ -2,6 +2,69 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.7.0-alpha.3] - 2026-04-20 — "Outbound Filter: enforcement via egress-runner"
+
+Wires the alpha.2 sidecar into a one-click apply / remove flow via a short-lived `NET_ADMIN` helper container that installs nftables rules into the target's netns. Users no longer need to set `HTTP_PROXY` env manually — `POST /api/egress-filter/policies/:id/apply` handles it.
+
+**`ENFORCEMENT_ACTIVE` flag flipped to `true`** in the route layer. API responses no longer say "config only."
+
+### Added — The runner
+
+- **`src/services/egress-runner.js`** (~180 LOC):
+  - `applyToContainer({containerId, hostId})` — runs `alpine` + nftables with `--network container:<target>` + `NET_ADMIN`, installs `ip ddout` table with NAT prerouting rules that accept DNS/loopback/RFC1918 pass-through + redirect everything else to the sidecar.
+  - `removeFromContainer` — idempotent cleanup via `nft delete table ip ddout 2>/dev/null || true`.
+  - `isApplied` — inspects target's netns for our table marker.
+  - Requires `DD_EGRESS_SIDECAR_ENDPOINT=<ip:port>` env on the Docker Dash container (operator configures — runner does NOT auto-discover).
+  - Container scope only in this release; stack scope returns `501 Not Implemented` with a clear upgrade path for rc1.
+
+### Added — REST endpoints
+
+- `POST /api/egress-filter/policies/:id/apply` — runs the precondition check (refuses NET_ADMIN / privileged / host), then installs rules. Audit-logged as `egress_policy_applied`.
+- `POST /api/egress-filter/policies/:id/unapply` — removes rules. Safe to call when nothing applied. Audit-logged as `egress_policy_unapplied`.
+- `GET /api/egress-filter/policies/:id/status` — reports `{applied: bool, details: <nft output>}`.
+- Frontend API methods: `Api.egressFilterApply / Unapply / Status`.
+
+### Staging E2E verified (this release)
+
+Ephemeral target container + sidecar on staging 2026-04-20:
+
+| Step | Result |
+|---|---|
+| Target baseline: `curl https://httpbin.org` + `curl https://example.com` | ✅ both 200 |
+| Install filter via helper (rules script ran cleanly, echoed "applied") | ✅ |
+| After filter: `curl https://httpbin.org` (in allowlist) | ✅ 200 |
+| After filter: `curl https://example.com` (NOT in allowlist) | ✅ connection reset; sidecar logs `host=example.com port=443 reason=not-in-allowlist` |
+| Remove filter via helper | ✅ echoed "removed" |
+
+### Operator configuration required (before calling `/apply`)
+
+Set the sidecar's network-reachable address on the Docker Dash container:
+
+```yaml
+services:
+  app:
+    environment:
+      DD_EGRESS_SIDECAR_ENDPOINT: "172.17.0.5:29193"  # sidecar's bridge IP + listen port
+      DD_EGRESS_SIDECAR_NAME: "dd-egress-filter"       # optional, default shown
+```
+
+Without this env, `/apply` returns `503` with a clear error pointing to the setting.
+
+### What alpha.3 does NOT ship (saved for rc1)
+
+- **No UI** — still REST-only. rc1 ships the 3-step modal + Apply / Remove buttons in the System → Egress tab.
+- **Stack scope** — iterating every service in a compose project. Simple loop on top of the existing container-scope runner — rc1.
+- **Per-container allowlist routing** — alpha.3 sidecar is one global policy. rc1 evaluates source-IP → policy_id lookup.
+- **GHCR image publish** — one repo-setting toggle away.
+
+### Tests
+
+- `egress-runner.test.js` — 16 new tests. Mocks the docker API (the actual nftables install was already validated in preflight P1 on staging). Covers: env validation, script shape (DNS/loopback/RFC1918 passthrough + sidecar redirect), idempotent apply, helper cleanup on failure, `isApplied` parsing, removal safety.
+- `egress-filter-routes.test.js` — 4 tests updated for flipped `enforced: true` flag.
+- **Total: 628 passing / 42 suites** (612 → 628, +16).
+
+---
+
 ## [6.7.0-alpha.2] - 2026-04-20 — "Outbound Filter: sidecar ships"
 
 Ships the `dd-egress-proxy` Go sidecar — the real enforcement data plane for the v6.7 Outbound Network Filter. Validated end-to-end on staging: allow + block + SIGHUP-reload all work. rc1 wires it into the UI + iptables; alpha.2 is standalone (HTTP_PROXY mode).

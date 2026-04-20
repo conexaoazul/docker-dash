@@ -56,7 +56,7 @@ describe('GET /api/egress-filter/presets', () => {
     expect(res.status).toBe(200);
     expect(res.body.presets.length).toBeGreaterThanOrEqual(5);
     expect(res.body.imdsAlwaysBlocked).toEqual(expect.arrayContaining(['169.254.169.254']));
-    expect(res.body.enforced).toBe(false);  // alpha.1
+    expect(res.body.enforced).toBe(true);  // alpha.3 flipped this on
   });
 });
 
@@ -89,14 +89,14 @@ describe('POST /api/egress-filter/policies', () => {
     expect(res.body.error).toMatch(/Unknown preset/);
   });
 
-  it('creates a policy for stack scope and returns enforced:false + note', async () => {
+  it('creates a policy for stack scope and returns enforced:true + apply note', async () => {
     const res = await request(app).post('/api/egress-filter/policies').set(auth())
       .send({ scopeType: 'stack', scopeKey: 'mystack', preset: 'registry-only' });
     expect(res.status).toBe(201);
     expect(res.body.ok).toBe(true);
     expect(res.body.updated).toBe(false);
-    expect(res.body.enforced).toBe(false);
-    expect(res.body.note).toMatch(/not enforced/i);
+    expect(res.body.enforced).toBe(true);
+    expect(res.body.note).toMatch(/POST \/apply/);
     expect(res.body.allowlist).toEqual(expect.arrayContaining(['docker.io']));
   });
 
@@ -136,7 +136,7 @@ describe('GET /api/egress-filter/policies', () => {
     const res = await request(app).get('/api/egress-filter/policies').set(auth());
     expect(res.status).toBe(200);
     expect(res.body.policies).toHaveLength(2);
-    expect(res.body.enforced).toBe(false);
+    expect(res.body.enforced).toBe(true);
   });
 });
 
@@ -176,7 +176,7 @@ describe('DELETE /api/egress-filter/policies/:id', () => {
 });
 
 describe('GET /api/egress-filter/policies/:id/block-log', () => {
-  it('returns empty for fresh policy + an alpha note', async () => {
+  it('returns empty for fresh policy + a note explaining why', async () => {
     const create = await request(app).post('/api/egress-filter/policies').set(auth())
       .send({ scopeType: 'stack', scopeKey: 's1', preset: 'registry-only' });
     const id = create.body.policyId;
@@ -184,8 +184,8 @@ describe('GET /api/egress-filter/policies/:id/block-log', () => {
     const res = await request(app).get(`/api/egress-filter/policies/${id}/block-log`).set(auth());
     expect(res.status).toBe(200);
     expect(res.body.entries).toEqual([]);
-    expect(res.body.enforced).toBe(false);
-    expect(res.body.note).toMatch(/empty in this alpha/i);
+    expect(res.body.enforced).toBe(true);
+    expect(res.body.note).toMatch(/No deny events logged yet/);
   });
 
   it('404 on unknown policy', async () => {
