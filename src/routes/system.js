@@ -1645,6 +1645,7 @@ router.get('/egress-audit', requireAuth, requireRole('admin'), async (req, res) 
         const analysis = egressAudit.analyzeContainer(inspect, networksByName);
         return {
           id: c.Id.substring(0, 12),
+          fullId: c.Id,
           name,
           image: c.Image,
           state: c.State,

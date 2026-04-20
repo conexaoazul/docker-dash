@@ -293,6 +293,14 @@ async function start() {
     (channel, data) => wsServer.broadcast('remediate:job:update', data, channel)
   );
 
+  // Egress Filter block-log ingester (v6.7.0-rc1): tails the sidecar's
+  // deny log and inserts new entries into egress_block_log every 30s.
+  // Opt-in via DD_EGRESS_BLOCKLOG_INGESTER=1 (off by default for alpha users
+  // who don't run the sidecar).
+  if (process.env.DD_EGRESS_BLOCKLOG_INGESTER === '1') {
+    require('./services/egress-blocklog-ingester').start();
+  }
+
   // Egress Filter (v6.7.0-alpha.2): after each policy write, SIGHUP the sidecar.
   // The sidecar is opt-in — user runs a container named `dd-egress-filter`. If it's
   // absent, this hook silently succeeds (alpha testing without the sidecar is fine).

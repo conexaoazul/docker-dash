@@ -2,6 +2,61 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.7.0-rc.1] - 2026-04-20 — "Outbound Filter: UI + block log + How-To"
+
+First release candidate for v6.7.0. Alphas 1-4 built the foundation, sidecar, enforcement, stack scope. rc.1 ships the user-facing surface (UI in System → Egress tab), block log ingestion from sidecar → DB, and a bilingual How-To guide. **The feature is now end-to-end usable by someone who's never looked at the REST API.**
+
+### Added — UI (System → Egress tab)
+
+- **New Filter column** per container row:
+  - Shows "Enable filter" button for unfiltered containers
+  - Shows preset + mode badge (e.g. `registry-only · enforce`) + cog icon for filtered ones
+- **Enable modal** — 3-step flow reusing established patterns:
+  - Preset picker (registry-only, registries-github, lockdown, audit-only, custom)
+  - Mode selector (enforce / audit-only)
+  - Custom allowlist textarea with live validation
+  - Save & apply in one click — creates policy → writes policy.json → runs helper to install iptables → reports success
+- **Manage modal** — same shell for existing policies. Shows current preset/allowlist/mode, allows edit + re-apply, **Unapply** (config retained), or **Emergency disable** (red button — unapplies + deletes policy + audit-logs with operator reason).
+- **Expandable deny log** — click a filtered row's chevron → shows last 25 block events with timestamp, hostname, port, reason. Lazy-loaded (no extra API call until user expands).
+- **Live status** — table refreshes after every apply/unapply so state is always current.
+- **Callout updated** — no longer says "read-only audit"; explains that sidecar + `DD_EGRESS_SIDECAR_ENDPOINT` env unlock enforcement.
+
+### Added — Block log ingestion
+
+- **`src/services/egress-blocklog-ingester.js`** — background job that every 30s runs `docker exec dd-egress-filter tail -n 500 /var/log/dd-egress/denied.log`, parses new lines (dedupes on timestamp), and inserts into `egress_block_log` via the existing contract.
+- **Opt-in** via `DD_EGRESS_BLOCKLOG_INGESTER=1` env (off by default — alpha users without the sidecar don't pay the cost).
+- **Detects sidecar restart** via container-id change and resets offset — old entries in a rotated log get re-ingested cleanly.
+- **11 unit tests** — parser for line format + Go log prefix, no-op on missing/stopped sidecar, dedup across ticks, sidecar restart handling, junk-line skipping, no-policy no-op.
+
+### Added — Bilingual How-To (EN + RO)
+
+- **`055_howto_outbound_filter.js`** — "Enforce Outbound Allowlists with the Egress Filter". Covers threat model, architecture, setup (two steps), UI walkthrough, invariants table, audit events, gotchas table, per-container vs per-stack, explicit non-goals (no TLS decryption, no IPv6 this release).
+
+### Architecture decision documented: per-container routing
+
+The sidecar runs **one aggregate policy** in this release — the union of all active DB policies. For users needing isolated per-container policies, the pattern is **multiple named sidecars** (`dd-egress-filter-api`, `dd-egress-filter-db`, etc.), each with its own `DD_EGRESS_SIDECAR_ENDPOINT` on the Docker Dash container — switch which sidecar a policy targets via a small config extension to the service. Source-IP-keyed sidecar routing was considered but rejected as over-engineering for the single-node deploy target.
+
+### Tests
+
+- **648 → 648 passing** (UI changes don't affect test counts; +11 ingester tests offset the UI-only additions).
+
+### What closes the v6.7 milestone
+
+- ✅ Go sidecar with SNI peek (alpha.2)
+- ✅ egress-runner with iptables install via NET_ADMIN helper (alpha.3)
+- ✅ Stack scope with transactional apply (alpha.4)
+- ✅ UI with 3-step modal + deny log viewer (rc.1)
+- ✅ Block log ingestion (rc.1)
+- ✅ Bilingual How-To (rc.1)
+
+### Remaining to v6.7.0 final
+
+- **GHCR image publish** — one-click repo toggle (Settings → Actions → Workflow permissions → Read and write). Then the buildx workflow in `.github/workflows/` publishes automatically.
+- **Community testing on non-Ubuntu hosts** — preflight P2 partial (Ubuntu 22.04 confirmed; Debian 11 + RHEL 8 are low-risk but unverified).
+- **Design-partner validation of presets** — preflight P7 pending user survey.
+
+---
+
 ## [6.7.0-alpha.4] - 2026-04-20 — "Outbound Filter: stack scope"
 
 Extends alpha.3's container-scope enforcement to entire compose stacks. A single `POST /apply` now iterates every container with the same `com.docker.compose.project` label and installs the filter atomically.
