@@ -20,8 +20,12 @@ Turn the v6.6.2 audit from **visibility** into **enforcement**. Users pick a con
 |---|---|---|
 | `01-feature-spec.md` | Contract: what users do, what they see, out-of-scope | Product sign-off |
 | `02-deep-spec.md` | Hard technical decisions with alternatives | Implementation |
+| `03-assumption-audit.md` | Every claim in the specs, rated L×I, with verification plan | Pre-implementation review |
+| `04-preflight.md` | 10 time-boxed verification tasks to run BEFORE coding | Whoever runs the spike session |
 
 Earlier pipeline stages (research, brainstorm) collapse into the feature-spec — the proposal already did the exploratory work.
+
+`05-preflight-results.md` will be created during preflight execution (matches v6.5/v6.6 pattern).
 
 ## Rough effort estimate
 
