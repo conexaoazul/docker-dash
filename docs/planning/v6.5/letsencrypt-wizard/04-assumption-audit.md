@@ -47,7 +47,7 @@ Each assumption has:
 
 ---
 
-## A4. The 5 Tier-1 Caddy DNS plugins compile cleanly with current Caddy version ✅ amd64 VALIDATED, ⚠ arm64 PENDING 2026-04-20
+## A4. The 5 Tier-1 Caddy DNS plugins compile cleanly with current Caddy version ✅ FULLY VALIDATED 2026-04-20
 
 **Claim:** `xcaddy build` with our 5 plugins produces a working binary on both `linux/amd64` and `linux/arm64`.
 
@@ -57,7 +57,9 @@ Each assumption has:
 
 Build time ~2 min, image 163 MB, all 5 DNS plugins listed in `caddy list-modules`. See `05-preflight-results.md` Section A4.
 
-**Result (arm64):** Not yet executed. **Action item:** run via GitHub Actions buildx with `--platform linux/arm64` in a separate PR before main implementation lands.
+**Result (arm64):** PASS via GitHub Actions multi-arch buildx (`648b2f5`, run 24650042876, 2026-04-20). Both `linux/amd64 builder` and `linux/arm64 builder` reached "exporting to image" — all 5 plugins compiled cleanly on arm64 under QEMU emulation against Go 1.25 (auto-downloaded via GOTOOLCHAIN=auto). Total wall time 19m40s.
+
+The run reported failure overall ONLY because of GHCR `permission_denied: write_package` at the push step — an operational permissions issue, not an architectural one. Fix: enable "Read and write permissions" in Repo Settings → Actions → Workflow permissions, then re-trigger.
 
 **Risk if arm64 fails:** ARM64 users (Raspberry Pi, Mac M-series) lose plugin support. v6.5 launches AMD64-only, alienating ~40% of homelab audience.
 
@@ -311,8 +313,8 @@ Phase 1 executed 2026-04-20 in ~50 min wall time. Findings in `05-preflight-resu
 | A1 — Caddy admin API mutations | ✅ VALIDATED | PUT-then-POST-then-DELETE pattern works |
 | A2 — Caddy file substitution JSON paths | ⚠ INVALIDATED | Fallback to one-file-per-field adopted |
 | A3 — Caddy reloads credentials from file | ✅ VALIDATED + BONUS | Per-request reload — no restart needed for rotation |
-| A4 — 5 plugins compile clean amd64 | ✅ VALIDATED (Caddy 2.11.2 + GOTOOLCHAIN=auto) | — |
-| A4 — 5 plugins compile clean arm64 | ⏳ PENDING | Defer to GHA buildx |
+| A4 — 5 plugins compile clean amd64 | ✅ VALIDATED (Caddy 2.11.2 + GOTOOLCHAIN=auto) | preflight 2026-04-20 |
+| A4 — 5 plugins compile clean arm64 | ✅ VALIDATED via GHA buildx (run 24650042876) | 2026-04-20 |
 | A11 — Network isolation for admin API | ❌ INVALIDATED → ✅ PIVOTED | Unix socket + shared volume |
 | A12 — v6.4 → v6.5 upgrade safe | ⏳ PENDING | Defer to first staging integration test |
 

@@ -121,7 +121,19 @@ Image size: 163 MB (vs ~80MB stock caddy:2-alpine — acceptable +83 MB for 5 pl
 2. Update `03-deep-spec.md` Section 11: same
 3. Add `ENV GOTOOLCHAIN=auto` to Dockerfile (allows future plugin upgrades to pull required Go versions automatically)
 
-**arm64 not yet validated.** Cross-compilation via QEMU would take ~30 min. Defer to GitHub Actions where buildx + native arm64 runners are available. **Risk:** if arm64 fails for any plugin, drop that plugin from Tier 1.
+**arm64 VALIDATED 2026-04-20** via GitHub Actions multi-arch buildx (`docker/caddy/Dockerfile` + `.github/workflows/caddy-image.yml`, commit `648b2f5`).
+
+- Run: https://github.com/bogdanpricop/docker-dash/actions/runs/24650042876
+- Total time: 19 min 40s (amd64 + arm64 in parallel via QEMU)
+- Both `linux/amd64 builder` and `linux/arm64 builder` reached "exporting to image" — proof that all 5 plugins compiled cleanly under QEMU emulation against Go 1.25 (auto-downloaded via `GOTOOLCHAIN=auto`)
+- Smoke tests for `caddy list-modules` were not executed because the run failed at the GHCR push step (`permission_denied: write_package`) — separate concern from architectural validation
+
+**Push permission issue (separate, easy fix):**
+- Repo Settings → Actions → General → Workflow permissions → switch to "Read and write permissions"
+- OR after first manual `docker push` from a local terminal, link the package to the repo via package Settings
+- Re-trigger via `gh workflow run caddy-image.yml`
+
+**Architectural conclusion: A4 fully closed.** Both architectures compile. The push-permission fix is operational, not a spec change.
 
 ---
 

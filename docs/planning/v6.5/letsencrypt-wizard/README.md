@@ -48,7 +48,8 @@ Total: ~63 min reading. Preflight Phase 1 already executed (50 min wall time).
 - [x] Preflight checklist drafted
 - [x] **Preflight Phase 1 executed (5 of 6 critical assumptions validated; results in `05-preflight-results.md`)**
 - [x] **Spec amendments applied** (Caddy 2.11.2, Unix socket admin, GOTOOLCHAIN=auto, drop reload-after-rotation, one-file-per-field)
-- [ ] arm64 build validation in GitHub Actions
+- [x] **arm64 build validation in GitHub Actions** (run 24650042876 — both arch's compiled cleanly, only push to GHCR failed on permissions — fix is operational)
+- [ ] Enable Repo Settings → Actions → Workflow permissions = "Read and write" → re-trigger build
 - [ ] Session 1: Migration + service skeletons
 - [ ] Session 2: Routes + custom Caddy image
 - [ ] Session 3: UI wizard
