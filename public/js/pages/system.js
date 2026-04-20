@@ -3438,25 +3438,31 @@ DB_PASS=secret"></textarea>
     });
   },
 
-  async _renderSecretsAudit(el) {
+  async _renderSecretsAudit(rootEl) {
+    // NOTE: `rootEl` is the outer container (held by the page). Do NOT reassign
+    // it — the subtab click handler's closure captures this variable, and if
+    // it points at the inner sub-content div, subsequent clicks render the
+    // tab bar INSIDE the inner div (tabs duplicate).
     const activeSub = this._secretsSubtab || 'audit';
     const tabBar = '<div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border)">'
       + '<button class="secrets-subtab-btn" data-sub="audit" style="padding:8px 14px;border:none;background:none;cursor:pointer;border-bottom:2px solid ' + (activeSub === 'audit' ? 'var(--accent)' : 'transparent') + ';color:' + (activeSub === 'audit' ? 'var(--text-bright)' : 'var(--text-dim)') + ';font-weight:' + (activeSub === 'audit' ? '600' : '400') + '"><i class="fas fa-shield-alt" style="margin-right:6px"></i>Audit &amp; Wizard</button>'
       + '<button class="secrets-subtab-btn" data-sub="rotation" style="padding:8px 14px;border:none;background:none;cursor:pointer;border-bottom:2px solid ' + (activeSub === 'rotation' ? 'var(--accent)' : 'transparent') + ';color:' + (activeSub === 'rotation' ? 'var(--text-bright)' : 'var(--text-dim)') + ';font-weight:' + (activeSub === 'rotation' ? '600' : '400') + '"><i class="fas fa-sync-alt" style="margin-right:6px"></i>Rotation Tracker</button>'
       + '<button class="secrets-subtab-btn" data-sub="certs" style="padding:8px 14px;border:none;background:none;cursor:pointer;border-bottom:2px solid ' + (activeSub === 'certs' ? 'var(--accent)' : 'transparent') + ';color:' + (activeSub === 'certs' ? 'var(--text-bright)' : 'var(--text-dim)') + ';font-weight:' + (activeSub === 'certs' ? '600' : '400') + '"><i class="fas fa-certificate" style="margin-right:6px"></i>Certificates</button>'
       + '</div><div id="secrets-sub-content"></div>';
-    el.innerHTML = tabBar;
-    el.querySelectorAll('.secrets-subtab-btn').forEach(btn => btn.addEventListener('click', () => {
+    rootEl.innerHTML = tabBar;
+    rootEl.querySelectorAll('.secrets-subtab-btn').forEach(btn => btn.addEventListener('click', () => {
       this._secretsSubtab = btn.dataset.sub;
-      this._renderSecretsAudit(el);
+      this._renderSecretsAudit(rootEl);
     }));
 
-    const sub = el.querySelector('#secrets-sub-content');
+    const sub = rootEl.querySelector('#secrets-sub-content');
     if (activeSub === 'rotation') return this._renderSecretRotations(sub);
     if (activeSub === 'certs') return this._renderCertificates(sub);
 
     sub.innerHTML = '<div class="text-muted"><i class="fas fa-spinner fa-spin"></i> Scanning containers for secret hygiene...</div>';
-    el = sub;
+    // Render the audit view INTO sub; use a local `el` alias for the rest of
+    // the function to minimize diff vs. original code.
+    const el = sub;
 
     try {
       const data = await Api.getSecretsAudit();

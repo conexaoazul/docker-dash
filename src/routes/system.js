@@ -1496,13 +1496,21 @@ router.get('/backup/list', requireAuth, requireRole('admin'), (req, res) => {
 // ─── Secrets Audit ──────────────────────────────────────────
 
 // GET /secrets-audit — analyze secret hygiene across all containers
+// Concurrency: inspect up to 20 containers in parallel (Docker socket handles
+// this fine; sequential with 100+ containers was taking 30+ seconds).
+// Query params:
+//   ?limit=N    cap the scan (default: all containers)
+//   ?offset=N   skip first N containers (for pagination — UI doesn't use yet)
 router.get('/secrets-audit', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const docker = dockerService.getDocker(req.hostId);
-    const containers = await docker.listContainers({ all: true });
-    const results = [];
+    const allContainers = await docker.listContainers({ all: true });
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const limit = Math.max(1, parseInt(req.query.limit) || allContainers.length);
+    const containers = allContainers.slice(offset, offset + limit);
 
-    for (const c of containers.slice(0, 30)) {
+    const CONCURRENCY = 20;
+    async function inspectOne(c) {
       try {
         const container = docker.getContainer(c.Id);
         const inspect = await container.inspect();
@@ -1564,23 +1572,41 @@ router.get('/secrets-audit', requireAuth, requireRole('admin'), async (req, res)
           issues.push({ severity: 'info', message: 'No memory limit set', fix: 'Add mem_limit to prevent OOM impact on host' });
         }
 
-        results.push({
+        return {
           name, id: c.Id.substring(0, 12), image: c.Image, state: c.State,
+          labels: inspect.Config?.Labels || {},
+          stack: (inspect.Config?.Labels || {})['com.docker.compose.project'] || null,
+          service: (inspect.Config?.Labels || {})['com.docker.compose.service'] || null,
           score: Math.max(0, score),
           secretMounts: secretMounts.length,
           filePatternVars: filePatternVars.length,
           plainSecrets: plainSecrets.length,
           privileged, socketMount, noNewPrivs, readOnly, hasMemLimit, hasCpuLimit,
           issues,
-        });
-      } catch { /* skip */ }
+        };
+      } catch { return null; /* skip containers we can't inspect */ }
+    }
+
+    // Parallel batches of CONCURRENCY
+    const results = [];
+    for (let i = 0; i < containers.length; i += CONCURRENCY) {
+      const batch = containers.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.all(batch.map(inspectOne));
+      for (const r of batchResults) if (r) results.push(r);
     }
 
     const avgScore = results.length > 0 ? Math.round(results.reduce((s, r) => s + r.score, 0) / results.length) : 100;
     const criticalCount = results.reduce((s, r) => s + r.issues.filter(i => i.severity === 'critical').length, 0);
     const warningCount = results.reduce((s, r) => s + r.issues.filter(i => i.severity === 'warning').length, 0);
 
-    res.json({ containers: results, avgScore, criticalCount, warningCount, total: results.length });
+    res.json({
+      containers: results,
+      avgScore, criticalCount, warningCount,
+      total: results.length,
+      scanned: containers.length,
+      hostTotal: allContainers.length,
+      offset, limit,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
