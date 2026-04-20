@@ -44,10 +44,16 @@ All of the above = 3-5 days of infra work. Out of scope for a single-box product
 
 ### LE Wizard: WebSocket progress (replace 3s polling)
 
-**Why deferred:** Current 3s polling works end-to-end. WS adds complexity without a functional win for most users (issuance is <60s typical). Would only help for slow DNS providers (Route53 can take 90s).
+**Status (updated 2026-04-20):** ✅ Shipped in v6.6.5. Channel `acme:job:<jobId>` broadcasts on each state transition; polling kept as 15s safety net. Service layer stays WS-independent (broadcaster injected at startup).
 
-**Estimated effort:** 2-4 hours.
-**Proposed approach:** piggyback on existing `src/ws/index.js` infrastructure; reuse topic pattern from other features.
+**Still open:** the pre-existing gap that `acme_jobs.status` never transitions `running → success`. Requires a background Caddy-state watcher. Tracked below.
+
+### LE Wizard: Background watcher for issuance completion
+
+**Why deferred:** Current code transitions `pending → running` when Caddy accepts the policy, but never flips to `success` — that would require polling Caddy for the actual cert appearance (in `/data/caddy/certificates/`) or subscribing to Caddy's events. Workaround today: users see "running" until they navigate away; the `acme_managed_certs` table does get populated so the cert is usable, just not reflected in the job status.
+
+**Estimated effort:** 3-4 hours (watcher service + tests).
+**Proposed approach:** `src/services/acme-watcher.js` polls Caddy admin socket every 5s for each `running` job older than 10s, calls the existing WS publisher on state change. Graceful timeout at 5 min → mark as `failed` with `error_class: 'timeout'`.
 
 ### Remediation Wizard: WebSocket progress
 

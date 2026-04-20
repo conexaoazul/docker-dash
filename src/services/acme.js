@@ -21,6 +21,20 @@ const { getDb } = require('../db');
 const dnsProviders = require('./dns-providers');
 const caddyConfig = require('./caddy-config');
 
+// WS broadcaster is set up lazily — server wires it via setWsBroadcaster().
+// Services should never hard-depend on the WS server module (test reachability).
+let _wsBroadcaster = null;
+function setWsBroadcaster(fn) { _wsBroadcaster = fn; }
+function _publishJobUpdate(jobId) {
+  if (!_wsBroadcaster) return;
+  try {
+    const row = getDb().prepare('SELECT id, status, error_class, output, started_at, completed_at FROM acme_jobs WHERE id = ?').get(jobId);
+    if (row) _wsBroadcaster(`acme:job:${jobId}`, row);
+  } catch (e) {
+    log.warn('WS publish failed (non-fatal)', { jobId, error: e.message });
+  }
+}
+
 // Where Caddy reads credential files. Both the app and the caddy container
 // see the same path, since they share the caddy-secrets Docker volume.
 // Read per-call (not at module load) so tests can override after import.
@@ -227,6 +241,7 @@ async function issueCertificate({
 
   const jobId = job.lastInsertRowid;
   log.info('ACME job created', { jobId, domains, challengeType, providerId, staging });
+  _publishJobUpdate(jobId);
 
   // Skeleton: synchronous push for now. Session 2 wraps this in async runner + WS events.
   try {
@@ -249,6 +264,7 @@ async function issueCertificate({
     db.prepare(`
       UPDATE acme_jobs SET status = 'running', started_at = datetime('now') WHERE id = ?
     `).run(jobId);
+    _publishJobUpdate(jobId);
 
     db.prepare(`
       INSERT INTO acme_managed_certs (domain, challenge_type, provider_id, credentials_id, staging, caddy_policy_index)
@@ -274,6 +290,7 @@ async function issueCertificate({
       SET status = 'failed', error_class = 'caddy', output = ?, completed_at = datetime('now')
       WHERE id = ?
     `).run(e.message, jobId);
+    _publishJobUpdate(jobId);
     throw e;
   }
 }
@@ -305,6 +322,8 @@ module.exports = {
   // Issuance
   issueCertificate,
   removeCertificate,
+  // WS wiring (called once at server boot)
+  setWsBroadcaster,
   // Internal exports for tests
   _readCredentials,
   _writeCredentialFiles: writeCredentialFiles,

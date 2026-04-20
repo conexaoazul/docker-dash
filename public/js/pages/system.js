@@ -4568,22 +4568,35 @@ DB_PASS=secret"></textarea>
           state.jobStatus = 'pending';
           render();
 
-          // Poll
+          // Progress delivery — WS-first with polling as fallback.
+          // Channel format: `acme:job:<jobId>` (broadcasters push on every state change).
+          const channel = `acme:job:${state.jobId}`;
+          const onUpdate = (job) => {
+            state.jobStatus = job.status;
+            state.jobOutput = job.output || state.jobOutput;
+            render();
+            if (job.status === 'success' || job.status === 'failed') {
+              if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+              if (state.wsUnsub) { state.wsUnsub(); state.wsUnsub = null; }
+              (job.status === 'success' ? Toast.success : Toast.error)('Issuance ' + job.status);
+            }
+          };
+          if (typeof WS !== 'undefined' && WS.subscribe) {
+            WS.subscribe(channel);
+            state.wsUnsub = WS.on('acme:job:update', (data) => {
+              if (data && Number(data.id) === Number(state.jobId)) onUpdate(data);
+            });
+          }
+          // Fallback poll every 15s (down from 3s) — safety net if WS fails.
           state.pollTimer = setInterval(async () => {
             try {
               const job = await Api.acmeJob(state.jobId);
-              state.jobStatus = job.status;
-              state.jobOutput = job.output || '';
-              render();
-              if (job.status === 'success' || job.status === 'failed') {
-                clearInterval(state.pollTimer); state.pollTimer = null;
-                (job.status === 'success' ? Toast.success : Toast.error)('Issuance ' + job.status);
-              }
+              onUpdate(job);
             } catch (err) {
               state.jobOutput += '\n[poll error] ' + err.message;
               render();
             }
-          }, 3000);
+          }, 15000);
         } catch (err) { Toast.error(err.message); }
       });
 

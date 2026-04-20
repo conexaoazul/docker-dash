@@ -268,6 +268,11 @@ async function start() {
   const wsServer = require('./ws');
   wsServer.attach(server);
 
+  // Wire WS broadcaster into services that publish job progress
+  require('./services/acme').setWsBroadcaster(
+    (channel, data) => wsServer.broadcast('acme:job:update', data, channel)
+  );
+
   // Start stats collector
   const statsService = require('./services/stats');
   statsService.start();

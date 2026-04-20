@@ -2,6 +2,33 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.6.5] - 2026-04-20 — "LE Wizard WS progress + code hygiene"
+
+Housekeeping + a real UX polish on the Let's Encrypt Wizard.
+
+### Added — LE Wizard WebSocket progress
+
+- **Per-job WS channel** `acme:job:<jobId>` broadcasts every status transition (`pending → running → failed`). Server publishes via `wsServer.broadcast('acme:job:update', row, channel)`.
+- **Frontend subscribes** on issuance-start and calls the existing render logic on each push. User sees state changes instantly — no more 3-second interval lag.
+- **Polling kept as safety net** (reduced 3s → 15s) so users with a flaky WebSocket connection still see updates. When WS and poll both deliver, the idempotent `onUpdate()` handles duplicates cleanly.
+
+**Architecture:** service layer stays WS-independent. `acme.js` exports `setWsBroadcaster(fn)`; `server.js` wires the broadcaster once at startup. No hard dep from services on the WS module (keeps tests fast).
+
+**Known limitation (pre-existing, not introduced here):** job status never transitions from `running → success` today — that requires a background watcher that polls Caddy for cert-file appearance. Tracked in BACKLOG as a separate refactor.
+
+### Fixed — Lint hygiene
+
+- **eslint.config.js** — 3 `no-undef` errors fixed by adding missing Node globals (`setImmediate`, `clearImmediate`, `URLSearchParams`, `TextEncoder`, `TextDecoder`) to the project's globals list.
+- **12 unused top-level imports removed** across `src/jobs/`, `src/routes/`, `src/services/` — all safe (no-side-effect module deletions only; function-local unused vars deferred to a dedicated hygiene pass).
+- **Lint score:** 49 → 34 warnings, 3 → 0 errors.
+
+### Dependencies
+
+- `nodemailer` `^7.0.7` → `^8.0.5` (shipped in 6.6.4; reiterating — 0 vulnerabilities after audit).
+- All within-major bumps from 6.6.4 carry forward.
+
+---
+
 ## [6.6.4] - 2026-04-20 — "Dependency audit + nodemailer CVE patch"
 
 Housekeeping release — security patch + minor bumps + dep-audit hygiene.
