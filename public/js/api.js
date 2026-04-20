@@ -362,6 +362,9 @@ const Api = {
   getSecretsAudit() { return this.get('/system/secrets-audit'); },
   validateDeploy(data) { return this.post('/system/deploy-validate', data); },
 
+  // ─── Egress Audit ─────────────────────────────────────
+  getEgressAudit() { return this.get('/system/egress-audit'); },
+
   // ─── Secrets Wizard ───────────────────────────────────
   analyzeSecretsWizard(envContent) { return this.post('/system/secrets-wizard/analyze', { envContent }); },
   generateSecretsScript(data) {

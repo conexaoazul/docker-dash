@@ -2,6 +2,38 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.6.2] - 2026-04-20 — "Egress Audit"
+
+Minor release adding a read-only egress-posture audit that flags containers able to reach the public internet and cloud-metadata endpoints (IMDS — e.g. AWS <code>169.254.169.254</code>). Part of the Outbound Network Filter work (BACKLOG). Enforcement remains planned for v6.7.
+
+### Added — Egress Audit (System → Egress)
+
+- **New tab** in the System page — per-container table with risk badge, network mode, attached networks (internal vs bridge), internet + IMDS reachability verdict, and a 0-100 score. Expandable rows show findings detail, <code>extra_hosts</code>, and custom DNS.
+- **Summary pills** on the audit page: avg score, critical count, warning count, internet-reachable count, IMDS-reachable count, and scanned/total coverage.
+- **Findings catalog** with severity + fix hint per item:
+  - `critical`: `network_mode: host`, `extra_hosts` pinned to an IMDS IP
+  - `warning`: any non-internal bridge network (internet + IMDS reachable), `NET_ADMIN` / `NET_RAW` capability
+  - `info`: attached only to internal networks, custom DNS servers, `network_mode: none` / `container:<id>`
+- **Bilingual How-To** (EN + RO): "Audit Container Outbound Network Posture" — explains IMDS threat model, compose recipes for network isolation, host-level iptables blocks, and the limits of the audit (no live probe, no enforcement).
+
+### Backend
+
+- New service `src/services/egress-audit.js` — pure-function `analyzeContainer(inspect, networksByName)` that returns `{networkMode, networks, canReachInternet, canReachIMDS, canReachRFC1918, findings, score}`.
+- New route `GET /api/system/egress-audit` (admin only) — pre-fetches host networks once, inspects containers with `CONCURRENCY=20`, aggregates results. Response includes per-container verdicts + summary counts.
+- New migration `053_howto_egress_audit.js`.
+
+### Tests
+
+- `src/__tests__/egress-audit.test.js` — 11 tests covering host mode, none mode, default bridge, internal networks, mixed networks, IMDS-pin via extra_hosts, `NET_ADMIN` / `NET_RAW`, custom DNS, and `container:<id>` mode. 549 tests pass across 39 suites.
+
+### Scope intentionally deferred to v6.7
+
+- **Enforcement** (blocking outbound traffic) — covered by a larger feature spec: squid / mitmproxy sidecar + per-container whitelist UI + iptables redirect rule. See `docs/planning/proposals/agent-sandbox.md`.
+- **Live probe** — verifying whether the host's iptables actually blocks IMDS (currently we classify based on Docker config only).
+- **Per-finding remediation hooks** — integration with Container Remediation Wizard (v6.6.0) to apply isolation fixes in one click.
+
+---
+
 ## [6.6.1] - 2026-04-20 — "DNS providers + rotate UX"
 
 Patch release focused on v6.5 Let's Encrypt Wizard polish and deferred cleanup.

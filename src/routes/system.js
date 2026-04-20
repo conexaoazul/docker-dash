@@ -1612,6 +1612,79 @@ router.get('/secrets-audit', requireAuth, requireRole('admin'), async (req, res)
   }
 });
 
+// ─── Egress Audit ───────────────────────────────────────────
+
+// GET /egress-audit — analyze outbound network posture across all containers.
+// Read-only: flags containers that can reach public internet + IMDS endpoints.
+// Enforcement (whitelist, iptables, squid sidecar) is deferred to v6.7.
+router.get('/egress-audit', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const egressAudit = require('../services/egress-audit');
+    const docker = dockerService.getDocker(req.hostId);
+    const allContainers = await docker.listContainers({ all: true });
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const limit = Math.max(1, parseInt(req.query.limit) || allContainers.length);
+    const containers = allContainers.slice(offset, offset + limit);
+
+    // Pre-fetch all networks on the host so we can resolve `Internal` per network without
+    // re-inspecting for every container. Small N (typically <20 networks), cheap.
+    const allNetworks = await docker.listNetworks();
+    const networksByName = new Map();
+    await Promise.all(allNetworks.map(async n => {
+      try {
+        const full = await docker.getNetwork(n.Id).inspect();
+        networksByName.set(full.Name, full);
+      } catch { /* ignore unreadable networks */ }
+    }));
+
+    const CONCURRENCY = 20;
+    async function inspectOne(c) {
+      try {
+        const inspect = await docker.getContainer(c.Id).inspect();
+        const name = inspect.Name.replace(/^\//, '');
+        const analysis = egressAudit.analyzeContainer(inspect, networksByName);
+        return {
+          id: c.Id.substring(0, 12),
+          name,
+          image: c.Image,
+          state: c.State,
+          stack: (inspect.Config?.Labels || {})['com.docker.compose.project'] || null,
+          service: (inspect.Config?.Labels || {})['com.docker.compose.service'] || null,
+          ...analysis,
+        };
+      } catch { return null; }
+    }
+
+    const results = [];
+    for (let i = 0; i < containers.length; i += CONCURRENCY) {
+      const batch = containers.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.all(batch.map(inspectOne));
+      for (const r of batchResults) if (r) results.push(r);
+    }
+
+    const avgScore = results.length > 0 ? Math.round(results.reduce((s, r) => s + r.score, 0) / results.length) : 100;
+    const criticalCount = results.reduce((s, r) => s + r.findings.filter(i => i.severity === 'critical').length, 0);
+    const warningCount = results.reduce((s, r) => s + r.findings.filter(i => i.severity === 'warning').length, 0);
+    const internetReachable = results.filter(r => r.canReachInternet).length;
+    const imdsReachable = results.filter(r => r.canReachIMDS).length;
+
+    res.json({
+      containers: results,
+      avgScore,
+      criticalCount,
+      warningCount,
+      internetReachable,
+      imdsReachable,
+      total: results.length,
+      scanned: containers.length,
+      hostTotal: allContainers.length,
+      offset, limit,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST /deploy-validate — pre-deploy checklist for env + compose
 router.post('/deploy-validate', requireAuth, requireRole('admin'), (req, res) => {
   try {

@@ -30,6 +30,7 @@ const SystemPage = {
         <button class="tab" data-tab="ssl"><i class="fas fa-shield-alt" style="margin-right:4px"></i> SSL/TLS</button>
         <button class="tab" data-tab="cis"><i class="fas fa-clipboard-check" style="margin-right:4px"></i> CIS Benchmark</button>
         <button class="tab" data-tab="secrets"><i class="fas fa-user-secret" style="margin-right:4px"></i> Secrets</button>
+        <button class="tab" data-tab="egress"><i class="fas fa-network-wired" style="margin-right:4px"></i> Egress</button>
         <button class="tab" data-tab="prune">${i18n.t('pages.system.tabPrune')}</button>
         <button class="tab" data-tab="audit">${i18n.t('pages.system.tabAudit')}</button>
       </div>
@@ -66,6 +67,7 @@ const SystemPage = {
       else if (this._tab === 'ssl') await this._renderSsl(el);
       else if (this._tab === 'cis') await this._renderCisBenchmark(el);
       else if (this._tab === 'secrets') await this._renderSecretsAudit(el);
+      else if (this._tab === 'egress') await this._renderEgressAudit(el);
       else if (this._tab === 'prune') this._renderPrune(el);
       else if (this._tab === 'audit') await this._renderAudit(el);
     } catch (err) {
@@ -4745,6 +4747,130 @@ DB_PASS=secret"></textarea>
 
       </div>
     `;
+  },
+
+  async _renderEgressAudit(el) {
+    el.innerHTML = `<div class="empty-msg"><i class="fas fa-spinner fa-spin"></i> Scanning egress posture…</div>`;
+    let data;
+    try {
+      data = await Api.getEgressAudit();
+    } catch (e) {
+      el.innerHTML = `<div class="empty-msg">Error: ${Utils.escapeHtml(e.message || 'Failed to load egress audit')}</div>`;
+      return;
+    }
+
+    const badge = (sev) => {
+      const colors = { critical: '#ef4444', warning: '#f59e0b', info: '#64748b' };
+      return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:#fff;background:${colors[sev] || '#64748b'}">${sev.toUpperCase()}</span>`;
+    };
+
+    const pill = (label, val, bg) => `<div style="padding:10px 14px;background:${bg};border-radius:8px;min-width:110px"><div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px">${label}</div><div style="font-size:22px;font-weight:700;margin-top:2px">${val}</div></div>`;
+
+    const score = data.avgScore ?? 100;
+    const scoreColor = score >= 80 ? 'rgba(34,197,94,0.15)' : score >= 60 ? 'rgba(234,179,8,0.15)' : 'rgba(239,68,68,0.15)';
+
+    const rowHtml = (r) => {
+      const topSev = r.findings.find(f => f.severity === 'critical') ? 'critical'
+        : r.findings.find(f => f.severity === 'warning') ? 'warning'
+        : r.findings.length > 0 ? 'info' : null;
+
+      const verdict = r.canReachInternet
+        ? (r.canReachIMDS ? '<span style="color:#ef4444">Internet + IMDS</span>' : '<span style="color:#f59e0b">Internet</span>')
+        : '<span style="color:#22c55e">Isolated</span>';
+
+      const findingsHtml = r.findings.length === 0
+        ? '<div style="padding:12px;color:var(--text-dim)">No findings — container has a clean egress posture.</div>'
+        : r.findings.map(f => `
+            <div style="padding:8px 12px;border-bottom:1px solid var(--border)">
+              <div style="display:flex;gap:8px;align-items:start">
+                ${badge(f.severity)}
+                <div style="flex:1">
+                  <div>${Utils.escapeHtml(f.message)}</div>
+                  ${f.fix ? `<div style="color:var(--text-dim);font-size:12px;margin-top:4px"><i class="fas fa-wrench" style="margin-right:4px"></i>${Utils.escapeHtml(f.fix)}</div>` : ''}
+                </div>
+              </div>
+            </div>`).join('');
+
+      const netsHtml = r.networks.length === 0
+        ? '<span style="color:var(--text-dim)">none</span>'
+        : r.networks.map(n => {
+            const tag = n.internal ? 'internal' : (n.gateway ? 'bridge' : n.driver);
+            const bg = n.internal ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.10)';
+            return `<span style="display:inline-block;padding:2px 6px;background:${bg};border-radius:3px;margin-right:4px;font-size:11px"><code>${Utils.escapeHtml(n.name)}</code> <span style="color:var(--text-dim)">[${tag}]</span></span>`;
+          }).join('');
+
+      return `
+        <tr class="egress-row" data-id="${r.id}" style="cursor:pointer">
+          <td>${topSev ? badge(topSev) : '<span style="color:var(--text-dim)">—</span>'}</td>
+          <td><strong>${Utils.escapeHtml(r.name)}</strong>${r.stack ? `<div style="font-size:11px;color:var(--text-dim)">${Utils.escapeHtml(r.stack)}${r.service ? ' / ' + Utils.escapeHtml(r.service) : ''}</div>` : ''}</td>
+          <td><code style="font-size:12px">${Utils.escapeHtml(r.networkMode || 'default')}</code></td>
+          <td>${netsHtml}</td>
+          <td>${verdict}</td>
+          <td style="text-align:right"><strong style="color:${r.score >= 80 ? '#22c55e' : r.score >= 60 ? '#f59e0b' : '#ef4444'}">${r.score}</strong></td>
+          <td style="text-align:center"><i class="fas fa-chevron-down egress-chev" style="color:var(--text-dim)"></i></td>
+        </tr>
+        <tr class="egress-detail" data-id="${r.id}" style="display:none;background:var(--bg-dim)"><td colspan="7" style="padding:0">
+          ${findingsHtml}
+          ${r.extraHosts && r.extraHosts.length > 0 ? `<div style="padding:8px 12px;border-top:1px solid var(--border);font-size:12px"><strong>extra_hosts:</strong> <code>${Utils.escapeHtml(r.extraHosts.join(', '))}</code></div>` : ''}
+          ${r.dns && r.dns.length > 0 ? `<div style="padding:8px 12px;border-top:1px solid var(--border);font-size:12px"><strong>custom DNS:</strong> <code>${Utils.escapeHtml(r.dns.join(', '))}</code></div>` : ''}
+        </td></tr>`;
+    };
+
+    const sorted = [...data.containers].sort((a, b) => a.score - b.score);
+
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body">
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            ${pill('Avg Score', score, scoreColor)}
+            ${pill('Critical', data.criticalCount, 'rgba(239,68,68,0.15)')}
+            ${pill('Warnings', data.warningCount, 'rgba(234,179,8,0.15)')}
+            ${pill('Internet reach', `${data.internetReachable}/${data.total}`, 'rgba(249,115,22,0.12)')}
+            ${pill('IMDS reach', `${data.imdsReachable}/${data.total}`, 'rgba(239,68,68,0.12)')}
+            ${pill('Scanned', `${data.scanned}/${data.hostTotal}`, 'rgba(148,163,184,0.15)')}
+          </div>
+          <div style="margin-top:12px;padding:10px 12px;background:rgba(59,130,246,0.08);border-left:3px solid #3b82f6;border-radius:4px;font-size:13px">
+            <strong><i class="fas fa-info-circle" style="margin-right:4px"></i>Read-only audit.</strong>
+            Flags containers that can reach public internet and cloud-metadata endpoints (IMDS — <code>169.254.169.254</code>). Active enforcement (whitelist, outbound filter) is planned for v6.7.
+            <a href="#/howto" style="margin-left:6px">How to mitigate →</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body" style="padding:0;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="background:var(--bg-dim);border-bottom:1px solid var(--border)">
+                <th style="padding:10px 12px;text-align:left;width:90px">Risk</th>
+                <th style="padding:10px 12px;text-align:left">Container</th>
+                <th style="padding:10px 12px;text-align:left;width:120px">Network Mode</th>
+                <th style="padding:10px 12px;text-align:left">Networks</th>
+                <th style="padding:10px 12px;text-align:left;width:150px">Reachability</th>
+                <th style="padding:10px 12px;text-align:right;width:70px">Score</th>
+                <th style="width:40px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sorted.length > 0 ? sorted.map(rowHtml).join('') : '<tr><td colspan="7" style="padding:30px;text-align:center;color:var(--text-dim)">No containers to scan.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    // Toggle detail row on click
+    el.querySelectorAll('.egress-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const id = row.dataset.id;
+        const detail = el.querySelector(`.egress-detail[data-id="${id}"]`);
+        if (!detail) return;
+        const open = detail.style.display !== 'none';
+        detail.style.display = open ? 'none' : 'table-row';
+        const chev = row.querySelector('.egress-chev');
+        if (chev) chev.className = open ? 'fas fa-chevron-down egress-chev' : 'fas fa-chevron-up egress-chev';
+      });
+    });
   },
 
   destroy() {
