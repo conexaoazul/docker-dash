@@ -8,8 +8,8 @@
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/releases/latest"><img src="https://img.shields.io/github/v/release/bogdanpricop/docker-dash?color=blue" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
-    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-431%20passing%20(100%25)-brightgreen" alt="Tests"></a>
-    <img src="https://img.shields.io/badge/version-6.4.0-blue" alt="Version">
+    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-493%20passing%20(100%25)-brightgreen" alt="Tests"></a>
+    <img src="https://img.shields.io/badge/version-6.5.0-blue" alt="Version">
     <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.2%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
     <img src="https://img.shields.io/badge/Docker-~80MB-blue" alt="Image Size">
@@ -26,7 +26,7 @@
   </p>
 </p>
 
-**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.4.0**
+**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.5.0**
 
 ## Screenshots
 
@@ -202,7 +202,8 @@
 - **Watchtower Detection** — Auto-detect and migrate from Watchtower to native safe-pull
 - **Prometheus Metrics** — `/api/metrics` endpoint for Grafana integration
 - **Self-Reporting Footprint** — Docker Dash memory, uptime, DB size at `/api/footprint`
-- **431 Tests** — 32 test suites covering auth, RBAC, security, CRUD, services (100% passing)
+- **Let's Encrypt Wizard** — 3-step UI for issuing certs via DNS-01 (Cloudflare, Route53, DigitalOcean, Hetzner, Linode) or HTTP-01. Encrypted credential vault, auto-renewal via Caddy, hash-chained audit trail. Open source — no other Docker UI ships this
+- **493 Tests** — 36 test suites covering auth, RBAC, security, CRUD, services, ACME orchestrator (100% passing)
 
 ## Where to start
 

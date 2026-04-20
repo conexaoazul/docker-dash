@@ -2,6 +2,79 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.5.0] - 2026-04-20 — "Let's Encrypt Wizard"
+
+Headline feature: a 3-step UI wizard for issuing Let's Encrypt certificates from inside Docker Dash, with multi-DNS-provider support, encrypted credential vault, and integration with the existing Certificate Manager (v6.3) for tracking + renewal monitoring.
+
+### Added — Let's Encrypt Wizard
+
+- **3-step wizard** in System → Secrets → Certificates → "Request Let's Encrypt" button:
+  - Step 1: domains (multi-domain SAN, max 100), email, challenge type (HTTP-01 / DNS-01), staging toggle (default ON for first issuance — protects against rate limits)
+  - Step 2 (DNS-01): provider picker, scoped-token-vs-Global-Key warnings, save credential for reuse, optional pre-flight validation against provider API
+  - Step 3: confirmation summary, "Issue Certificate" button, 3s polling on job status with terminal-style live output
+- **5 DNS providers in v6.5 launch:**
+  - **Cloudflare** — live token verification via `/user/tokens/verify`; rejects 37-hex-char Global API Keys by format
+  - **DigitalOcean** — live verification via `/v2/account`
+  - **Hetzner DNS** — live verification via `/api/v1/zones`
+  - **Linode (Akamai)** — live verification via `/v4/domains` (proves Domains:Read scope, not just token validity)
+  - **AWS Route53** — format-only validation (AWS SigV4 deferred to first issuance attempt)
+- **Saved DNS Credentials management** — create/list/rotate/delete/validate via UI. Credentials stored AES-GCM encrypted in `acme_credentials` table. On disk for Caddy at `/etc/caddy/secrets/<id>/<field>`, mode 0600, dir 0700.
+- **Let's Encrypt Managed Certificates table** — domain, challenge type, provider, credential, env (PROD / STAGING badge), one-click remove (cleans Caddy policy without touching cert files on disk)
+- **Auto-renewal via Caddy** — no Docker Dash cron involvement; Caddy renews 30 days before expiry. Issued certs also picked up by the existing daily 07:30 Certificate Manager scan for expiry warnings.
+- **Hash-chained audit log** captures every state change with credential ID + SHA fingerprint (NEVER credential value): `acme_credential_create / _update / _delete / _validate`, `acme_issuance_request`, `acme_certificate_remove`.
+- **Bilingual How-To guide** built-in (EN + RO): "Request a Let's Encrypt Certificate via DNS Challenge" — covers when to use HTTP-01 vs DNS-01, scoped-token creation per provider, troubleshooting common errors.
+
+### Backend
+
+- New service: `src/services/dns-providers.js` — pluggable provider registry (~30 LOC per new provider)
+- New service: `src/services/caddy-config.js` — Caddy admin API client over **Unix socket** (not TCP — security hardening from preflight A11)
+- New service: `src/services/acme.js` — orchestrator for credential lifecycle + issuance
+- New routes: `src/routes/acme.js` — 11 endpoints under `/api/system/acme/*`
+- Custom Caddy image: `docker/caddy/Dockerfile` (Caddy 2.11.2 base + 5 DNS plugins compiled via xcaddy)
+- GitHub Actions workflow: `.github/workflows/caddy-image.yml` (builds + pushes multi-arch image to GHCR)
+
+### Infrastructure changes
+
+- **Caddy admin API now uses Unix socket** (`/run/caddy/admin.sock`) shared via `caddy-admin-sock` Docker volume — replaces network-isolation approach (preflight A11 found that `--internal` networks don't restrict inbound from shared networks)
+- **Caddy image bumped to 2.11.2** (was 2.8.4) with `ENV GOTOOLCHAIN=auto` so plugins requiring newer Go can auto-download
+- **DNS credential files on disk** are read by Caddy **per-request** (preflight A3 finding) — credential rotation is zero-downtime, no Caddy reload needed
+
+### Database
+
+- Migration `049_acme.js` — `acme_credentials`, `acme_jobs`, `acme_managed_certs` tables (with `down()`)
+- Migration `050_howto_letsencrypt_wizard.js` — bilingual How-To guide
+
+### Tests
+
+- 492 → **493 passing** across 36 suites (5/5 stable runs)
+- New: `acme.test.js` (11 tests) — credential CRUD with encryption round-trip
+- New: `dns-providers.test.js` (26 tests) — registry shape, format checks, Tier-1 coverage matrix
+- New: `caddy-config.test.js` (8 tests) — module shape, ENOENT handling, input validation
+- New: `acme-routes.test.js` (15 supertest integration tests) — auth required (401 unauth), encryption-at-rest verified (no plaintext in DB), no-leak in list responses, input validation for all 4xx codes
+
+### Frontend
+
+- 11 new `Api.acme*` methods in `public/js/api.js`
+- ~390 LOC added to `public/js/pages/system.js` for the wizard + saved-credentials/managed-certs sections
+- All sections **fail-silent** if ACME endpoints unreachable (e.g., Caddy not started yet) — they just don't render
+
+### Multi-Host UX
+
+- **Multi-Host page now defaults to Tab View** (was List View) per user request
+
+### Documentation
+
+- New planning docs in `docs/planning/v6.5/letsencrypt-wizard/` — public OSS planning artifact: brainstorm, feature spec, deep spec, assumption audit, preflight checklist + execution results, README index
+- New proposal `docs/planning/proposals/agent-sandbox.md` — response to MS Docker Sandbox + Copilot blog post; recommends building outbound network filter as v6.6 + full Agent Sandbox in v6.7+ (decision tracked)
+
+### Deferred to v6.5.1 / v6.6
+
+- WebSocket-based job progress (current implementation polls `/jobs/:id` every 3s — works, just not ideal UX for slow DNS providers)
+- Live integration test against Let's Encrypt staging in CI (requires CI-only Cloudflare token in GH Actions secrets)
+- Credential rotation UX in Saved DNS Credentials table (today: delete + create again with same name; backend supports PATCH already)
+- arm64 Caddy image push (build verified working in preflight, but GHCR push needs Repo Settings → Actions → "Read and write permissions" toggle)
+- 4 more DNS providers (Namecheap, Gandi, Porkbun, OVH) — pattern in `dns-providers.js` invites ~30-line community PRs
+
 ## [6.4.0] - 2026-04-18 — "Hardening"
 
 This release closes 31 of 35 findings from the v6.3.0 pre-sale audit (`AUDIT_2026-04-18.md`).

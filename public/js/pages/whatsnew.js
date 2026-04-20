@@ -10,6 +10,24 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.5.0',
+      date: '2026-04-20',
+      title: 'Let\'s Encrypt Wizard — issue real certs from the UI in 3 clicks',
+      changes: [
+        { type: 'feature', text: 'Let\'s Encrypt Wizard (System → Secrets → Certificates → "Request Let\'s Encrypt") — 3-step modal: domains+challenge, provider+credentials, issue+poll. Wildcards force DNS-01 automatically. Default to staging for first issuance to protect from rate limits.' },
+        { type: 'feature', text: '5 DNS providers in launch: Cloudflare, AWS Route53, DigitalOcean, Hetzner DNS, Linode (Akamai). Each with live API token verification before burning Let\'s Encrypt rate limit slots. Cloudflare Global API Keys rejected by format heuristic — only scoped tokens accepted.' },
+        { type: 'feature', text: 'Saved DNS Credentials manager — create/list/validate/delete credentials. AES-GCM encrypted at rest. Stored on disk for Caddy at /etc/caddy/secrets/<id>/<field> (mode 600). Caddy reads files per-request → credential rotation is zero-downtime, no Caddy reload needed.' },
+        { type: 'feature', text: 'Let\'s Encrypt Managed Certificates table — every issued cert tracked with provider, credential, environment (PROD/STAGING badge), one-click remove. Auto-renewal handled by Caddy 30 days before expiry — no Docker Dash cron needed. Issued certs also picked up by the existing daily 07:30 Certificate Manager scan.' },
+        { type: 'feature', text: 'Bilingual How-To guide built-in: "Request a Let\'s Encrypt Certificate via DNS Challenge" — covers HTTP-01 vs DNS-01, scoped-token creation per provider with screenshots, troubleshooting common errors.' },
+        { type: 'security', text: 'Caddy admin API now via Unix socket (not TCP). Preflight A11 found that Docker --internal networks don\'t restrict inbound from shared networks; Unix socket is structurally safer. Shared via caddy-admin-sock volume — only the app container can talk to it.' },
+        { type: 'security', text: 'Hash-chained audit log captures every state change (acme_credential_create/_update/_delete/_validate, acme_issuance_request, acme_certificate_remove) with credential ID + SHA fingerprint. NEVER credential value.' },
+        { type: 'improvement', text: 'Custom Caddy image (ghcr.io/bogdanpricop/docker-dash-caddy:6.5) — Caddy 2.11.2 + 5 DNS plugins compiled via xcaddy. Multi-arch build (linux/amd64 + linux/arm64) verified in CI.' },
+        { type: 'improvement', text: 'Multi-Host page defaults to Tab View (was List View). One less click to get to the visual.' },
+        { type: 'improvement', text: 'Public planning artifacts for v6.5 in docs/planning/v6.5/letsencrypt-wizard/ — brainstorm, feature spec, deep spec, assumption audit, preflight execution. Open development; community PRs welcome (especially for adding more DNS providers — ~30-line pattern).' },
+        { type: 'improvement', text: 'Tests: 461 → 493 passing across 36 suites (5/5 stable runs). New: acme.test.js, dns-providers.test.js, caddy-config.test.js, acme-routes.test.js.' },
+      ],
+    },
+    {
       version: '6.4.0',
       date: '2026-04-18',
       title: 'Hardening — 31 of 35 pre-sale audit findings closed',
