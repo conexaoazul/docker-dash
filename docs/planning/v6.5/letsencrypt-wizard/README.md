@@ -19,8 +19,9 @@ The work was prompted by the analysis of [twonas/docker-certbot-cloudflare](http
 | 3 | [03-deep-spec.md](03-deep-spec.md) | The gnarly bits in detail (Caddy config, credential injection, errors, concurrency) | 15 min |
 | 4 | [04-assumption-audit.md](04-assumption-audit.md) | Risky assumptions + cheap validations to do before coding | 10 min |
 | 5 | [00-preflight.md](00-preflight.md) | Operational checklist to verify environment + assumptions | 5 min |
+| 6 | [05-preflight-results.md](05-preflight-results.md) | **NEW** — Results of preflight Phase 1 execution + spec amendments | 8 min |
 
-Total: ~55 min reading + 8-12h preflight execution.
+Total: ~63 min reading. Preflight Phase 1 already executed (50 min wall time).
 
 ---
 
@@ -45,8 +46,9 @@ Total: ~55 min reading + 8-12h preflight execution.
 - [x] Deep spec drafted
 - [x] Assumption audit complete
 - [x] Preflight checklist drafted
-- [ ] Preflight executed (Phase 1 + 2 from `00-preflight.md`)
-- [ ] Spec sign-off after preflight
+- [x] **Preflight Phase 1 executed (5 of 6 critical assumptions validated; results in `05-preflight-results.md`)**
+- [ ] arm64 build validation in GitHub Actions
+- [ ] Spec amendments applied (Caddy 2.11.2, Unix socket admin, GOTOOLCHAIN=auto)
 - [ ] Session 1: Migration + service skeletons
 - [ ] Session 2: Routes + custom Caddy image
 - [ ] Session 3: UI wizard
