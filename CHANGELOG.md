@@ -2,6 +2,73 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.6.0] - 2026-04-20 — "Container Remediation Wizard"
+
+Headline feature: a 3-step UI wizard that turns Secrets Audit + CIS Benchmark findings into actionable fixes. Pick findings → preview compose YAML diff + live CLI commands → apply live (with auto-rollback) OR open a Git PR. 20-entry catalog, 4 live-updatable (memory/CPU/pids/restart) with zero downtime, 16 require recreation with `depends_on` ordering + health-check rollback window.
+
+### Added — Container Remediation Wizard
+
+- **3-step modal** (component: `public/js/components/remediate-wizard.js`):
+  - **Step 1** — scope (container or stack) + applicable findings. Auto-select critical/warn. Info hidden by default. Select-all / deselect-all.
+  - **Step 2** — per-container expandable preview: GitHub-style YAML diff (green/red) + live update commands + findings list with risk notes.
+  - **Step 3** — 3 apply modes: **Apply live + recreate** (default), **Generate Git PR** (git-backed stacks only), **Download patch** (escape hatch). Live polling 2.5s.
+- **20-entry remediation catalog** (`src/services/remediation-catalog.js`):
+  - All CIS 5.x container runtime findings (5.3 caps, 5.4 privileged, 5.5 sensitive binds, 5.10 memory, 5.11 CPU, 5.12 readonly, 5.16 IPC, 5.25 no-new-privileges, 5.26 root, 5.28 PID, 5.29 network, 5.31 docker socket)
+  - Secrets Audit: plain-text env secret → routes to existing Secrets Wizard
+  - Reliability: missing healthcheck, unbounded logging, no restart policy, no PID limit
+  - Format: `{code, applies(inspect), plan(inspect, composeService) → {composePatch, cliCommands, liveUpdate, notes}}`
+- **Compose diff engine** (`src/services/compose-diff.js`) — uses `yaml` package (eemeli/yaml), preserves comments + style through round-trip per preflight A1. Patches: `null` = delete, `{$add: []}` / `{$remove: []}` = list surgery, nested objects = merge.
+- **Docker runner** (`src/services/docker-runner.js`) — topological sort by `depends_on`, compose recreate with `--no-deps --force-recreate`, health detection via `State.Running` + `RestartCount` delta (preflight A5: 0/10 popular images ship `HEALTHCHECK`).
+- **Auto-rollback** — on health-check fail or compose error, restores pre-apply compose file + re-recreates from gzipped inspect snapshot stored in SQLite.
+- **Manual rollback window** — 60 seconds after a successful apply, UI shows "Rollback" button. After window expires, rollback via UI disabled.
+- **Git-PR mode** — for git-backed stacks only: clones repo, creates branch `docker-dash/remediate-<planId>`, applies compose diff, commits, pushes, constructs PR URL for GitHub/GitLab/Gitea.
+- **Artifact mode** — downloads `.patch` file with unified diff + shell script for manual application.
+- **Bilingual How-To guide** (EN + RO): "Remediate Container Security Issues via the Wizard".
+
+### Backend
+
+- 3 new services: `remediation-catalog.js` (500 LOC, 20 entries), `compose-diff.js` (110 LOC), `docker-runner.js` (180 LOC), `remediate.js` (400 LOC orchestrator).
+- New routes: `src/routes/remediate.js` — 7 endpoints under `/api/remediate`:
+  - `GET /findings/codes`
+  - `POST /plan`
+  - `POST /apply`
+  - `GET /job/:id`
+  - `POST /job/:id/rollback`
+  - `GET /jobs`
+- Hash-chained audit log entries: `remediate_plan`, `remediate_apply_start`, `remediate_apply_success`, `remediate_apply_failed`, `remediate_rollback`, `remediate_pr_created`.
+- Concurrency: one job per scope (container / stack) at a time. 409 with existing `jobId` on conflict.
+- Error classification: `docker` / `compose` / `git` / `timeout` / `health` / `rollback` / `other` with per-class user-facing recovery hints.
+
+### Frontend
+
+- 6 new `Api.remediate*` methods.
+- Entry points: "Fix" + "Remediate stack" buttons on every Secrets Audit container row with issues.
+- Component is reusable — other pages (security.js, cis.js, stacks.js) can open it later by calling `RemediateWizard.open({ scope, findings })`.
+
+### Infrastructure
+
+- New migrations: `051_remediation_jobs.js` (jobs table), `052_howto_remediation_wizard.js` (bilingual How-To).
+- New dependencies: `yaml` ^2.8.3 (round-trip-safe YAML), `diff` ^5.2.2 (moved from overrides to direct dependency).
+
+### Other fixes in this release
+
+- **Audit & Wizard subtabs duplication bug** fixed — `_renderSecretsAudit(el)` was reassigning its parameter at the end of the function; the subtab click handler's closure captured the variable, causing later clicks to render the tab bar inside the previous sub container. Fix: rename parameter to `rootEl` (never reassigned) + use local `const el = sub`.
+- **30-container scan limit removed** — Secrets Audit now scans all containers on the host (parallelized via `Promise.all` with concurrency 20; previously sequential with hardcoded `.slice(0, 30)`). Response includes `scanned`, `hostTotal`, `offset`, `limit`. Optional `?limit=N&offset=N` for future pagination.
+- **Stack + service + image labels** returned per container in audit output (needed by Remediation Wizard for stack-level grouping).
+
+### Tests
+
+- 530 → **? passing** (3 new test files cover remediation-catalog 26 tests + compose-diff 12 tests). Docker-runner + routes tested via smoke + integration flow on staging.
+
+### Deferred to v6.6.1 / v6.7
+
+- Entry points on security.js / stacks.js / cis.js pages (currently only Secrets Audit has them)
+- Sandbox-clone "test fix first" mode
+- AI-suggested image-specific fixes
+- Cross-stack fleet remediation
+- Remote-host Apply mode (compose file edits via SSH) — Git-PR mode already works for remote
+- WebSocket progress (currently 3s polling)
+
 ## [6.5.0] - 2026-04-20 — "Let's Encrypt Wizard"
 
 Headline feature: a 3-step UI wizard for issuing Let's Encrypt certificates from inside Docker Dash, with multi-DNS-provider support, encrypted credential vault, and integration with the existing Certificate Manager (v6.3) for tracking + renewal monitoring.

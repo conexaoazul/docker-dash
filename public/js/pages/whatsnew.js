@@ -10,6 +10,25 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.6.0',
+      date: '2026-04-20',
+      title: 'Container Remediation Wizard — turn audit findings into actionable fixes',
+      changes: [
+        { type: 'feature', text: 'Container Remediation Wizard — 3-step modal that turns Secrets Audit + CIS Benchmark findings into actionable fixes. Step 1: select findings (auto-selects critical/warn). Step 2: preview YAML diff + CLI commands. Step 3: apply live (with auto-rollback) or open Git PR.' },
+        { type: 'feature', text: '20-entry remediation catalog: CIS 5.3-5.31 + Secrets Audit + reliability fixes (healthcheck, logging, restart, PID limit). 4 of 20 apply live via docker update (memory/CPU/pids/restart) with zero downtime.' },
+        { type: 'feature', text: 'Compose diff engine using eemeli/yaml — preserves comments + style through round-trip. GitHub-style red/green diff in UI.' },
+        { type: 'feature', text: 'Auto-rollback — on health-check fail or compose error, restores pre-apply snapshot (gzipped docker inspect). Manual rollback window of 60 seconds after successful apply.' },
+        { type: 'feature', text: 'Git-PR mode for git-backed stacks — creates docker-dash/remediate-<planId> branch, commits diff, pushes, returns PR URL. Does NOT touch running containers — webhook auto-pull takes over on merge. Safest mode.' },
+        { type: 'feature', text: 'Artifact mode — downloads .patch file + shell script for manual application (offline / air-gapped escape hatch).' },
+        { type: 'feature', text: '"Fix" and "Remediate stack" buttons on every Secrets Audit container row with issues. Reusable component — other pages can call RemediateWizard.open() directly.' },
+        { type: 'feature', text: 'Bilingual How-To guide (EN + RO): "Remediate Container Security Issues via the Wizard".' },
+        { type: 'fix', text: 'Audit & Wizard sub-tabs no longer duplicate. JS closure bug: _renderSecretsAudit() was reassigning its parameter at the end, so the click handler captured the inner div instead of the parent.' },
+        { type: 'fix', text: 'Secrets Audit no longer limited to 30 containers. Now scans all containers on the host, parallelized (Promise.all concurrency 20) — 100 containers in ~5s vs ~30s previously.' },
+        { type: 'improvement', text: 'Secrets Audit response now includes stack + service + image labels per container (needed for stack-level grouping in Remediation Wizard).' },
+        { type: 'improvement', text: 'Hash-chained audit log captures every state change: remediate_plan / _apply_start / _apply_success / _apply_failed / _rollback / _pr_created.' },
+      ],
+    },
+    {
       version: '6.5.0',
       date: '2026-04-20',
       title: 'Let\'s Encrypt Wizard — issue real certs from the UI in 3 clicks',
