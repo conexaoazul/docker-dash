@@ -3991,7 +3991,8 @@ DB_PASS=secret"></textarea>
       const certs = await Api.getTrackedCertificates();
 
       const headerActions = '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
-        + '<button class="btn btn-primary" id="cert-add-btn"><i class="fas fa-plus"></i> Track Certificate</button>'
+        + '<button class="btn btn-primary" id="cert-le-btn" style="background:linear-gradient(135deg,#3a8fb7,#1a5478);border:none"><i class="fas fa-magic"></i> Request Let\'s Encrypt</button>'
+        + '<button class="btn btn-secondary" id="cert-add-btn"><i class="fas fa-plus"></i> Track Certificate</button>'
         + '<button class="btn btn-secondary" id="cert-csr-btn"><i class="fas fa-file-signature"></i> Generate CSR</button>'
         + '</div>';
 
@@ -4039,8 +4040,66 @@ DB_PASS=secret"></textarea>
           + '</tbody></table></div></div>';
       }
 
-      el.innerHTML = headerActions + summaryCards + body;
+      // Render saved DNS credentials section (best-effort — silently empty on error)
+      let credsSection = '';
+      try {
+        const credsRes = await Api.acmeListCredentials();
+        const creds = (credsRes && credsRes.credentials) || [];
+        if (creds.length > 0) {
+          credsSection = '<div class="card" style="margin-top:16px"><div class="card-header"><h3><i class="fas fa-key" style="margin-right:6px;color:var(--accent)"></i>Saved DNS Credentials (' + creds.length + ')</h3></div>'
+            + '<div class="card-body" style="padding:0;overflow-x:auto">'
+            + '<table class="data-table compact"><thead><tr><th>Name</th><th>Provider</th><th>Last Validated</th><th>Status</th><th>Actions</th></tr></thead><tbody>'
+            + creds.map(c => {
+                const status = c.lastValidationStatus;
+                const statusBadge = status === 'ok'
+                  ? '<span class="badge" style="background:var(--green)22;color:var(--green);font-size:10px">OK</span>'
+                  : status === 'failed'
+                    ? '<span class="badge" style="background:var(--red)22;color:var(--red);font-size:10px" title="' + Utils.escapeHtml(c.lastValidationMessage || '') + '">FAILED</span>'
+                    : '<span class="badge" style="background:var(--text-dim)22;color:var(--text-dim);font-size:10px">UNVERIFIED</span>';
+                const lastVal = c.lastValidatedAt ? c.lastValidatedAt.replace('T', ' ').substring(0, 16) : '—';
+                return '<tr>'
+                  + '<td><strong>' + Utils.escapeHtml(c.name) + '</strong></td>'
+                  + '<td class="text-sm">' + Utils.escapeHtml(c.providerId) + '</td>'
+                  + '<td class="text-sm text-muted">' + lastVal + '</td>'
+                  + '<td>' + statusBadge + '</td>'
+                  + '<td>'
+                  + '<button class="btn btn-xs btn-secondary acme-cred-validate-btn" data-id="' + c.id + '" title="Re-validate"><i class="fas fa-check-circle"></i></button> '
+                  + '<button class="btn btn-xs btn-danger acme-cred-delete-btn" data-id="' + c.id + '" data-name="' + Utils.escapeHtml(c.name) + '" title="Delete"><i class="fas fa-trash"></i></button>'
+                  + '</td></tr>';
+              }).join('')
+            + '</tbody></table></div></div>';
+        }
+      } catch { /* ACME endpoints may not be reachable — silently skip */ }
 
+      // Render ACME-managed certs section
+      let managedSection = '';
+      try {
+        const managedRes = await Api.acmeListManagedCerts();
+        const managed = (managedRes && managedRes.certs) || [];
+        if (managed.length > 0) {
+          managedSection = '<div class="card" style="margin-top:16px"><div class="card-header"><h3><i class="fas fa-rocket" style="margin-right:6px;color:var(--accent)"></i>Let\'s Encrypt Managed Certificates (' + managed.length + ')</h3></div>'
+            + '<div class="card-body" style="padding:0;overflow-x:auto">'
+            + '<table class="data-table compact"><thead><tr><th>Domain(s)</th><th>Challenge</th><th>Provider</th><th>Credential</th><th>Env</th><th>Actions</th></tr></thead><tbody>'
+            + managed.map(c => {
+                const envBadge = c.staging
+                  ? '<span class="badge" style="background:var(--yellow)22;color:var(--yellow);font-size:10px">STAGING</span>'
+                  : '<span class="badge" style="background:var(--green)22;color:var(--green);font-size:10px">PROD</span>';
+                return '<tr>'
+                  + '<td class="mono text-sm" style="max-width:280px;word-break:break-all">' + Utils.escapeHtml(c.domain) + '</td>'
+                  + '<td class="text-sm">' + Utils.escapeHtml(c.challengeType) + '</td>'
+                  + '<td class="text-sm">' + (c.providerId ? Utils.escapeHtml(c.providerId) : '—') + '</td>'
+                  + '<td class="text-sm">' + (c.credentialName ? Utils.escapeHtml(c.credentialName) : '—') + '</td>'
+                  + '<td>' + envBadge + '</td>'
+                  + '<td><button class="btn btn-xs btn-danger acme-cert-remove-btn" data-domain="' + Utils.escapeHtml(c.domain) + '" title="Remove"><i class="fas fa-trash"></i></button></td>'
+                  + '</tr>';
+              }).join('')
+            + '</tbody></table></div></div>';
+        }
+      } catch { /* skip */ }
+
+      el.innerHTML = headerActions + summaryCards + body + managedSection + credsSection;
+
+      el.querySelector('#cert-le-btn')?.addEventListener('click', () => this._showLetsEncryptWizard(el));
       el.querySelector('#cert-add-btn')?.addEventListener('click', () => this._showAddCertificateModal(el));
       el.querySelector('#cert-csr-btn')?.addEventListener('click', () => this._showCsrModal());
       el.querySelectorAll('.cert-refresh-btn').forEach(btn => btn.addEventListener('click', async () => {
@@ -4050,6 +4109,23 @@ DB_PASS=secret"></textarea>
       el.querySelectorAll('.cert-delete-btn').forEach(btn => btn.addEventListener('click', async () => {
         if (!confirm('Stop tracking this certificate?')) return;
         try { await Api.deleteTrackedCertificate(btn.dataset.id); Toast.success('Untracked'); this._renderCertificates(el); }
+        catch (err) { Toast.error(err.message); }
+      }));
+      el.querySelectorAll('.acme-cred-validate-btn').forEach(btn => btn.addEventListener('click', async () => {
+        try {
+          const r = await Api.acmeValidateCredential(btn.dataset.id);
+          (r.ok ? Toast.success : Toast.error)(r.message);
+          this._renderCertificates(el);
+        } catch (err) { Toast.error(err.message); }
+      }));
+      el.querySelectorAll('.acme-cred-delete-btn').forEach(btn => btn.addEventListener('click', async () => {
+        if (!confirm('Delete credential "' + btn.dataset.name + '"?')) return;
+        try { await Api.acmeDeleteCredential(btn.dataset.id); Toast.success('Deleted'); this._renderCertificates(el); }
+        catch (err) { Toast.error(err.message); }
+      }));
+      el.querySelectorAll('.acme-cert-remove-btn').forEach(btn => btn.addEventListener('click', async () => {
+        if (!confirm('Remove ACME certificate for "' + btn.dataset.domain + '"? This will remove the Caddy config block (cert files on disk are NOT deleted).')) return;
+        try { await Api.acmeRemoveCert(btn.dataset.domain); Toast.success('Removed'); this._renderCertificates(el); }
         catch (err) { Toast.error(err.message); }
       }));
     } catch (err) {
@@ -4143,6 +4219,316 @@ DB_PASS=secret"></textarea>
         mc.querySelector('#csr-download-csr').onclick = () => dl(data.commonName + '.csr', res.csr);
       } catch (err) { Toast.error(err.message); }
     });
+  },
+
+  // ─── Let's Encrypt Wizard (v6.5) ────────────────────────────
+  _showLetsEncryptWizard(parentEl) {
+    const state = {
+      step: 1,
+      // Step 1
+      domains: [],
+      email: '',
+      challengeType: 'http-01',
+      staging: true,
+      // Step 2
+      providers: [],
+      providerId: null,
+      providerSpec: null,
+      credentialMode: 'new', // 'new' | 'existing'
+      existingCredentials: [],
+      existingCredentialId: null,
+      newCredentialFields: {}, // {api_token: '...', etc.}
+      saveCredentialAs: '',
+      validateBeforeIssue: true,
+      // Step 3
+      jobId: null,
+      jobStatus: null,
+      jobOutput: '',
+      pollTimer: null,
+    };
+
+    const cleanup = () => {
+      if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+    };
+
+    const stepBar = () => {
+      const labels = ['Domain & Challenge', 'Provider Credentials', 'Issue Certificate'];
+      return '<div style="display:flex;gap:4px;margin-bottom:18px">' + labels.map((label, i) => {
+        const num = i + 1;
+        const active = num === state.step;
+        const done = num < state.step;
+        const color = done ? 'var(--green)' : active ? 'var(--accent)' : 'var(--surface3)';
+        const textColor = active ? 'var(--text-bright)' : done ? 'var(--text)' : 'var(--text-dim)';
+        return '<div style="flex:1;display:flex;align-items:center;gap:6px">'
+          + '<span style="width:26px;height:26px;border-radius:50%;background:' + color + ';color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">' + (done ? '✓' : num) + '</span>'
+          + '<span style="font-size:12px;color:' + textColor + ';font-weight:' + (active ? '700' : '500') + '">' + label + '</span>'
+          + (num < labels.length ? '<span style="flex:1;height:1px;background:var(--border);margin:0 4px"></span>' : '')
+          + '</div>';
+      }).join('') + '</div>';
+    };
+
+    const renderStep1 = () => {
+      return '<div class="form-group"><label>Domains <span class="text-muted text-sm">(comma-separated; wildcards <code>*.example.com</code> require DNS-01)</span></label>'
+        + '<input id="le-domains" class="form-control" value="' + Utils.escapeHtml(state.domains.join(', ')) + '" placeholder="api.example.com, www.example.com" style="font-family:var(--mono);font-size:12px"></div>'
+        + '<div class="form-group"><label>Email for ACME notifications</label>'
+        + '<input id="le-email" class="form-control" type="email" value="' + Utils.escapeHtml(state.email) + '" placeholder="admin@example.com"></div>'
+        + '<div class="form-group"><label>Challenge type</label>'
+        + '<div style="display:flex;gap:14px;margin-top:6px">'
+        + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="le-challenge" value="http-01"' + (state.challengeType === 'http-01' ? ' checked' : '') + '> <span><strong>HTTP-01</strong> <span class="text-sm text-muted">— port 80 must be reachable from internet</span></span></label>'
+        + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="le-challenge" value="dns-01"' + (state.challengeType === 'dns-01' ? ' checked' : '') + '> <span><strong>DNS-01</strong> <span class="text-sm text-muted">— DNS provider API; required for wildcards</span></span></label>'
+        + '</div></div>'
+        + '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="le-staging"' + (state.staging ? ' checked' : '') + '> <span><strong>Use Let\'s Encrypt staging</strong> <span class="text-sm text-muted">(recommended for first issuance — protects from rate limits, but cert won\'t be browser-trusted)</span></span></label></div>';
+    };
+
+    const renderStep2 = () => {
+      if (state.challengeType === 'http-01') {
+        return '<div class="empty-msg"><i class="fas fa-info-circle" style="font-size:32px;color:var(--accent)"></i>'
+          + '<p>HTTP-01 challenge selected — no DNS provider configuration needed.</p>'
+          + '<p class="text-muted text-sm">Make sure port 80 on this host is reachable from the public internet so Let\'s Encrypt can verify domain ownership. Click Next to issue.</p></div>';
+      }
+
+      let html = '';
+      // Mode toggle
+      html += '<div class="form-group"><label>Credential source</label>'
+        + '<div style="display:flex;gap:14px;margin-top:6px">'
+        + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="le-cred-mode" value="new"' + (state.credentialMode === 'new' ? ' checked' : '') + '> Create new</label>'
+        + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="le-cred-mode" value="existing"' + (state.credentialMode === 'existing' ? ' checked' : '') + '> Use saved credential</label>'
+        + '</div></div>';
+
+      if (state.credentialMode === 'existing') {
+        const filtered = state.existingCredentials.filter(c => !state.providerId || c.providerId === state.providerId);
+        if (filtered.length === 0) {
+          html += '<div class="empty-msg text-sm"><i class="fas fa-key" style="color:var(--text-dim)"></i><p>No saved credentials yet. Switch to "Create new" or save one first.</p></div>';
+        } else {
+          html += '<div class="form-group"><label>Saved credential</label>'
+            + '<select id="le-existing-cred" class="form-control"><option value="">— select —</option>'
+            + filtered.map(c => '<option value="' + c.id + '"' + (state.existingCredentialId === c.id ? ' selected' : '') + '>' + Utils.escapeHtml(c.name) + ' (' + Utils.escapeHtml(c.providerId) + ')</option>').join('')
+            + '</select></div>';
+        }
+      } else {
+        // Provider picker
+        html += '<div class="form-group"><label>DNS Provider</label>'
+          + '<select id="le-provider" class="form-control"><option value="">— select —</option>'
+          + state.providers.map(p => '<option value="' + p.id + '"' + (state.providerId === p.id ? ' selected' : '') + '>' + Utils.escapeHtml(p.name) + '</option>').join('')
+          + '</select></div>';
+
+        if (state.providerSpec) {
+          html += '<div style="padding:10px 12px;background:var(--accent-dim);border-left:3px solid var(--accent);border-radius:4px;margin-bottom:12px;font-size:12px">'
+            + '<strong>📖 Get the API token:</strong> <a href="' + Utils.escapeHtml(state.providerSpec.docsUrl) + '" target="_blank" rel="noopener">' + Utils.escapeHtml(state.providerSpec.docsUrl) + '</a>'
+            + '<br><strong style="color:var(--red)">⚠ Use a SCOPED token, NOT a Global API Key</strong> — Docker Dash will reject formats that look like global keys.'
+            + '</div>';
+
+          for (const f of state.providerSpec.fields) {
+            const val = state.newCredentialFields[f.key] || '';
+            html += '<div class="form-group"><label>' + Utils.escapeHtml(f.label) + (f.required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>'
+              + '<input id="le-field-' + Utils.escapeHtml(f.key) + '" class="form-control" type="' + f.type + '" data-field="' + Utils.escapeHtml(f.key) + '" value="' + Utils.escapeHtml(val) + '" placeholder="' + Utils.escapeHtml(f.placeholder || '') + '" style="font-family:var(--mono);font-size:12px">'
+              + (f.helpText ? '<div class="text-xs text-muted" style="margin-top:4px">' + Utils.escapeHtml(f.helpText) + '</div>' : '')
+              + '</div>';
+          }
+
+          html += '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="le-save-cred"' + (state.saveCredentialAs ? ' checked' : '') + '> Save this credential for reuse</label>'
+            + '<input id="le-save-cred-name" class="form-control" placeholder="e.g. cloudflare-prod" value="' + Utils.escapeHtml(state.saveCredentialAs) + '" style="margin-top:6px;display:' + (state.saveCredentialAs ? 'block' : 'none') + '"></div>'
+            + '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="le-validate"' + (state.validateBeforeIssue ? ' checked' : '') + '> Validate credential against provider API before issuing</label></div>';
+        }
+      }
+      return html;
+    };
+
+    const renderStep3 = () => {
+      if (state.jobId == null) {
+        // Confirmation summary
+        let credLine;
+        if (state.challengeType === 'http-01') credLine = 'HTTP-01 challenge (no credential needed)';
+        else if (state.credentialMode === 'existing') {
+          const c = state.existingCredentials.find(c => c.id === state.existingCredentialId);
+          credLine = 'Existing: ' + (c ? c.name + ' (' + c.providerId + ')' : '—');
+        } else {
+          credLine = 'New ' + (state.providerSpec?.name || state.providerId) + ' credential' + (state.saveCredentialAs ? ' (saved as "' + state.saveCredentialAs + '")' : '');
+        }
+
+        return '<div class="card" style="border-left:4px solid var(--accent)"><div class="card-body">'
+          + '<h4 style="margin:0 0 12px"><i class="fas fa-clipboard-check" style="margin-right:6px"></i>Ready to issue</h4>'
+          + '<table style="width:100%;font-size:13px">'
+          + '<tr><td style="padding:4px 0;color:var(--text-dim);width:140px">Domains</td><td style="font-family:var(--mono)">' + state.domains.map(Utils.escapeHtml).join(', ') + '</td></tr>'
+          + '<tr><td style="padding:4px 0;color:var(--text-dim)">Email</td><td>' + Utils.escapeHtml(state.email) + '</td></tr>'
+          + '<tr><td style="padding:4px 0;color:var(--text-dim)">Challenge</td><td>' + state.challengeType + '</td></tr>'
+          + '<tr><td style="padding:4px 0;color:var(--text-dim)">Credential</td><td>' + Utils.escapeHtml(credLine) + '</td></tr>'
+          + '<tr><td style="padding:4px 0;color:var(--text-dim)">Environment</td><td>' + (state.staging ? '<span style="color:var(--yellow)">⚠ STAGING (not browser-trusted)</span>' : '<span style="color:var(--green)">PRODUCTION</span>') + '</td></tr>'
+          + '</table>'
+          + '<p class="text-sm text-muted" style="margin-top:12px;margin-bottom:0">Issuance can take 30s–5min depending on DNS propagation. The wizard will poll job status.</p>'
+          + '</div></div>';
+      }
+
+      // Job in progress
+      const statusColor = state.jobStatus === 'success' ? 'var(--green)' : state.jobStatus === 'failed' ? 'var(--red)' : 'var(--accent)';
+      const statusIcon = state.jobStatus === 'success' ? 'check-circle' : state.jobStatus === 'failed' ? 'times-circle' : 'spinner fa-spin';
+      return '<div style="text-align:center;padding:14px">'
+        + '<i class="fas fa-' + statusIcon + '" style="font-size:42px;color:' + statusColor + ';margin-bottom:10px"></i>'
+        + '<h3 style="margin:0 0 6px">Job #' + state.jobId + ' — ' + (state.jobStatus || 'pending') + '</h3>'
+        + '<p class="text-sm text-muted">Polling every 3 seconds…</p></div>'
+        + (state.jobOutput
+          ? '<div style="background:#111;color:#eee;padding:10px;border-radius:4px;font-family:var(--mono);font-size:11px;max-height:240px;overflow:auto;white-space:pre-wrap">' + Utils.escapeHtml(state.jobOutput) + '</div>'
+          : '');
+    };
+
+    const render = async () => {
+      let body;
+      if (state.step === 1) body = renderStep1();
+      else if (state.step === 2) body = renderStep2();
+      else body = renderStep3();
+
+      const footer = '<div style="display:flex;justify-content:space-between;gap:8px;margin-top:18px">'
+        + (state.step > 1 && state.jobId == null ? '<button class="btn btn-secondary" id="le-back"><i class="fas fa-arrow-left"></i> Back</button>' : '<div></div>')
+        + '<div>'
+        + (state.step < 3 ? '<button class="btn btn-primary" id="le-next">Next <i class="fas fa-arrow-right"></i></button>' : (state.jobId == null ? '<button class="btn btn-primary" id="le-issue"><i class="fas fa-magic"></i> Issue Certificate</button>' : '<button class="btn btn-primary" id="le-done">Close</button>'))
+        + '</div></div>';
+
+      Modal.open('<div class="modal-header"><h3><i class="fas fa-magic" style="margin-right:6px;color:var(--accent)"></i>Request Let\'s Encrypt Certificate</h3><button class="modal-close-btn" id="le-close"><i class="fas fa-times"></i></button></div>'
+        + '<div class="modal-body" style="max-height:75vh;overflow-y:auto">'
+        + stepBar()
+        + body
+        + footer
+        + '</div>', { width: '760px', onClose: cleanup });
+
+      const mc = Modal._content;
+      mc.querySelector('#le-close')?.addEventListener('click', () => { cleanup(); Modal.close(); });
+      mc.querySelector('#le-done')?.addEventListener('click', () => { cleanup(); Modal.close(); this._renderCertificates(parentEl); });
+      mc.querySelector('#le-back')?.addEventListener('click', () => { state.step--; render(); });
+
+      // Step 1 wiring
+      if (state.step === 1) {
+        mc.querySelectorAll('input[name="le-challenge"]').forEach(r => r.addEventListener('change', (e) => { state.challengeType = e.target.value; }));
+      }
+
+      // Step 2 wiring
+      if (state.step === 2) {
+        mc.querySelectorAll('input[name="le-cred-mode"]').forEach(r => r.addEventListener('change', (e) => { state.credentialMode = e.target.value; render(); }));
+        mc.querySelector('#le-provider')?.addEventListener('change', (e) => {
+          state.providerId = e.target.value || null;
+          state.providerSpec = state.providers.find(p => p.id === state.providerId) || null;
+          state.newCredentialFields = {};
+          render();
+        });
+        mc.querySelector('#le-existing-cred')?.addEventListener('change', (e) => {
+          state.existingCredentialId = parseInt(e.target.value) || null;
+          const c = state.existingCredentials.find(c => c.id === state.existingCredentialId);
+          if (c) { state.providerId = c.providerId; state.providerSpec = state.providers.find(p => p.id === c.providerId) || null; }
+        });
+        mc.querySelectorAll('input[data-field]').forEach(input => input.addEventListener('input', (e) => {
+          state.newCredentialFields[e.target.dataset.field] = e.target.value;
+        }));
+        mc.querySelector('#le-save-cred')?.addEventListener('change', (e) => {
+          state.saveCredentialAs = e.target.checked ? (mc.querySelector('#le-save-cred-name').value || 'unnamed') : '';
+          mc.querySelector('#le-save-cred-name').style.display = e.target.checked ? 'block' : 'none';
+        });
+        mc.querySelector('#le-save-cred-name')?.addEventListener('input', (e) => { state.saveCredentialAs = e.target.value; });
+        mc.querySelector('#le-validate')?.addEventListener('change', (e) => { state.validateBeforeIssue = e.target.checked; });
+      }
+
+      // Step 3 issue
+      mc.querySelector('#le-issue')?.addEventListener('click', async () => {
+        try {
+          // If new credential AND not existing-mode, save it first (if requested) OR use it inline
+          let credentialsId = state.existingCredentialId;
+          if (state.challengeType === 'dns-01' && state.credentialMode === 'new') {
+            if (!state.saveCredentialAs) {
+              Toast.warning('For dns-01 you must save the credential (provide a name)');
+              return;
+            }
+            const created = await Api.acmeCreateCredential({
+              name: state.saveCredentialAs,
+              providerId: state.providerId,
+              credentials: state.newCredentialFields,
+              validateImmediately: state.validateBeforeIssue,
+            });
+            if (state.validateBeforeIssue && created.validation && !created.validation.ok) {
+              Toast.error('Credential validation failed: ' + created.validation.message);
+              await Api.acmeDeleteCredential(created.id).catch(() => {});
+              return;
+            }
+            credentialsId = created.id;
+          }
+
+          const issued = await Api.acmeIssue({
+            domains: state.domains,
+            email: state.email,
+            challengeType: state.challengeType,
+            providerId: state.challengeType === 'dns-01' ? state.providerId : undefined,
+            credentialsId: state.challengeType === 'dns-01' ? credentialsId : undefined,
+            staging: state.staging,
+          });
+          state.jobId = issued.jobId;
+          state.jobStatus = 'pending';
+          render();
+
+          // Poll
+          state.pollTimer = setInterval(async () => {
+            try {
+              const job = await Api.acmeJob(state.jobId);
+              state.jobStatus = job.status;
+              state.jobOutput = job.output || '';
+              render();
+              if (job.status === 'success' || job.status === 'failed') {
+                clearInterval(state.pollTimer); state.pollTimer = null;
+                (job.status === 'success' ? Toast.success : Toast.error)('Issuance ' + job.status);
+              }
+            } catch (err) {
+              state.jobOutput += '\n[poll error] ' + err.message;
+              render();
+            }
+          }, 3000);
+        } catch (err) { Toast.error(err.message); }
+      });
+
+      // Next button
+      mc.querySelector('#le-next')?.addEventListener('click', async () => {
+        if (state.step === 1) {
+          // Validate domains
+          const raw = mc.querySelector('#le-domains').value.trim();
+          state.domains = raw.split(',').map(s => s.trim()).filter(Boolean);
+          if (state.domains.length === 0) { Toast.warning('Enter at least one domain'); return; }
+          if (state.domains.length > 100) { Toast.warning('Max 100 domains per cert'); return; }
+          state.email = mc.querySelector('#le-email').value.trim();
+          if (!state.email || !/^\S+@\S+\.\S+$/.test(state.email)) { Toast.warning('Valid email required'); return; }
+          state.staging = mc.querySelector('#le-staging').checked;
+          // Wildcards force dns-01
+          const hasWildcard = state.domains.some(d => d.startsWith('*.'));
+          if (hasWildcard && state.challengeType !== 'dns-01') {
+            Toast.warning('Wildcard domains require DNS-01. Switching to dns-01.');
+            state.challengeType = 'dns-01';
+          }
+          // Load providers + existing credentials for step 2
+          if (state.providers.length === 0) {
+            try {
+              const r = await Api.acmeListProviders();
+              state.providers = r.providers || [];
+            } catch (err) { Toast.error('Could not load providers: ' + err.message); return; }
+          }
+          try {
+            const r = await Api.acmeListCredentials();
+            state.existingCredentials = r.credentials || [];
+          } catch { state.existingCredentials = []; }
+          state.step = 2;
+          render();
+        } else if (state.step === 2) {
+          if (state.challengeType === 'dns-01') {
+            if (state.credentialMode === 'existing') {
+              if (!state.existingCredentialId) { Toast.warning('Select a saved credential'); return; }
+            } else {
+              if (!state.providerId) { Toast.warning('Select a DNS provider'); return; }
+              const required = (state.providerSpec.fields || []).filter(f => f.required);
+              for (const f of required) {
+                if (!state.newCredentialFields[f.key]) { Toast.warning(f.label + ' required'); return; }
+              }
+            }
+          }
+          state.step = 3;
+          render();
+        }
+      });
+    };
+
+    render();
   },
 
   _cisContainerRemediation(msg) {

@@ -52,9 +52,9 @@ Total: ~63 min reading. Preflight Phase 1 already executed (50 min wall time).
 - [ ] Enable Repo Settings → Actions → Workflow permissions = "Read and write" → re-trigger build
 - [x] **Session 1: Migration 049 + service skeletons** (461 tests passing, +30 new)
 - [x] **Session 2: All 5 Tier-1 providers + HTTP routes + integration tests** (492 tests, +31 new)
+- [x] **Session 3: UI wizard** — 3-step modal in System → Secrets → Certificates with provider picker, credential management (save/reuse/validate/delete), issuance + 3s job polling
 - [ ] Enable GHCR write permissions (Repo Settings) + re-trigger Caddy image build
-- [ ] Session 3: UI wizard
-- [ ] Session 4: WebSocket progress + integration tests + docs + release
+- [ ] Session 4: WebSocket progress (replace polling) + integration tests + docs + release v6.5
 - [ ] Session 2: Routes + custom Caddy image
 - [ ] Session 3: UI wizard
 - [ ] Session 4: Tests + docs + release
