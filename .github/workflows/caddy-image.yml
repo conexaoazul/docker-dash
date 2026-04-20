@@ -1,0 +1,116 @@
+name: Build Caddy Custom Image
+
+# Builds a multi-arch (amd64 + arm64) Caddy image with DNS plugins for the
+# v6.5 Let's Encrypt Wizard. Pushes to GHCR.
+#
+# Triggered:
+#   - on changes to docker/caddy/** or this workflow file
+#   - manually via workflow_dispatch
+#
+# To run manually:
+#   gh workflow run caddy-image.yml
+
+on:
+  push:
+    paths:
+      - 'docker/caddy/**'
+      - '.github/workflows/caddy-image.yml'
+  workflow_dispatch:
+    inputs:
+      push_to_ghcr:
+        description: 'Push to ghcr.io after build (otherwise build-only)'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/docker-dash-caddy
+  CADDY_VERSION: '2.11.2'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_ghcr == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ env.CADDY_VERSION }},enable={{is_default_branch}}
+            type=raw,value=6.5,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=sha,format=short
+
+      - name: Build and (optionally) push
+        uses: docker/build-push-action@v5
+        with:
+          context: docker/caddy
+          file: docker/caddy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_ghcr == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            CADDY_VERSION=${{ env.CADDY_VERSION }}
+
+      - name: Smoke test (amd64) — verify all 5 DNS plugins loaded
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_ghcr == 'true'
+        run: |
+          set -e
+          docker pull --platform linux/amd64 ${{ env.IMAGE_NAME }}:${{ env.CADDY_VERSION }}
+          MODULES=$(docker run --rm --platform linux/amd64 ${{ env.IMAGE_NAME }}:${{ env.CADDY_VERSION }} caddy list-modules 2>/dev/null | grep dns.providers || true)
+          echo "amd64 DNS providers loaded:"
+          echo "$MODULES"
+          for p in cloudflare route53 digitalocean hetzner linode; do
+            echo "$MODULES" | grep -q "dns.providers.$p" || { echo "MISSING amd64 plugin: $p"; exit 1; }
+          done
+          echo "✓ amd64 — all 5 plugins present"
+
+      - name: Smoke test (arm64) — verify all 5 DNS plugins loaded
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_ghcr == 'true'
+        run: |
+          set -e
+          docker pull --platform linux/arm64 ${{ env.IMAGE_NAME }}:${{ env.CADDY_VERSION }}
+          MODULES=$(docker run --rm --platform linux/arm64 ${{ env.IMAGE_NAME }}:${{ env.CADDY_VERSION }} caddy list-modules 2>/dev/null | grep dns.providers || true)
+          echo "arm64 DNS providers loaded:"
+          echo "$MODULES"
+          for p in cloudflare route53 digitalocean hetzner linode; do
+            echo "$MODULES" | grep -q "dns.providers.$p" || { echo "MISSING arm64 plugin: $p"; exit 1; }
+          done
+          echo "✓ arm64 — all 5 plugins present"
+
+      - name: Verify image size is reasonable (<250 MB)
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_ghcr == 'true'
+        run: |
+          SIZE=$(docker image inspect ${{ env.IMAGE_NAME }}:${{ env.CADDY_VERSION }} --format='{{.Size}}')
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Image size: ${SIZE_MB} MB"
+          [ $SIZE_MB -lt 250 ] || { echo "Image too large (${SIZE_MB}MB > 250MB target)"; exit 1; }
+          echo "✓ Image size within budget"
