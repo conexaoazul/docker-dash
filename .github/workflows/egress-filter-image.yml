@@ -1,0 +1,122 @@
+name: Build Egress Filter Sidecar Image
+
+# Builds a multi-arch (amd64 + arm64) image for the v6.7 Outbound Network
+# Filter sidecar (`docker-dash-egress-filter`). Pushes to GHCR.
+#
+# Triggered:
+#   - on changes to docker/egress-filter/** or this workflow file
+#   - manually via workflow_dispatch
+#
+# Requires: the repo's "Actions → General → Workflow permissions" must be set
+# to "Read and write permissions" for the push step to succeed.
+
+on:
+  push:
+    paths:
+      - 'docker/egress-filter/**'
+      - '.github/workflows/egress-filter-image.yml'
+  workflow_dispatch:
+    inputs:
+      push_to_ghcr:
+        description: 'Push to ghcr.io after build (otherwise build-only)'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/docker-dash-egress-filter
+  SIDECAR_VERSION: '6.7.0-rc.1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_ghcr == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ env.SIDECAR_VERSION }},enable={{is_default_branch}}
+            type=raw,value=6.7,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=sha,format=short
+
+      - name: Build and (optionally) push
+        uses: docker/build-push-action@v5
+        with:
+          context: docker/egress-filter
+          file: docker/egress-filter/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_ghcr == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test (amd64) — sidecar starts, /health reports no policy
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_ghcr == 'true'
+        run: |
+          set -e
+          docker pull --platform linux/amd64 ${{ env.IMAGE_NAME }}:${{ env.SIDECAR_VERSION }}
+          mkdir -p /tmp/p
+          echo '{"version":1,"mode":"enforce","allowlist":["example.com"],"updated_at":"2026-01-01T00:00:00Z"}' > /tmp/p/policy.json
+          docker run -d --name smoke-amd64 --platform linux/amd64 \
+            -v /tmp/p/policy.json:/etc/dd-egress/policy.json:ro \
+            -e DD_EGRESS_METRICS_LISTEN=:9191 \
+            -p 9191:9191 \
+            ${{ env.IMAGE_NAME }}:${{ env.SIDECAR_VERSION }}
+          sleep 3
+          HEALTH=$(curl -s http://localhost:9191/health || true)
+          docker rm -f smoke-amd64 >/dev/null
+          echo "health=$HEALTH"
+          echo "$HEALTH" | grep -q 'policy_v1' || { echo "amd64 smoke: unexpected health response"; exit 1; }
+          echo "✓ amd64 smoke test passed"
+
+      - name: Smoke test (arm64) — sidecar starts, /health reports policy
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_ghcr == 'true'
+        run: |
+          set -e
+          docker pull --platform linux/arm64 ${{ env.IMAGE_NAME }}:${{ env.SIDECAR_VERSION }}
+          # Run via QEMU; only check the binary loads + responds
+          docker run -d --name smoke-arm64 --platform linux/arm64 \
+            -v /tmp/p/policy.json:/etc/dd-egress/policy.json:ro \
+            ${{ env.IMAGE_NAME }}:${{ env.SIDECAR_VERSION }}
+          sleep 5
+          LOGS=$(docker logs smoke-arm64 2>&1 || true)
+          docker rm -f smoke-arm64 >/dev/null
+          echo "$LOGS" | grep -q 'loaded policy' || { echo "arm64 smoke: sidecar didn't log policy load"; echo "$LOGS"; exit 1; }
+          echo "✓ arm64 smoke test passed"
+
+      - name: Verify image size is reasonable (< 10 MB)
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_ghcr == 'true'
+        run: |
+          SIZE=$(docker image inspect ${{ env.IMAGE_NAME }}:${{ env.SIDECAR_VERSION }} --format='{{.Size}}')
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Image size: ${SIZE_MB} MB"
+          [ $SIZE_MB -lt 10 ] || { echo "Image too large (${SIZE_MB}MB > 10MB target — static Go binary should be small)"; exit 1; }
+          echo "✓ Image size within budget"

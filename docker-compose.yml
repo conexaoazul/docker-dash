@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        APP_VERSION: "${APP_VERSION:-6.7.0-rc.1}"
-    image: docker-dash:${APP_VERSION:-6.7.0-rc.1}
+        APP_VERSION: "${APP_VERSION:-6.7.0-rc.2}"
+    image: docker-dash:${APP_VERSION:-6.7.0-rc.2}
     container_name: docker-dash
     restart: unless-stopped
     env_file:
@@ -21,6 +21,8 @@ services:
       - docker-dash-data:/data
       # Shared certs dir — Caddyfile written here by the app, read by Caddy
       - caddy-certs:/data/certs
+      # Shared policy.json dir for the v6.7 egress filter sidecar (if running)
+      - egress-policy:/data/egress-policy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:${APP_PORT:-8101}/api/health"]
       interval: 30s
@@ -35,6 +37,46 @@ services:
     # Security: no privilege escalation, but needs docker socket
     security_opt:
       - no-new-privileges:true
+
+  # Optional Outbound Network Filter sidecar (v6.7+) — enable with:
+  #   docker compose --profile egress up -d
+  # Configure via Docker Dash UI: System → Egress → per-row "Enable filter"
+  #
+  # Before starting: set these envs on the `app` service (via .env):
+  #   DD_EGRESS_SIDECAR_ENDPOINT=dd-egress-filter:29193
+  #   DD_EGRESS_SIDECAR_NAME=dd-egress-filter
+  #   DD_EGRESS_BLOCKLOG_INGESTER=1
+  #
+  # The sidecar peeks TLS SNI + HTTP Host on every connection, compares to
+  # the policy allowlist (written by Docker Dash into /etc/dd-egress/policy.json
+  # via the shared egress-policy volume), and forwards or resets. IMDS is
+  # always blocked. No TLS decryption.
+  dd-egress-filter:
+    build:
+      context: ./docker/egress-filter
+    image: docker-dash-egress-filter:${APP_VERSION:-6.7.0-rc.2}
+    container_name: dd-egress-filter
+    restart: unless-stopped
+    # Uses the default bridge so target containers on the default bridge can
+    # reach it via 172.17.0.X without extra network plumbing. For user-defined
+    # bridges or Swarm overlays, attach the sidecar to those networks manually
+    # (or run one sidecar per network) — see docs/planning/v6.7/.../README.md.
+    network_mode: bridge
+    volumes:
+      - egress-policy:/etc/dd-egress:ro
+      - egress-logs:/var/log/dd-egress
+    environment:
+      DD_EGRESS_LISTEN: ":29193"
+      DD_EGRESS_POLICY_PATH: /etc/dd-egress/policy.json
+      DD_EGRESS_BLOCKLOG_PATH: /var/log/dd-egress/denied.log
+      DD_EGRESS_METRICS_LISTEN: ":9191"
+    # Deliberately NO `ports:` here — sidecar must not be exposed to the host
+    # (preflight P4 validated). Traffic reaches it via iptables redirect from
+    # within filtered containers' netns.
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - egress
 
   # Optional HTTPS reverse proxy — enable with: docker compose --profile tls up -d
   # Configure via Docker Dash UI: System → SSL/TLS → Enable HTTPS
@@ -65,3 +107,7 @@ volumes:
     name: docker-dash-caddy-certs
   caddy-data:
   caddy-config:
+  egress-policy:
+    name: docker-dash-egress-policy
+  egress-logs:
+    name: docker-dash-egress-logs

@@ -301,6 +301,15 @@ async function start() {
     require('./services/egress-blocklog-ingester').start();
   }
 
+  // Egress Filter boot sync (v6.7.0-rc.2): if Docker Dash restarted while
+  // policies existed, the sidecar's on-disk policy.json may be stale. Write
+  // it once at startup so the sidecar (if running) picks up via SIGHUP.
+  try {
+    require('./services/egress-filter').writePolicyFile();
+  } catch (e) {
+    require('./utils/logger')('egress-filter').debug('boot-time policy sync skipped', { error: e.message });
+  }
+
   // Egress Filter (v6.7.0-alpha.2): after each policy write, SIGHUP the sidecar.
   // The sidecar is opt-in — user runs a container named `dd-egress-filter`. If it's
   // absent, this hook silently succeeds (alpha testing without the sidecar is fine).

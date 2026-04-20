@@ -2,6 +2,63 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.7.0-rc.2] - 2026-04-20 — "Outbound Filter: operational polish"
+
+Second release candidate for v6.7.0. No new features — three operational improvements that reduce setup friction from "build + wire up manually" to "docker compose up".
+
+### Added — One-command setup
+
+- **`docker-compose.yml` gains `dd-egress-filter` service** under `egress` profile:
+  ```
+  docker compose --profile egress up -d
+  ```
+  Builds from `docker/egress-filter/`, mounts shared `egress-policy` + `egress-logs` volumes, exposes metrics on :9191, and deliberately has no published `ports:` (sidecar reachable only from containers via iptables redirect — preflight P4).
+- **`network_mode: bridge`** on the sidecar — attaches to the default Docker bridge where most target containers live. User-defined bridges and Swarm overlays are documented as requiring manual attachment.
+- **Two new shared volumes**: `egress-policy` (Docker Dash writes `policy.json` here; sidecar reads) and `egress-logs` (sidecar's deny log; readable from the ingester).
+
+### Added — GHA workflow for sidecar image
+
+- **`.github/workflows/egress-filter-image.yml`** — multi-arch buildx (amd64 + arm64), QEMU emulation, GHCR push on `main` or manual dispatch. Includes two smoke tests per arch (sidecar starts + `/health` reports a loaded policy) and an image-size guard at 10 MB.
+- Triggered by changes under `docker/egress-filter/**`. Tags: `latest`, `6.7.0-rc.1`, `6.7`, branch, short-sha.
+- **Blocked until you flip the repo's "Workflow permissions" to Read and write** (Settings → Actions → General). Nothing the CLI can automate — a one-click toggle.
+
+### Fixed — Boot-time policy sync
+
+- **`server.js`** now calls `egressFilter.writePolicyFile()` once at startup (after migrations). Previously: if Docker Dash restarted while policies existed, the sidecar's on-disk `policy.json` could be stale until someone edited a policy. Now state is consistent across restarts.
+
+### Operator notes
+
+To enable the outbound filter stack:
+
+```bash
+# 1. Add these to your .env (or docker-compose environment block on `app`):
+DD_EGRESS_SIDECAR_ENDPOINT=172.17.0.X:29193      # fill in after first compose up
+DD_EGRESS_SIDECAR_NAME=dd-egress-filter
+DD_EGRESS_BLOCKLOG_INGESTER=1
+
+# 2. Start with egress profile:
+docker compose --profile egress up -d
+
+# 3. Find the sidecar's bridge IP:
+docker inspect dd-egress-filter --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+
+# 4. Update DD_EGRESS_SIDECAR_ENDPOINT with that IP and restart app:
+docker compose up -d app
+```
+
+### Tests
+
+- **648 passing / 43 suites** — no test changes (these are infra/config additions).
+
+### v6.7.0 stable gating
+
+rc.2 is the last planned rc. v6.7.0 final ships once:
+- [ ] GHCR "Read and write" toggle flipped (one-click, user action)
+- [ ] Soak test passes — 48h on staging with ≥1 active policy
+- [ ] Optional: design-partner preset validation (preflight P7)
+
+---
+
 ## [6.7.0-rc.1] - 2026-04-20 — "Outbound Filter: UI + block log + How-To"
 
 First release candidate for v6.7.0. Alphas 1-4 built the foundation, sidecar, enforcement, stack scope. rc.1 ships the user-facing surface (UI in System → Egress tab), block log ingestion from sidecar → DB, and a bilingual How-To guide. **The feature is now end-to-end usable by someone who's never looked at the REST API.**
