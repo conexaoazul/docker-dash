@@ -103,8 +103,8 @@ describe('_tick', () => {
 
   it('ingests new lines + inserts into egress_block_log for every active policy', async () => {
     // Create 2 active policies
-    const p1 = egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's1', preset: 'registry-only' });
-    const p2 = egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's2', preset: 'lockdown' });
+    egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's1', preset: 'registry-only' });
+    egressFilter.createPolicy({ scopeType: 'stack', scopeKey: 's2', preset: 'lockdown' });
 
     dockerService._mock.mockContainer.inspect.mockResolvedValue({ State: { Running: true }, Id: 'sidecar1' });
     mockExecOutput([

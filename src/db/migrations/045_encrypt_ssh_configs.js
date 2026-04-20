@@ -39,13 +39,13 @@ exports.up = function (db) {
       db.prepare('UPDATE docker_hosts SET ssh_config = ? WHERE id = ?').run(blob, row.id);
       encrypted++;
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.warn(`[045] Failed to encrypt ssh_config for host id=${row.id}: ${err.message}`);
       skipped++;
     }
   }
 
-  // eslint-disable-next-line no-console
+   
   console.log(`[045] SSH config encryption: ${encrypted} encrypted, ${skipped} skipped`);
 };
 
@@ -55,7 +55,7 @@ exports.down = function (db) {
   try {
     ({ decryptSshConfig } = require('../../services/host-config-crypto'));
   } catch {
-    // eslint-disable-next-line no-console
+     
     console.warn('[045 down] Cannot load host-config-crypto — setting encrypted rows to NULL');
     db.prepare(
       "UPDATE docker_hosts SET ssh_config = NULL WHERE ssh_config IS NOT NULL AND ssh_config != '' AND ssh_config NOT LIKE '{%'"
@@ -89,13 +89,13 @@ exports.down = function (db) {
         skipped++;
       }
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.warn(`[045 down] Failed to decrypt ssh_config for host id=${row.id}: ${err.message}`);
       db.prepare('UPDATE docker_hosts SET ssh_config = NULL WHERE id = ?').run(row.id);
       skipped++;
     }
   }
 
-  // eslint-disable-next-line no-console
+   
   console.log(`[045 down] SSH config decryption: ${decrypted} decrypted, ${skipped} skipped`);
 };

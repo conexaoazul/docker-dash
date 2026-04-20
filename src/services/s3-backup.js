@@ -70,7 +70,6 @@ function _s3Put(bucket, objectKey, body, contentType = 'application/octet-stream
     // Canonical request
     const signedHeaderKeys = Object.keys(headers).map(k => k.toLowerCase()).sort();
     const signedHeaders = signedHeaderKeys.join(';');
-    const canonicalHeaders = signedHeaderKeys.map(k => `${k}:${headers[k.split('-').map((p, i) => i === 0 ? p : p.charAt(0).toUpperCase() + p.slice(1)).join('-') || k]}`);
 
     // Build canonical headers properly
     const canonicalHeaderStr = signedHeaderKeys.map(k => {

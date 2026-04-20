@@ -535,7 +535,7 @@ class DockerService {
     return await docker.df();
   }
 
-  async prune({ containers, images, volumes, networks, buildCache } = {}, hostId = 0) {
+  async prune({ containers, images, volumes, networks, buildCache: _buildCache } = {}, hostId = 0) {
     const docker = this.getDocker(hostId);
     const results = {};
     if (containers) results.containers = await docker.pruneContainers();

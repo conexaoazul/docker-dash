@@ -565,7 +565,7 @@ async function _ensureSandboxNetwork(docker) {
 router.post('/sandbox', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
   try {
     const {
-      mode = 'ephemeral', ttl = 3600, memLimit = 536870912, cpuLimit = 0.5, name, openTerminal,
+      mode = 'ephemeral', ttl = 3600, memLimit = 536870912, cpuLimit = 0.5, name, openTerminal: _openTerminal,
       // Project source params
       projectSource = 'none',
       githubUrl,
@@ -1122,7 +1122,6 @@ router.post('/:id/smart-restart', requireAuth, requireRole('admin', 'operator'),
     const container = docker.getContainer(id);
     const inspect = await container.inspect();
     const name = inspect.Name.replace(/^\//, '');
-    const image = inspect.Config.Image;
 
     // Get restart history from events
     const db = getDb();
@@ -1277,9 +1276,8 @@ router.post('/:id/safe-update', requireAuth, requireRole('admin', 'operator'), w
       });
     });
 
-    // Step 2: Get new image digest
-    const newImage = await docker.getImage(image).inspect();
-    const newDigest = newImage.Id;
+    // Step 2: Get new image digest (retained for future use by Trivy step)
+    await docker.getImage(image).inspect();
 
     // Step 3: Scan with Trivy (if available)
     let scanPassed = true;
@@ -1431,7 +1429,6 @@ router.get('/:id/diagnose', requireAuth, async (req, res) => {
 
     // Step 6: Resource limits
     const memLimit = inspect.HostConfig?.Memory || 0;
-    const memUsage = state.Running ? null : null; // Can't get usage for stopped containers
     steps.push({
       step: 6, title: 'Resource Limits',
       status: memLimit === 0 ? 'info' : 'ok',
@@ -1618,7 +1615,6 @@ router.get('/:id/dependencies', requireAuth, async (req, res) => {
 
     // Parse env vars for references to other containers
     const urlPattern = /(?:\/\/|@)([a-z0-9][\w.-]*?)(?::\d+|\/)/gi;
-    const hostPattern = /^([A-Z_]*(?:HOST|SERVER|ADDR|ENDPOINT|URL|URI))\s*=\s*(.+)$/i;
     const dependencies = [];
     const seen = new Set();
 

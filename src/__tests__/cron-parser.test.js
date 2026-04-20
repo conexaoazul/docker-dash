@@ -53,7 +53,7 @@ function cronMatchesNow(cronExpr, now) {
 }
 
 // Helper: create a Date at a specific minute/hour/weekday
-function at({ minute = 0, hour = 0, day = 1, month = 1, weekday = 0 } = {}) {
+function _at({ minute = 0, hour = 0, day: _day = 1, month: _month = 1, weekday = 0 } = {}) {
   // Use a known Sunday (2024-01-07 = Sunday = day 0)
   // weekday: 0=Sun, 1=Mon, ..., 6=Sat
   const base = new Date(2024, 0, 7); // 2024-01-07 Sunday

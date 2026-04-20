@@ -32,7 +32,6 @@ router.get('/health', (req, res) => {
 
 router.get('/metrics', optionalAuth, (req, res) => {
   try {
-    const db = getDb();
     const overview = statsService.getOverview();
     const lines = [
       '# HELP docker_dash_containers_total Total containers',
@@ -772,8 +771,6 @@ router.get('/dependencies', requireAuth, async (req, res) => {
       const stack = c.Labels?.['com.docker.compose.project'];
       const service = c.Labels?.['com.docker.compose.service'];
 
-      // Detect dependencies from env vars (DB_HOST, REDIS_URL, etc.)
-      const envDeps = [];
       // We can't read env from list, but we can infer from links and networks
 
       nodes.push({
@@ -1131,7 +1128,7 @@ const ROOT = path.join(__dirname, '..', '..');
 router.get('/about/files', requireAuth, (req, res) => {
   const files = ABOUT_FILES.map(name => {
     const filePath = path.join(ROOT, name);
-    let content = null, exists = false, size = 0;
+    let exists = false, size = 0;
     try {
       const stat = fs.statSync(filePath);
       exists = true;

@@ -299,7 +299,7 @@ router.delete('/:id', requireAuth, requireRole('admin'), writeable, async (req, 
 router.post('/test', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { connectionType, socketPath, host, port, tlsCa, tlsCert, tlsKey,
-            sshHost, sshPort, sshUsername, sshPassword, sshPrivateKey, sshPassphrase, sshDockerSocket } = req.body;
+            sshHost, sshPort, sshUsername, sshPassword, sshPrivateKey, sshPassphrase } = req.body;
 
     if (connectionType === 'ssh') {
       // Test SSH connection

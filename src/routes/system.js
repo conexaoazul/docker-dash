@@ -587,7 +587,6 @@ router.post('/compose/:stack/:action', requireAuth, requireRole('admin', 'operat
     const docker = dockerService.getDocker(req.hostId);
     const firstContainer = await docker.getContainer(stackContainers[0].id).inspect();
     const workingDir = firstContainer.Config.Labels?.['com.docker.compose.project.working_dir'] || '';
-    const configFile = firstContainer.Config.Labels?.['com.docker.compose.project.config_files'] || '';
 
     if (!workingDir) return res.status(400).json({ error: 'Cannot determine compose working directory' });
 
@@ -609,7 +608,7 @@ router.post('/compose/:stack/:action', requireAuth, requireRole('admin', 'operat
 });
 
 /** Reconstruct a best-effort docker-compose.yml from a container inspect result */
-function _generateComposeFromInspect(inspection, stackName) {
+function _generateComposeFromInspect(inspection, _stackName) {
   const labels = inspection.Config?.Labels || {};
   const rawName = labels['com.docker.compose.service'] || (inspection.Name || '').replace(/^\//, '');
   const serviceName = rawName.replace(/[^a-z0-9_-]/gi, '_') || 'app';
@@ -723,7 +722,7 @@ const os = require('os');
 
 router.post('/stacks/:name/validate', requireAuth, async (req, res) => {
   try {
-    const { config: yamlContent, workingDir } = req.body;
+    const { config: yamlContent } = req.body;
     if (!yamlContent) return res.status(400).json({ error: 'config required' });
 
     // Write to temp file and validate with docker compose
@@ -2098,7 +2097,6 @@ router.post('/secrets-wizard/deploy-remote', requireAuth, requireRole('admin'), 
 
     const result = await new Promise((resolve, reject) => {
       let output = '';
-      let exitCode = null;
       const timeout = setTimeout(() => { try { client.end(); } catch {} reject(new Error('Remote execution timeout (120s)')); }, 120000);
 
       client.on('ready', () => {
@@ -2116,7 +2114,6 @@ router.post('/secrets-wizard/deploy-remote', requireAuth, requireRole('admin'), 
               ch.stderr.on('data', (d) => { output += d.toString(); });
               ch.on('close', (code) => {
                 clearTimeout(timeout);
-                exitCode = code;
                 client.end();
                 resolve({ output, exitCode: code });
               });

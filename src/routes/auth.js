@@ -550,7 +550,6 @@ router.post('/reset-password-token',
 // ─── OIDC / OAuth Flow ────────────────────────────────────
 
 const https = require('https');
-const http = require('http');
 const crypto = require('crypto');
 
 /** Fetch JSON from a URL (for OIDC discovery, token exchange, userinfo) */

@@ -271,7 +271,6 @@ class GitService {
     if (removeContainers && fs.existsSync(repoDir)) {
       try {
         const composePath = path.join(repoDir, stack.compose_path);
-        const flags = removeVolumes ? '--volumes' : '';
         const args = ['compose', '-f', composePath, '-p', stack.stack_name, 'down'];
         if (removeVolumes) args.push('--volumes');
         require('child_process').execFileSync('docker', args, { timeout: 60000, encoding: 'utf8', stdio: 'pipe' });

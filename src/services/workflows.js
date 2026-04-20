@@ -101,7 +101,7 @@ class WorkflowService {
     return statsData.filter(s => s.container_name === target || s.container_id?.startsWith(target));
   }
 
-  _checkTrigger(type, config, stats, events) {
+  _checkTrigger(type, config, stats, _events) {
     switch (type) {
       case 'cpu_high':
         return stats.cpu_percent > (config.threshold || 90);

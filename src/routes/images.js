@@ -58,7 +58,7 @@ router.post('/pull-stream', requireAuth, requireRole('admin', 'operator'), write
         'Connection': 'keep-alive',
       });
 
-      docker.modem.followProgress(stream, (err, output) => {
+      docker.modem.followProgress(stream, (err, _output) => {
         // onFinished
         if (err) {
           res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
@@ -305,7 +305,6 @@ function _generateRemediation(vulns, imageName) {
   const binaryVulns = vulns.filter(v => v._class === 'third-party-binary');
   const otherVulns = vulns.filter(v => v._class === 'other');
   const fixable = vulns.filter(v => v.fixedIn && v.fixedIn !== 'not fixed');
-  const unfixable = vulns.filter(v => !v.fixedIn || v.fixedIn === 'not fixed');
   const critical = vulns.filter(v => v.severity === 'critical');
   const high = vulns.filter(v => v.severity === 'high');
 
@@ -321,7 +320,6 @@ function _generateRemediation(vulns, imageName) {
   // === Third-party binary vulnerabilities (Scout, Trivy, Docker CLI) ===
   if (binaryVulns.length > 0) {
     const binaryCritical = binaryVulns.filter(v => v.severity === 'critical');
-    const binaryHigh = binaryVulns.filter(v => v.severity === 'high');
     const toolNames = [...new Set(binaryVulns.map(v => {
       const t = (v.target || '').toLowerCase();
       if (t.includes('scout')) return 'Docker Scout';
@@ -416,7 +414,6 @@ function _generateRemediation(vulns, imageName) {
   }
 
   // === Summary ===
-  const appVulns = npmVulns.length + osVulns.length + otherVulns.length;
   recs.push({
     priority: 'info',
     type: 'summary',

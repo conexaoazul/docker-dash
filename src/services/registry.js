@@ -169,7 +169,7 @@ class RegistryService {
       const headers = { 'Accept': 'application/json' };
 
       if (reg.username && reg.password_encrypted) {
-        const pass = this._decryptLegacyOrNew(reg.password_encrypted);  // eslint-disable-line no-underscore-dangle
+        const pass = this._decryptLegacyOrNew(reg.password_encrypted);   
         headers['Authorization'] = 'Basic ' + Buffer.from(`${reg.username}:${pass}`).toString('base64');
       }
 

@@ -2,6 +2,33 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.7.1] - 2026-04-20 — "Hygiene — native deps + zero lint warnings"
+
+Post-v6.7 housekeeping. No new features, no behavior changes. Two things land:
+
+### Native dependency refresh
+
+- `bcrypt` `^5.1.1` → `^6.0.0` (major). Drops Node <16 support (we're on 24). API identical for our usage (`hash` + `compare`), native bindings rebuild cleanly.
+- `better-sqlite3` `^11.10.0` → `^12.9.0` (major). Pure perf + stability bump; no API changes affect our usage. All 648 tests pass without modification.
+
+`npm audit` remains at 0 vulnerabilities.
+
+### Zero lint warnings
+
+- `npm run lint` exits 0 with no output. 49 warnings at the start of this session → 34 after the v6.6.5 sweep → **0** now.
+- Strategy: underscore-prefix unused function args (safe, preserves caller contract), remove unused local vars with no side effects, remove stale `eslint-disable` directives.
+- Files touched: `src/__tests__/cron-parser.test.js`, `egress-blocklog-ingester.test.js`, `egress-filter.test.js`, `src/routes/auth.js`, `containers.js`, `hosts.js`, `images.js`, `misc.js`, `stats.js`, `system.js`, `src/services/docker-runner.js`, `docker.js`, `git.js`, `s3-backup.js`, `securityAlerts.js`, `workflows.js`. All backed by tests passing.
+
+### Still deferred
+
+- `diff` 5 → 9, `express` 4 → 5, `node-cron` 3 → 4 — each wants a dedicated regression session. Tracked in BACKLOG P2.
+
+### Tests
+
+- **648 passing / 43 suites** — no regressions from native dep bumps or lint changes.
+
+---
+
 ## [6.7.0] - 2026-04-20 — "Outbound Network Filter" 🎉
 
 Docker Dash's biggest security feature to date. Ships a production hostname-based outbound allowlist enforced by a lightweight Go sidecar (~2 MB scratch image) + nftables rules installed into target container netns via a short-lived `NET_ADMIN` helper. No TLS decryption, no cert injection — containers see their destinations' real certs.

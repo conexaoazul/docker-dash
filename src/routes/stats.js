@@ -157,7 +157,6 @@ router.get('/trends/:id', requireAuth, (req, res) => {
 
 router.get('/cost', requireAuth, (req, res) => {
   try {
-    const db = require('../db').getDb();
     const hostId = req.hostId || 0;
     const monthlyCost = parseFloat(req.query.monthly_cost || '0');
 

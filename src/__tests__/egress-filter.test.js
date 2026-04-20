@@ -291,7 +291,6 @@ describe('block log', () => {
 
 describe('writePolicyFile + _buildAggregatePolicy', () => {
   const fs = require('fs');
-  const path = require('path');
 
   beforeEach(() => {
     getDb().prepare('DELETE FROM egress_policies').run();

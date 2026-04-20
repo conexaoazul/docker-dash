@@ -136,7 +136,7 @@ function composeRecreate(composeFile, serviceName) {
  * @param {number} args.hostId
  * @param {function(string)} args.onLog - log callback
  */
-async function recreateInOrder({ composeFile, composeDoc, services, docker, hostId, onLog }) {
+async function recreateInOrder({ composeFile, composeDoc, services, docker, hostId: _hostId, onLog }) {
   const order = topoOrder(composeDoc, services);
   onLog(`[runner] Recreate order: ${order.join(' → ')}`);
 

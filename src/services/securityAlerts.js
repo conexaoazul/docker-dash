@@ -76,8 +76,6 @@ class SecurityAlertService {
   evaluateWindowed() {
     if (!this._initialized) this.init();
 
-    const db = getDb();
-
     for (const rule of this._rules) {
       if (rule.window_seconds <= 0 || rule.threshold <= 1) continue;
 
