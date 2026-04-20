@@ -50,7 +50,11 @@ Total: ~63 min reading. Preflight Phase 1 already executed (50 min wall time).
 - [x] **Spec amendments applied** (Caddy 2.11.2, Unix socket admin, GOTOOLCHAIN=auto, drop reload-after-rotation, one-file-per-field)
 - [x] **arm64 build validation in GitHub Actions** (run 24650042876 — both arch's compiled cleanly, only push to GHCR failed on permissions — fix is operational)
 - [ ] Enable Repo Settings → Actions → Workflow permissions = "Read and write" → re-trigger build
-- [ ] Session 1: Migration + service skeletons
+- [x] **Session 1: Migration 049 + service skeletons** (commit pending — 4 new files, 3 new test files, 30 new tests passing)
+- [ ] Enable GHCR write permissions (Repo Settings) + re-trigger Caddy image build
+- [ ] Session 2: Routes + WebSocket progress + DNS providers tier 1 (4 more)
+- [ ] Session 3: UI wizard
+- [ ] Session 4: Integration tests + docs + release
 - [ ] Session 2: Routes + custom Caddy image
 - [ ] Session 3: UI wizard
 - [ ] Session 4: Tests + docs + release

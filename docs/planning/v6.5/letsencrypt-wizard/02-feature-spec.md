@@ -142,7 +142,7 @@ On failure: red error with classified cause (rate limit / DNS / credential / net
 
 | Path | Purpose | LOC estimate |
 |---|---|---|
-| `src/db/migrations/048_acme.js` | Tables + down() | 60 |
+| `src/db/migrations/049_acme.js` | Tables + down() — **renumbered from 048** because v6.4 already shipped 048_howto_positioning_guides.js | 60 |
 | `src/services/acme.js` | Orchestrator | 250 |
 | `src/services/caddy-config.js` | JSON config manipulation | 200 |
 | `src/services/dns-providers.js` | Provider registry + validators | 300 |
@@ -166,12 +166,12 @@ On failure: red error with classified cause (rate limit / DNS / credential / net
 | `caddy-bootstrap/Caddyfile.default` | Add `admin unix//run/caddy/admin.sock` directive (preflight A11) |
 | `CHANGELOG.md` | v6.5 entry |
 | `public/js/pages/whatsnew.js` | v6.5 release |
-| `src/db/migrations/048_howto_*` | Renumber to 049 (avoid collision) |
+| (n/a — ACME migration is 049, no renumber needed) | 048_howto_positioning_guides.js stays as-is from v6.4 |
 
 ## 7. Database schema
 
 ```sql
--- Migration 048_acme.js
+-- Migration 049_acme.js
 
 CREATE TABLE acme_credentials (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
