@@ -1,6 +1,6 @@
 {
   "name": "docker-dash",
-  "version": "6.6.3",
+  "version": "6.6.4",
   "description": "Full-featured Docker management dashboard",
   "main": "src/server.js",
   "scripts": {
@@ -16,18 +16,18 @@
     "bcrypt": "^5.1.1",
     "better-sqlite3": "^11.7.0",
     "cookie-parser": "^1.4.7",
+    "diff": "^5.2.2",
     "dockerode": "^4.0.4",
-    "dotenv": "^17.3.1",
+    "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "ldapjs": "^3.0.7",
     "node-cron": "^3.0.3",
-    "nodemailer": "^7.0.7",
-    "simple-git": "^3.27.0",
+    "nodemailer": "^8.0.5",
+    "simple-git": "^3.36.0",
     "ssh2": "^1.16.0",
     "ws": "^8.18.0",
-    "yaml": "^2.8.3",
-    "diff": "^5.2.2"
+    "yaml": "^2.8.3"
   },
   "overrides": {
     "cross-spawn": "^7.0.5",
@@ -42,10 +42,10 @@
   },
   "devDependencies": {
     "canvas": "^3.2.3",
-    "eslint": "^10.1.0",
+    "eslint": "^10.2.1",
     "gif-encoder-2": "^1.0.5",
     "jest": "^30.3.0",
-    "puppeteer": "^24.40.0",
+    "puppeteer": "^24.41.0",
     "sharp": "^0.34.5",
     "supertest": "^7.2.2"
   }

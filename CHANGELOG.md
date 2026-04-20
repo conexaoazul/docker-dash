@@ -2,6 +2,35 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.6.4] - 2026-04-20 — "Dependency audit + nodemailer CVE patch"
+
+Housekeeping release — security patch + minor bumps + dep-audit hygiene.
+
+### Security
+
+- **nodemailer** `^7.0.7` → `^8.0.5`. Patches GHSA-c7w3-x93f-qmm8 (SMTP command injection via `envelope.size`) and GHSA-vvjj-xcjg-gr5g (SMTP command injection via CRLF in transport name). **Not exploitable in our usage** — Docker Dash only passes admin-controlled SMTP config + server-generated templates, never user-controlled envelope/name fields. Upgrading anyway for defense in depth and to clear `npm audit`.
+
+### Minor bumps (safe, within-major)
+
+- `dotenv` `^17.3.1` → `^17.4.2`
+- `simple-git` `^3.27.0` → `^3.36.0`
+- `eslint` (dev) `^10.1.0` → `^10.2.1`
+- `puppeteer` (dev) `^24.40.0` → `^24.41.0`
+
+### Deferred (documented in BACKLOG.md P2 section)
+
+Major-version upgrades left for a dedicated bump session:
+- `bcrypt 5→6`, `better-sqlite3 11→12`, `diff 5→9`, `express 4→5`, `node-cron 3→4`
+
+Rationale: each needs its own regression pass. Better to batch them in v6.8+ than sprinkle into feature PRs.
+
+### Audit result
+
+- `npm audit`: **0 vulnerabilities** after upgrade
+- Tests: 549 passing / 39 suites — no regressions
+
+---
+
 ## [6.6.3] - 2026-04-20 — "Remediation Wizard entry points"
 
 Patch release that wires the v6.6.0 Remediation Wizard into two more pages it was always designed to reach from.

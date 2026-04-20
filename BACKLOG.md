@@ -73,6 +73,21 @@ Same as above. 2.5s polling works fine for sub-5-minute stack remediations. Defe
 
 ---
 
+## P2 — Dependency majors (deferred after 2026-04-20 audit)
+
+**Current state:** npm audit shows 0 vulnerabilities after v6.6.4 bump (nodemailer 7→8). All within-major patches applied (dotenv, eslint, puppeteer, simple-git).
+
+Available major upgrades, deliberately not taken:
+
+- **bcrypt 5 → 6** — native binding change. Needs rebuild against Node 24. No functional gain; defer.
+- **better-sqlite3 11 → 12** — new prepared-statement API, no breaking changes for our usage, but native binding rebuild. Low-priority opportunistic bump.
+- **diff 5 → 9** — used by the Remediation Wizard for unified-diff display. v9 is an API rewrite. Needs a compat pass. Defer until next refactor of diff-related code.
+- **express 4 → 5** — async router rewrite. Middleware ordering changes. Test matrix would be large. Defer to a dedicated upgrade session (8-12h).
+- **node-cron 3 → 4** — new scheduler internals, API mostly compatible. Low-risk bump; do it opportunistically.
+- **helmet 8 → 9** (if/when released) — tracked separately in security audit cycle.
+
+**Proposed approach:** bundle these into one "major-dep bump" session in v6.8+ with a full regression run, not sprinkle them into feature PRs.
+
 ## P3 — Operational
 
 ### GHCR push permission for custom Caddy image
