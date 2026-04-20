@@ -13,68 +13,55 @@ Each assumption has:
 
 ---
 
-## A1. Caddy admin API supports the JSON config mutations we need
+## A1. Caddy admin API supports the JSON config mutations we need ✅ VALIDATED 2026-04-20
 
 **Claim:** `POST /config/apps/tls/automation/policies` appends to the policies array atomically; `DELETE /config/apps/tls/automation/policies/N` removes by index; both can be called without restart.
 
+**Result:** PASS with refinement. PUT-first-then-POST pattern needed: `apps/tls` doesn't exist initially, so the first cert needs `PUT /config/apps/tls` to bootstrap the structure; subsequent certs use POST to append. DELETE-by-index works as expected. See `05-preflight-results.md` Section A1.
+
 **Risk if wrong:** Whole architecture (option D) collapses. Forces fallback to Caddyfile rewrite (fragile) or option E (Node ACME).
 
-**Validation (1 hour):**
-1. Run our existing Caddy container with admin API exposed locally
-2. POST a sample TLS policy via curl to `localhost:2019/config/apps/tls/automation/policies`
-3. Verify `GET /config/` shows it
-4. Issue a Let's Encrypt staging cert manually
-5. DELETE the policy by index, verify it's gone
-6. Repeat with concurrent requests (2 parallel POSTs) — check for race conditions
-
-**Fallback if wrong:** Use Caddy's `POST /load` to push the entire config tree on each change. Slower (rewrites whole config) but still atomic. Not a blocker.
+**Fallback if wrong:** Use Caddy's `POST /load` to push the entire config tree on each change. Not needed.
 
 ---
 
-## A2. Caddy's `{file.path}` substitution can extract JSON paths
+## A2. Caddy's `{file.path}` substitution can extract JSON paths ⚠ INVALIDATED — fallback in use 2026-04-20
 
 **Claim:** `{file./etc/caddy/secrets/123.json:api_token}` resolves to the JSON value at key `api_token` in that file.
 
-**Risk if wrong:** Multi-field credentials (Route53 needs access_key + secret_key + region) need one file per field, increasing filesystem ops 3-5x and adding directory-creation complexity.
+**Result:** FAIL. Caddy treats `:api_token` as part of the path, not as a JSON extractor; substitution returned empty. Fallback (one file per field) tested and works. See `05-preflight-results.md` Section A2.
 
-**Validation (30 min):**
-- Read Caddy 2.8+ docs on placeholder substitution
-- Run a test: write a JSON file, reference it with the path syntax in a config policy, see if Caddy resolves
-- If undocumented, test by trial
+**Risk if wrong:** Multi-field credentials (Route53 needs access_key + secret_key + region) need one file per field, increasing filesystem ops 3-5x and adding directory-creation complexity. **Bounded — adopted as the implementation path.**
 
-**Fallback if wrong:** One file per credential field. Layout: `/etc/caddy/secrets/<id>/access_key`, `/etc/caddy/secrets/<id>/secret_key`, etc. Added complexity is bounded.
+**Fallback in use:** Layout `/etc/caddy/secrets/<id>/<field>` with directory `0700`, files `0600`.
 
 ---
 
-## A3. Caddy's DNS plugins reload credentials from file on config reload
+## A3. Caddy's DNS plugins reload credentials from file on config reload ✅ VALIDATED + BONUS 2026-04-20
 
 **Claim:** When Caddy reloads (via admin API or signal), it re-reads files referenced via `{file.path}` substitution, picking up rotated credentials.
 
-**Risk if wrong:** Credential rotation requires Caddy container restart, which drops in-flight TLS connections (~second of downtime).
+**Result:** PASS, **and stronger than expected** — Caddy reads file substitutions on EVERY request, not at config-load time. Credential rotation requires NO Caddy reload at all. Atomic file replace (`tmp + rename`) is sufficient. Zero-downtime, zero-restart credential rotation. See `05-preflight-results.md` Section A3.
 
-**Validation (45 min):**
-1. Set up a test cert with file-based credentials
-2. Issue cert successfully
-3. Modify the credential file (change token value)
-4. Trigger Caddy reload (POST /load with same config)
-5. Issue another cert with the same provider; verify it uses the new credential
-
-**Fallback if wrong:** Document credential rotation as requiring `docker compose restart caddy`. Less elegant, still functional.
+**Spec impact:** dropped the "trigger Caddy reload after rotation" step from the credential rotation flow.
 
 ---
 
-## A4. The 5 Tier-1 Caddy DNS plugins compile cleanly with current Caddy version
+## A4. The 5 Tier-1 Caddy DNS plugins compile cleanly with current Caddy version ✅ amd64 VALIDATED, ⚠ arm64 PENDING 2026-04-20
 
 **Claim:** `xcaddy build` with our 5 plugins produces a working binary on both `linux/amd64` and `linux/arm64`.
 
-**Risk if wrong:** ARM64 users (Raspberry Pi, Mac M-series) lose plugin support. v6.5 launches AMD64-only, alienating ~40% of homelab audience.
+**Result (amd64):** PASS, but required two adjustments from initial spec:
+- Caddy version bumped 2.8.4 → 2.11.2 (route53@v1.6.0 needs Go 1.25 + Caddy 2.10.2+)
+- `ENV GOTOOLCHAIN=auto` added to let Go auto-download required toolchain version
 
-**Validation (2 hours):**
-1. Run the planned `docker/caddy/Dockerfile` locally for amd64 → verify binary works (`caddy version`, `caddy list-modules` shows 5 dns providers)
-2. Run with `--platform linux/arm64` in buildx → verify ARM64 binary works
-3. Smoke test with one DNS provider (Cloudflare, easiest token to get)
+Build time ~2 min, image 163 MB, all 5 DNS plugins listed in `caddy list-modules`. See `05-preflight-results.md` Section A4.
 
-**Fallback if wrong:** Drop the broken plugin from Tier 1, revisit in v6.6. Document compatibility matrix per architecture.
+**Result (arm64):** Not yet executed. **Action item:** run via GitHub Actions buildx with `--platform linux/arm64` in a separate PR before main implementation lands.
+
+**Risk if arm64 fails:** ARM64 users (Raspberry Pi, Mac M-series) lose plugin support. v6.5 launches AMD64-only, alienating ~40% of homelab audience.
+
+**Fallback if any plugin fails on arm64:** Drop that plugin from Tier 1, revisit in v6.6. Document compatibility matrix per architecture.
 
 ---
 
@@ -171,18 +158,21 @@ Each assumption has:
 
 ---
 
-## A11. The Caddy `tls-internal` Docker network isolation works
+## A11. The Caddy `tls-internal` Docker network isolation works ❌ INVALIDATED → ✅ PIVOTED to Unix socket 2026-04-20
 
 **Claim:** Adding a `tls-internal: { internal: true }` network to docker-compose.yml restricts admin API access to only the `app` and `caddy` services on that network.
 
-**Risk if wrong:** User-deployed container stacks could potentially reach Caddy's admin API (port 2019) and reconfigure TLS arbitrarily. Sec hole.
+**Result:** **FAIL.** `--internal` on a Docker network blocks OUTBOUND traffic from that network only. Containers attached to it still receive INBOUND from any other network they share. Since Caddy must be on the `default` network to serve 80/443, putting it ALSO on `tls-internal` doesn't restrict who can reach its admin port — anyone on `default` can hit `caddy:2019`. **An intruder container on the default network successfully fetched the full Caddy config including secrets.**
 
-**Validation (30 min):**
-1. Set up `tls-internal` network as planned
-2. Spawn a third container connected only to the default network
-3. Try to curl `http://docker-dash-caddy:2019/config/` from that container → expect connection failure
+**Pivot tested:** Caddy admin API on a Unix socket (`unix//run/caddy/admin.sock`), shared with the `app` container via a mounted Docker volume (`caddy-admin-sock`). TCP attempts from any container → refused. App container with mounted socket → full access. Stronger security posture than the original plan.
 
-**Fallback if wrong:** Implement Caddy admin API authentication via mTLS (Caddy 2.7+ supports). Adds setup complexity but not blocking.
+See `05-preflight-results.md` Section A11.
+
+**Spec impact:**
+- Drop `tls-internal` network from `docker-compose.yml`
+- Add `caddy-admin-sock` named volume, mounted RW in both `app` and `caddy`
+- `caddy-bootstrap/Caddyfile.default` adds `admin unix//run/caddy/admin.sock` directive
+- `services/caddy-config.js` uses Node `http.request` with `socketPath` (not fetch with TCP URL)
 
 ---
 
@@ -314,17 +304,19 @@ Each assumption has:
 
 ## Summary — go/no-go decision matrix
 
-Run validations A1, A2, A3, A4, A11, A12 BEFORE writing production code. These are the load-bearing ones:
+Phase 1 executed 2026-04-20 in ~50 min wall time. Findings in `05-preflight-results.md`.
 
-| Assumption | Effort | Blocker if false? |
+| Assumption | Status | Outcome |
 |---|---|---|
-| A1 — Caddy admin API mutations | 1h | YES (architecture changes) |
-| A2 — Caddy file substitution JSON paths | 30m | NO (one-file-per-field fallback) |
-| A3 — Caddy reloads credentials from file | 45m | NO (restart fallback) |
-| A4 — 5 plugins compile clean for amd64+arm64 | 2h | YES for arm64 (limit Tier 1) |
-| A11 — Network isolation for admin API | 30m | NO (mTLS fallback exists) |
-| A12 — v6.4 → v6.5 upgrade safe | 1h | YES (must not break existing users) |
+| A1 — Caddy admin API mutations | ✅ VALIDATED | PUT-then-POST-then-DELETE pattern works |
+| A2 — Caddy file substitution JSON paths | ⚠ INVALIDATED | Fallback to one-file-per-field adopted |
+| A3 — Caddy reloads credentials from file | ✅ VALIDATED + BONUS | Per-request reload — no restart needed for rotation |
+| A4 — 5 plugins compile clean amd64 | ✅ VALIDATED (Caddy 2.11.2 + GOTOOLCHAIN=auto) | — |
+| A4 — 5 plugins compile clean arm64 | ⏳ PENDING | Defer to GHA buildx |
+| A11 — Network isolation for admin API | ❌ INVALIDATED → ✅ PIVOTED | Unix socket + shared volume |
+| A12 — v6.4 → v6.5 upgrade safe | ⏳ PENDING | Defer to first staging integration test |
 
-Total preflight investigation: ~6 hours. Deferring this and discovering A1 or A12 is wrong mid-implementation could waste 2-3 days.
+**Decision: 🟢 GO for implementation.** Spec amendments applied (Caddy 2.11.2, Unix socket admin, GOTOOLCHAIN=auto, drop reload-after-rotation, one-file-per-field). Two pending items (arm64, v6.4 upgrade safety) are non-blockers for Session 1.
 
 → `00-preflight.md` operationalizes this list.
+→ `05-preflight-results.md` documents Phase 1 execution + spec amendments.

@@ -71,40 +71,68 @@ api.example.com {
 **Hybrid mode:**
 
 - **Boot-time:** Caddy still starts with a Caddyfile (the `caddy-bootstrap/Caddyfile.default`) so zero-config users get an HTTP listener. Existing `services/ssl.js` flow for self-signed certs remains Caddyfile-based.
-- **ACME-managed certs:** managed exclusively via JSON config tree, mutated via Caddy's admin API at `localhost:2019`.
+- **ACME-managed certs:** managed exclusively via JSON config tree, mutated via Caddy's admin API on a **Unix socket** at `/run/caddy/admin.sock` (see Section 10 for security rationale — TCP would be reachable from arbitrary user containers on the same Docker network).
 
 This way:
 - Existing users with hand-edited Caddyfiles are not broken
 - ACME certs get clean, atomic, programmatic management
 - We don't rewrite anyone's Caddyfile
+- Admin API is unreachable over the network — only mountable via shared volume
 
 ### How it works
 
-Caddy actually compiles Caddyfile → JSON internally. So at runtime, both representations exist. We can:
+Caddy actually compiles Caddyfile → JSON internally. So at runtime, both representations exist. We talk to admin API via Unix socket and:
 
-1. Fetch the current full JSON config: `GET http://localhost:2019/config/`
-2. Merge our ACME-managed cert blocks into the `apps.tls.automation.policies` array
-3. POST the merged config: `POST http://localhost:2019/load`
+1. **First-time bootstrap** (the `tls` app may not exist yet): `PUT /config/apps/tls` with `{"automation":{"policies":[{...}]}}`
+2. **Subsequent appends:** `POST /config/apps/tls/automation/policies` with one policy object
+3. **Removal:** `DELETE /config/apps/tls/automation/policies/{index}`
+
+Path traversal fails if the parent doesn't exist — so the orchestrator detects "tls app present?" first via `GET /config/apps/tls` and PUTs vs POSTs accordingly.
 
 Caddy validates and applies atomically. If invalid, returns 400 with a clear error (no half-applied state).
 
-For incremental updates (add one policy without re-sending whole config), use:
-
-- `POST /config/apps/tls/automation/policies/...` — appends to array
-- `DELETE /config/apps/tls/automation/policies/3` — removes by index
-
-The admin API supports these granular mutations cleanly.
+The admin API supports these granular mutations cleanly. **Verified in preflight A1** — see `05-preflight-results.md`.
 
 ### Implementation skeleton
 
 ```js
 // src/services/caddy-config.js
+const http = require('http');
 
-const CADDY_ADMIN = process.env.CADDY_ADMIN_URL || 'http://docker-dash-caddy:2019';
+const CADDY_ADMIN_SOCKET = process.env.CADDY_ADMIN_SOCKET || '/run/caddy/admin.sock';
+
+/**
+ * Make an HTTP request to Caddy admin API over Unix socket.
+ * @param {string} method - GET/PUT/POST/DELETE
+ * @param {string} path - e.g. '/config/apps/tls/automation/policies'
+ * @param {object} [body] - JSON body
+ */
+function caddyApi(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const opts = {
+      socketPath: CADDY_ADMIN_SOCKET,
+      method,
+      path,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+    };
+    const req = http.request(opts, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => {
+        if (res.statusCode >= 400) {
+          return reject(new Error(`Caddy admin ${method} ${path} → ${res.statusCode}: ${data}`));
+        }
+        resolve(data ? JSON.parse(data) : null);
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
 
 async function fetchConfig() {
-  const res = await fetch(`${CADDY_ADMIN}/config/`);
-  return res.json();
+  return caddyApi('GET', '/config/');
 }
 
 async function addAcmePolicy({ subjects, email, challengeType, providerConfig }) {
@@ -118,12 +146,19 @@ async function addAcmePolicy({ subjects, email, challengeType, providerConfig })
         : {}, // HTTP-01 is default
     }],
   };
-  const res = await fetch(`${CADDY_ADMIN}/config/apps/tls/automation/policies`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(policy),
-  });
-  if (!res.ok) throw new Error('Caddy config push failed: ' + await res.text());
+
+  // Detect whether the tls app exists yet
+  let tlsExists = true;
+  try { await caddyApi('GET', '/config/apps/tls'); }
+  catch { tlsExists = false; }
+
+  if (!tlsExists) {
+    // Bootstrap the whole tls app
+    await caddyApi('PUT', '/config/apps/tls', { automation: { policies: [policy] } });
+  } else {
+    // Append to existing policies array
+    await caddyApi('POST', '/config/apps/tls/automation/policies', policy);
+  }
 }
 
 async function removeAcmePolicyBySubjects(subjects) {
@@ -136,18 +171,18 @@ async function removeAcmePolicyBySubjects(subjects) {
     p.subjects.every(s => targetSet.has(s))
   );
   if (idx === -1) return false;
-  const res = await fetch(`${CADDY_ADMIN}/config/apps/tls/automation/policies/${idx}`, {
-    method: 'DELETE',
-  });
-  return res.ok;
+  await caddyApi('DELETE', `/config/apps/tls/automation/policies/${idx}`);
+  return true;
 }
+
+module.exports = { caddyApi, fetchConfig, addAcmePolicy, removeAcmePolicyBySubjects };
 ```
 
 ### Edge case: Caddy is not running
 
 If `caddy` container is stopped (TLS profile not enabled), the wizard should fail gracefully with: "Caddy is not running. Start the TLS profile first: `docker compose --profile tls up -d`."
 
-Detection: `GET /config/` returns ECONNREFUSED → return 503 from our API.
+Detection: `GET /config/` throws (`ENOENT` on socket file or `ECONNREFUSED` if socket is dead) → return 503 from our API.
 
 ---
 
@@ -171,14 +206,14 @@ Caddy reads `CF_PROD_TOKEN` from its env at config-load time.
 ```json
 { "name": "cloudflare", "api_token": "{file./etc/caddy/secrets/cf_prod}" }
 ```
-Caddy reads the file at config-load time.
+Caddy reads the file **on every request** that needs the value (verified preflight A3 — not at config-load only). This means **credential rotation is zero-downtime, zero-reload**.
 
 ### Trade-offs
 
 | Aspect | Inline | Env vars | File mount |
 |---|---|---|---|
 | Visible in config dump | ❌ | ✅ hidden | ✅ hidden |
-| Rotation without Caddy restart | ✅ | ❌ requires restart | ✅ atomic file replace + reload |
+| Rotation without Caddy restart | ✅ | ❌ requires restart | ✅ **atomic file replace, no reload needed** |
 | Multi-credential support | ✅ | ✅ N env vars | ✅ N files |
 | Audit trail (who accessed) | — | — | possible via filesystem audit |
 
@@ -187,18 +222,32 @@ Caddy reads the file at config-load time.
 **File mount.** Specifically:
 
 - Docker volume `caddy-secrets:/etc/caddy/secrets:ro` mounted into Caddy container
-- Each credential lives at `/etc/caddy/secrets/<credential_id>` (the SQLite row ID, not the user-given name)
-- File contents = credential value (raw, just the token/key)
-- When credential is updated: write new value atomically (`tmp` file + `rename`)
-- Caddy re-reads file on next config reload (which we trigger)
+- Each credential lives at `/etc/caddy/secrets/<credential_id>/<field>` (the SQLite row ID + field name)
+- File contents = raw credential value (just the token/key)
+- When credential is updated: atomically replace via `tmp + rename`
+- **No Caddy reload needed** — file substitution is per-request
 
-For multi-field credentials (e.g., Route53 needs access key + secret key), use:
-- `/etc/caddy/secrets/<credential_id>.json` — JSON object with all fields
-- Caddy config references `{file./etc/caddy/secrets/<id>.json:access_key}` (Caddy supports JSON path extraction in file substitution)
+### Multi-field credentials
 
-Wait — verify this. Caddy file substitution may not support JSON path. If not, use one file per field: `/etc/caddy/secrets/<credential_id>/access_key`.
+Some providers (Route53, Linode with region, etc.) need multiple fields. Preflight A2 confirmed Caddy's `{file.path:key}` syntax does NOT extract JSON paths — fall back to one file per field:
 
-**Action item:** verify Caddy's `{file.path}` substitution capabilities in preflight.
+```
+/etc/caddy/secrets/<credential_id>/api_token         (Cloudflare)
+/etc/caddy/secrets/<credential_id>/access_key_id     (Route53)
+/etc/caddy/secrets/<credential_id>/secret_access_key
+/etc/caddy/secrets/<credential_id>/region
+```
+
+Per-credential directory `0700`, files `0600`. Caddy config references each individually:
+
+```json
+{
+  "name": "route53",
+  "access_key_id": "{file./etc/caddy/secrets/7/access_key_id}",
+  "secret_access_key": "{file./etc/caddy/secrets/7/secret_access_key}",
+  "region": "{file./etc/caddy/secrets/7/region}"
+}
+```
 
 ### Implementation
 
@@ -207,7 +256,11 @@ Wait — verify this. Caddy file substitution may not support JSON path. If not,
 
 const CADDY_SECRETS_DIR = process.env.CADDY_SECRETS_DIR || '/data/caddy-secrets';
 
-async function writeCredentialFile(credentialId, providerId, credentials) {
+/**
+ * Write credential field files atomically. Caddy picks up changes on next
+ * request — NO reload required.
+ */
+async function writeCredentialFiles(credentialId, credentials) {
   const fs = require('fs').promises;
   const path = require('path');
   const dir = path.join(CADDY_SECRETS_DIR, String(credentialId));
@@ -215,8 +268,8 @@ async function writeCredentialFile(credentialId, providerId, credentials) {
   for (const [key, value] of Object.entries(credentials)) {
     const filePath = path.join(dir, key);
     const tmpPath = filePath + '.tmp';
-    await fs.writeFile(tmpPath, value, { mode: 0o600 });
-    await fs.rename(tmpPath, filePath);
+    await fs.writeFile(tmpPath, String(value), { mode: 0o600 });
+    await fs.rename(tmpPath, filePath);  // atomic replace
   }
 }
 
@@ -225,18 +278,29 @@ async function deleteCredentialFiles(credentialId) {
   const path = require('path');
   await fs.rm(path.join(CADDY_SECRETS_DIR, String(credentialId)), { recursive: true, force: true });
 }
+
+async function rotateCredential(credentialId, newCredentials) {
+  // Just rewrite the files. No Caddy reload.
+  await writeCredentialFiles(credentialId, newCredentials);
+}
 ```
 
-The Docker Dash `app` container also mounts `caddy-secrets:/data/caddy-secrets` so it can write the files. Caddy mounts read-only at `/etc/caddy/secrets`.
+The Docker Dash `app` container mounts `caddy-secrets:/data/caddy-secrets:rw` so it can write the files. Caddy mounts the same volume read-only at `/etc/caddy/secrets`.
 
 `docker-compose.yml` change:
 ```yaml
-volumes:
-  - caddy-secrets:/data/caddy-secrets:rw  # in app service
-  - caddy-secrets:/etc/caddy/secrets:ro   # in caddy service
+services:
+  app:
+    volumes:
+      - caddy-secrets:/data/caddy-secrets:rw  # write side
+  caddy:
+    volumes:
+      - caddy-secrets:/etc/caddy/secrets:ro   # read side
+      - caddy-admin-sock:/run/caddy:rw         # admin API socket (see Section 10)
 
 volumes:
   caddy-secrets:
+  caddy-admin-sock:
 ```
 
 ---
@@ -503,59 +567,74 @@ All entries include user_id, IP, timestamp via existing audit infra.
 
 ## 10. Caddy admin API security
 
-Currently Caddy's admin API at port 2019 is unauthenticated. In our Docker Compose setup, port 2019 is NOT published to the host (no `ports:` mapping for 2019). Only the `app` container can reach it via the internal Docker network.
+Caddy's admin API is unauthenticated by design (intended for trusted local clients). The original plan was to put Caddy on a dedicated `tls-internal` Docker network with `--internal: true` and bind admin to TCP only on that network.
 
-But: any other container on the same Docker network can also reach it. In a typical Docker Dash deployment with stacks, this means user-deployed containers could potentially talk to Caddy's admin API.
+**Preflight A11 proved this approach FAILS:** `--internal` on a Docker network blocks OUTBOUND traffic from that network only. Containers attached to the network can still receive INBOUND from any other network they share. Since Caddy must be on the `default` network to serve 80/443 to user-facing containers, putting it ALSO on `tls-internal` doesn't restrict who can reach its admin port — anyone on `default` can hit `caddy:2019`.
 
-### Mitigations
+### Decision: Unix socket admin API
 
-1. **Bind Caddy admin to specific listener:** in our custom Caddy image config, bind admin to internal localhost only — but then `app` can't reach it across containers either. Need a different approach.
-
-2. **Use Caddy's `admin.identity` config:** Caddy 2.7+ supports admin API authentication via mTLS with client certificates.
-
-3. **Network isolation:** put Caddy + `app` on a dedicated `tls-internal` Docker network, separate from the user-stacks network. Other containers can't reach it.
-
-**Decision:** Option 3. Add a `tls-internal` network in `docker-compose.yml`:
-
-```yaml
-networks:
-  default:
-    name: docker-dash-default
-  tls-internal:
-    name: docker-dash-tls-internal
-    internal: true
-
-services:
-  app:
-    networks:
-      - default
-      - tls-internal
-  caddy:
-    networks:
-      - default      # for serving 80/443
-      - tls-internal # for admin API only
+```caddyfile
+{
+  admin unix//run/caddy/admin.sock
+}
 ```
 
-Caddy's admin API binds to the `tls-internal` interface only (configurable in Caddy startup).
+The socket file is created by Caddy at boot. Mount it via a shared Docker volume so only the `app` container can talk to it:
+
+```yaml
+services:
+  app:
+    volumes:
+      - caddy-admin-sock:/run/caddy:rw
+  caddy:
+    volumes:
+      - caddy-admin-sock:/run/caddy:rw
+
+volumes:
+  caddy-admin-sock:
+```
+
+**Verified in preflight A11:**
+- TCP attempt from intruder container on shared network → `HTTP 000` (refused — no TCP listener)
+- Unix socket from app container with mounted volume → `HTTP 200` (full config returned)
+
+**Stronger security posture than the original plan:**
+- Cannot be reached over TCP from anywhere — no port to scan
+- Sharable only via volume mount — explicit, declarative, auditable in `docker-compose.yml`
+- Socket file recreated by Caddy on bind — survives Caddy restarts cleanly
+- Permissions on the socket file (`s-w-------`, owner root) restrict access at OS level too
+
+### Caddy entrypoint requirement
+
+Caddy must `mkdir -p /run/caddy` before binding (default image already does this via the volume mount). If running outside Docker for some reason, ensure the directory exists with appropriate permissions before starting Caddy.
+
+### Future enhancement (v6.6+)
+
+Caddy 2.7+ supports `admin.identity` (mTLS with client certs) which would allow remote admin API access in HA deployments. Not needed for v6.5 single-instance scope.
 
 ---
 
 ## 11. Caddy custom image — build pipeline
 
-`docker/caddy/Dockerfile`:
+`docker/caddy/Dockerfile` (verified working in preflight A4):
 
 ```dockerfile
 # syntax=docker/dockerfile:1
-ARG CADDY_VERSION=2.8.4
+ARG CADDY_VERSION=2.11.2
 FROM caddy:${CADDY_VERSION}-builder AS builder
 
-# Pin plugin versions for reproducibility
+# Allow auto-download of newer Go toolchain when plugins require it
+# (route53 v1.6.0 requires Go 1.25, builder ships 1.24)
+ENV GOTOOLCHAIN=auto
+
+# Floating versions for now — plugin ecosystem moves quickly with security fixes.
+# Re-pin once API stabilizes.
 RUN xcaddy build \
-  --with github.com/caddy-dns/cloudflare@v0.0.6 \
-  --with github.com/caddy-dns/route53@v1.5.1 \
-  --with github.com/caddy-dns/digitalocean@v0.0.4 \
-  --with github.com/caddy-dns/hetzner@v1.0.0 \
-  --with github.com/caddy-dns/linode@v0.0.4
+  --with github.com/caddy-dns/cloudflare \
+  --with github.com/caddy-dns/route53 \
+  --with github.com/caddy-dns/digitalocean \
+  --with github.com/caddy-dns/hetzner \
+  --with github.com/caddy-dns/linode
 
 FROM caddy:${CADDY_VERSION}-alpine
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
@@ -564,6 +643,10 @@ LABEL org.opencontainers.image.source="https://github.com/bogdanpricop/docker-da
 LABEL org.opencontainers.image.description="Caddy with DNS plugins for Docker Dash Let's Encrypt Wizard"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 ```
+
+**Build measured in preflight (amd64):** ~2 minutes wall time, image size 163 MB (vs ~80 MB stock Caddy alpine, +83 MB for 5 plugins — acceptable).
+
+**arm64 still unverified.** Run via GitHub Actions buildx with `--platform linux/arm64` in a separate PR before main implementation lands.
 
 `.github/workflows/caddy-image.yml`:
 

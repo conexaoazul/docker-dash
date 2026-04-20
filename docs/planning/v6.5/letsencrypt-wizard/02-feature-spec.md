@@ -162,8 +162,8 @@ On failure: red error with classified cause (rate limit / DNS / credential / net
 | `public/js/api.js` | Add ACME methods (5-7 functions) |
 | `public/js/pages/system.js` | Add wizard launcher button + 3-step modal |
 | `public/i18n/{en,ro,...}.js` | Translation keys (English first, RO next, others stub) |
-| `docker-compose.yml` | Switch Caddy image to `ghcr.io/bogdanpricop/docker-dash-caddy:6.5` + add `secrets.json` volume |
-| `caddy-bootstrap/Caddyfile.default` | Comment about JSON config takeover |
+| `docker-compose.yml` | Switch Caddy image to `ghcr.io/bogdanpricop/docker-dash-caddy:6.5`; add `caddy-secrets` (RW for app, RO for caddy) and `caddy-admin-sock` (shared RW) volumes |
+| `caddy-bootstrap/Caddyfile.default` | Add `admin unix//run/caddy/admin.sock` directive (preflight A11) |
 | `CHANGELOG.md` | v6.5 entry |
 | `public/js/pages/whatsnew.js` | v6.5 release |
 | `src/db/migrations/048_howto_*` | Renumber to 049 (avoid collision) |
@@ -464,6 +464,23 @@ CHANGELOG entry, whatsnew page entry, blog post on dev.to ("v6.5: Let's Encrypt 
 | Tier 1 = 5 providers | Covers ~80% of expected demand | 2026-04-20 |
 | Custom Caddy image | Fast cold start, controlled distribution | 2026-04-20 |
 | JSON config (not Caddyfile) for ACME-managed | Easier programmatic mutation | 2026-04-20 |
-| Credentials in mounted JSON file | Easier rotation than env vars | 2026-04-20 |
+| Credentials in mounted file (one per field) | Easier rotation than env vars; preflight A2 confirmed JSON path syntax not supported by Caddy | 2026-04-20 |
 | Default to staging for first issuance | Protect users from rate limits | 2026-04-20 |
 | Single shared ACME account | Avoid scope creep | 2026-04-20 |
+| **Caddy version bump 2.8.4 → 2.11.2 + GOTOOLCHAIN=auto** | **Preflight A4: route53/linode plugins require Go 1.25 + Caddy 2.10.2+** | **2026-04-20** |
+| **Admin API on Unix socket (not TCP+network)** | **Preflight A11: `--internal` network doesn't restrict inbound from shared networks; Unix socket is structurally safer + simpler** | **2026-04-20** |
+| **Credential rotation requires NO Caddy reload** | **Preflight A3: file substitution is per-request, not load-time. Atomic file rename is sufficient** | **2026-04-20** |
+
+## 18. Post-preflight delta
+
+After executing preflight Phase 1 on 2026-04-20 (results in `05-preflight-results.md`), three architectural assumptions were updated. The spec sections above already reflect the amendments. Summary:
+
+| Original assumption | Preflight result | Spec change |
+|---|---|---|
+| Caddy 2.8.4 base image | route53@v1.6.0 needs Go 1.25 + Caddy 2.10.2+ | Bumped to 2.11.2 |
+| `tls-internal` Docker network for admin API isolation | Inbound from shared networks NOT blocked by `--internal` | Switched to Unix socket + shared volume |
+| Caddy reloads file substitutions at load time | Caddy reads files on EVERY request | Dropped "trigger reload after rotation" step |
+| `{file.path:key}` extracts JSON paths | Not supported | Use one file per credential field |
+| arm64 builds work (assumed) | Not yet verified | Defer to GitHub Actions; flag risk |
+
+Effort delta: −3h (Unix socket simpler than network setup; rotation simpler without reload). Updated estimate: **36h base, 45h with buffer.**
