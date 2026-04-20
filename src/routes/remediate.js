@@ -145,26 +145,30 @@ router.get('/job/:id', requireAuth, requireRole('admin', 'operator'), (req, res)
 });
 
 // POST /job/:id/rollback (within rollback_deadline)
-router.post('/job/:id/rollback', requireAuth, requireRole('admin'), writeable, (req, res) => {
+router.post('/job/:id/rollback', requireAuth, requireRole('admin'), writeable, async (req, res) => {
   try {
+    const jobId = parseInt(req.params.id);
     const db = getDb();
-    const row = db.prepare('SELECT * FROM remediation_jobs WHERE id = ?').get(parseInt(req.params.id));
+    const row = db.prepare('SELECT id, status, rollback_deadline, scope_type, scope_id FROM remediation_jobs WHERE id = ?').get(jobId);
     if (!row) return res.status(404).json({ error: 'Job not found' });
     if (row.status !== 'success') return res.status(409).json({ error: `Cannot rollback job in status '${row.status}'` });
     if (!row.rollback_deadline || new Date(row.rollback_deadline) < new Date()) {
       return res.status(409).json({ error: 'Rollback window has expired (60s after success)' });
     }
-    // Session 2 — rollback implementation. For now: mark rolled_back.
-    db.prepare(`UPDATE remediation_jobs SET status='rolled_back', completed_at=datetime('now') WHERE id=?`).run(row.id);
+
+    // Kick off async — respond 202 + client polls /job/:id
+    remediate.executeRollback(jobId).catch(err =>
+      log.error('async rollback failed', { jobId, error: err.message })
+    );
 
     auditService.log({
       userId: req.user.id, username: req.user.username,
       action: 'remediate_rollback', targetType: row.scope_type, targetId: row.scope_id,
-      details: { jobId: row.id, reason: 'manual' },
+      details: { jobId, reason: 'manual' },
       ip: getClientIp(req),
     });
 
-    res.json({ ok: true, note: 'Rollback marked. Full rollback execution lands in Session 2.' });
+    res.status(202).json({ ok: true, jobId });
   } catch (err) {
     log.error('rollback', err);
     res.status(500).json({ error: 'Internal server error' });

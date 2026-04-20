@@ -3509,6 +3509,7 @@ DB_PASS=secret"></textarea>
                 <th>_FILE Pattern</th>
                 <th>Plain Secrets</th>
                 <th>Issues</th>
+                <th>Actions</th>
               </tr></thead>
               <tbody>
                 ${data.containers.map(c => {
@@ -3518,13 +3519,19 @@ DB_PASS=secret"></textarea>
                     return '<div style="padding:4px 0;font-size:11px;border-top:1px dashed var(--border)"><span class="badge" style="font-size:9px;background:' + iColor + '22;color:' + iColor + '">' + i.severity.toUpperCase() + '</span> ' + Utils.escapeHtml(i.message) + '<br><span class="text-muted" style="font-size:10px;margin-left:8px"><i class="fas fa-wrench" style="margin-right:3px"></i>' + Utils.escapeHtml(i.fix) + '</span></div>';
                   }).join('') : '<span class="text-muted text-sm">No issues</span>';
 
+                  const remediateBtn = c.issues.length > 0
+                    ? '<button class="btn btn-xs btn-primary remediate-btn" data-container-id="' + Utils.escapeHtml(c.id) + '" data-container-name="' + Utils.escapeHtml(c.name) + '" title="Open Remediation Wizard"><i class="fas fa-tools"></i> Fix</button>'
+                    + (c.stack ? ' <button class="btn btn-xs btn-secondary remediate-stack-btn" data-stack="' + Utils.escapeHtml(c.stack) + '" title="Remediate whole stack"><i class="fas fa-cubes"></i></button>' : '')
+                    : '<span class="text-muted text-sm">—</span>';
+
                   return '<tr>'
-                    + '<td><div style="font-weight:600">' + Utils.escapeHtml(c.name) + '</div><div class="text-xs text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + Utils.escapeHtml(c.image) + '</div></td>'
+                    + '<td><div style="font-weight:600">' + Utils.escapeHtml(c.name) + '</div><div class="text-xs text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + Utils.escapeHtml(c.image) + '</div>' + (c.stack ? '<div class="text-xs" style="color:var(--accent)"><i class="fas fa-cubes"></i> ' + Utils.escapeHtml(c.stack) + '</div>' : '') + '</td>'
                     + '<td><strong style="color:' + sColor + ';font-size:14px">' + c.score + '</strong></td>'
                     + '<td>' + (c.secretMounts > 0 ? '<span style="color:var(--green)"><i class="fas fa-check"></i> ' + c.secretMounts + '</span>' : '<span class="text-muted">0</span>') + '</td>'
                     + '<td>' + (c.filePatternVars > 0 ? '<span style="color:var(--green)">' + c.filePatternVars + '</span>' : '<span class="text-muted">0</span>') + '</td>'
                     + '<td>' + (c.plainSecrets > 0 ? '<span style="color:var(--red)"><i class="fas fa-exclamation-triangle"></i> ' + c.plainSecrets + '</span>' : '<span style="color:var(--green)">0</span>') + '</td>'
                     + '<td style="max-width:400px">' + (c.issues.length > 0 ? '<details><summary style="cursor:pointer;font-size:12px">' + c.issues.length + ' issue(s)</summary>' + issuesHtml + '</details>' : '<span style="color:var(--green)"><i class="fas fa-check-circle"></i> Clean</span>') + '</td>'
+                    + '<td>' + remediateBtn + '</td>'
                     + '</tr>';
                 }).join('')}
               </tbody>
@@ -3602,6 +3609,20 @@ DB_PASS=secret"></textarea>
     } catch (err) {
       el.innerHTML = '<div class="empty-msg" style="color:var(--red)">Error: ' + err.message + '</div>';
     }
+
+    // Remediate Wizard entry points on Secrets Audit rows
+    el.querySelectorAll('.remediate-btn').forEach(btn => btn.addEventListener('click', () => {
+      if (typeof RemediateWizard === 'undefined') { Toast.error('Remediation Wizard not loaded'); return; }
+      RemediateWizard.open({
+        scope: { type: 'container', id: btn.dataset.containerId, hostId: Api.getHostId(), displayName: btn.dataset.containerName },
+      });
+    }));
+    el.querySelectorAll('.remediate-stack-btn').forEach(btn => btn.addEventListener('click', () => {
+      if (typeof RemediateWizard === 'undefined') { Toast.error('Remediation Wizard not loaded'); return; }
+      RemediateWizard.open({
+        scope: { type: 'stack', name: btn.dataset.stack, hostId: Api.getHostId(), displayName: 'stack: ' + btn.dataset.stack },
+      });
+    }));
   },
 
   _showSecretsWizard() {

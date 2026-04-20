@@ -11,6 +11,7 @@ const { getDb } = require('../db');
 const dockerService = require('../services/docker');
 const catalog = require('./remediation-catalog');
 const composeDiff = require('./compose-diff');
+const dockerRunner = require('./docker-runner');
 
 // ─── Planning ──────────────────────────────────────────
 
@@ -292,18 +293,58 @@ async function _applyLocal(jobId, plan) {
     }
   }
 
-  // Phase 2: compose rewrite + recreate (TODO Session 2 — just write the files for now)
+  // Phase 2: group compose rewrites by file, then recreate in topo order
+  const stepsByFile = {};
   for (const step of plan.steps) {
     if (!step.requiresRecreation || !step.composeFileExists) continue;
-    appendLog(`⏳ Writing updated compose file for ${step.containerName}: ${step.composeFile}`);
+    if (!stepsByFile[step.composeFile]) stepsByFile[step.composeFile] = [];
+    stepsByFile[step.composeFile].push(step);
+  }
+
+  for (const [composeFile, steps] of Object.entries(stepsByFile)) {
     try {
-      const diffResult = composeDiff.diffComposeFile(step.composeFile, { [step.serviceName]: step.composePatch });
-      fs.writeFileSync(step.composeFile + '.tmp', diffResult.after, 'utf8');
-      fs.renameSync(step.composeFile + '.tmp', step.composeFile);
-      appendLog(`✓ Compose file updated`);
-      appendLog(`⚠ Container recreation not implemented in Session 1 — file on disk is updated. Run 'docker compose up -d --no-deps ${step.serviceName}' manually in ${step.composeFile.replace(/\/[^/]+$/, '')}.`);
+      // Build patches object per service
+      const patchesByService = {};
+      for (const step of steps) {
+        patchesByService[step.serviceName] = step.composePatch;
+      }
+
+      appendLog(`⏳ Writing updated compose file: ${composeFile}`);
+      const diffResult = composeDiff.diffComposeFile(composeFile, patchesByService);
+      fs.writeFileSync(composeFile + '.tmp', diffResult.after, 'utf8');
+      fs.renameSync(composeFile + '.tmp', composeFile);
+      appendLog(`✓ Compose file updated (${steps.length} service(s))`);
+
+      // Recreate in topo order with health check
+      const YAML = require('yaml');
+      const composeDoc = YAML.parse(diffResult.after);
+      const services = steps.map(s => s.serviceName);
+      const hostId = steps[0].hostId || 0;
+      const docker = dockerService.getDocker(hostId);
+
+      await dockerRunner.recreateInOrder({
+        composeFile, composeDoc, services, docker, hostId, onLog: appendLog,
+      });
+
     } catch (e) {
-      throw new Error(`Compose update failed for ${step.containerName}: ${e.message}`);
+      appendLog(`✗ Recreate failed: ${e.message}`);
+      // Auto-rollback
+      appendLog(`⏳ Auto-rolling back...`);
+      try {
+        await dockerRunner.rollback({
+          snapshots,
+          onLog: appendLog,
+          hostId: plan.steps[0]?.hostId || 0,
+        });
+        db.prepare(`UPDATE remediation_jobs SET status='rolled_back', error_class=?, completed_at=datetime('now') WHERE id=?`)
+          .run(_classifyError(e), jobId);
+        appendLog(`✓ Rollback complete`);
+      } catch (rollbackErr) {
+        db.prepare(`UPDATE remediation_jobs SET status='failed', error_class='rollback', output=?, completed_at=datetime('now') WHERE id=?`)
+          .run(output.join('\n') + '\n[ROLLBACK FAILED] ' + rollbackErr.message, jobId);
+        appendLog(`✗ ROLLBACK FAILED — manual intervention required`);
+      }
+      throw e;
     }
   }
 
@@ -313,8 +354,46 @@ async function _applyLocal(jobId, plan) {
         rollback_deadline=datetime('now', '+60 seconds')
     WHERE id=?
   `).run(jobId);
-  appendLog(`✓ Job complete`);
+  appendLog(`✓ Job complete. Rollback available for 60 seconds.`);
   log.info('Remediation job succeeded', { jobId });
+}
+
+// ─── Manual rollback (called from route) ───────────────
+
+async function executeRollback(jobId) {
+  const db = getDb();
+  const job = db.prepare('SELECT * FROM remediation_jobs WHERE id = ?').get(jobId);
+  if (!job) throw new Error(`Job ${jobId} not found`);
+  if (job.status !== 'success') throw new Error(`Cannot rollback job in status '${job.status}'`);
+  if (!job.rollback_deadline || new Date(job.rollback_deadline) < new Date()) {
+    throw new Error('Rollback window expired');
+  }
+  if (!job.pre_apply_snapshot) throw new Error('No snapshot available for rollback');
+
+  const snapshots = JSON.parse(zlib.gunzipSync(Buffer.from(job.pre_apply_snapshot, 'base64')).toString('utf8'));
+  const output = [job.output || ''];
+  const appendLog = (line) => {
+    output.push(line);
+    db.prepare(`UPDATE remediation_jobs SET output=?, current_step=? WHERE id=?`).run(output.join('\n'), line, jobId);
+  };
+
+  appendLog(`⏳ Manual rollback initiated for job ${jobId}`);
+
+  try {
+    await dockerRunner.rollback({
+      snapshots,
+      onLog: appendLog,
+      hostId: 0,  // TODO multi-host
+    });
+    db.prepare(`UPDATE remediation_jobs SET status='rolled_back', completed_at=datetime('now') WHERE id=?`).run(jobId);
+    appendLog(`✓ Rollback complete`);
+    log.info('Manual rollback succeeded', { jobId });
+    return { ok: true };
+  } catch (e) {
+    db.prepare(`UPDATE remediation_jobs SET status='failed', error_class='rollback' WHERE id=?`).run(jobId);
+    appendLog(`✗ Rollback failed: ${e.message}`);
+    throw e;
+  }
 }
 
 async function _openPr(_jobId, _plan) {
@@ -378,6 +457,7 @@ module.exports = {
   plan,
   createJob,
   runJob,
+  executeRollback,
   _classifyError,
   mergePatch,
   mergeDockerUpdateFlags,
