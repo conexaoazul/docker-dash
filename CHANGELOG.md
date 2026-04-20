@@ -2,6 +2,29 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.6.1] - 2026-04-20 — "DNS providers + rotate UX"
+
+Patch release focused on v6.5 Let's Encrypt Wizard polish and deferred cleanup.
+
+### Added
+
+- **4 more DNS providers** for the LE Wizard — Namecheap, Gandi, Porkbun, OVH — bringing total coverage from 5 (Tier-1) to **9**. Wired through `src/services/dns-providers.js` (registry + format validators + Caddy config emitters) and `docker/caddy/Dockerfile` (4 new `xcaddy` plugins). Each provider emits file-substitution Caddy config only — no plaintext secrets in JSON state.
+- **Credential rotation UX** — new "Rotate" button per row in the Saved DNS Credentials list. Opens an inline modal (`_showAcmeRotateModal`) that re-prompts only the credential fields for that provider; submission re-writes the encrypted vault + `/etc/caddy/secrets/<id>/*` files without changing the credential id, so existing bound certs keep working. Avoids the delete+recreate dance users hit when rotating expired CF tokens.
+
+### Fixed
+
+- **Multi-host rollback uses correct `host_id`** in `src/services/remediate.js` (`executeRollback` was passing `hostId: 0` — a TODO from Session 2). Now reads `job.host_id || 0`, so remediation rollbacks target the host the original apply ran against.
+
+### Tests
+
+- `dns-providers.test.js` + `acme-routes.test.js` updated to expect all 9 providers. 538 tests pass across 38 suites.
+
+### Docs
+
+- **`BACKLOG.md`** — new single source of truth for deferred work, with the *why* per item (not just the what). P1: `ldapjs` → `ldapts` migration (2–3 days), distributed rate limiter for HA (v7.0 scope). P2: WebSocket progress for LE + Remediation wizards (polling works), i18n gap on 25% of keys in non-EN locales, Remediation entry points on security/stacks/cis pages. P3: GHCR push permission (one-time repo settings toggle), LE staging CI test (needs Cloudflare secret), multi-host SSH exec channel for remote-host live apply.
+
+---
+
 ## [6.6.0] - 2026-04-20 — "Container Remediation Wizard"
 
 Headline feature: a 3-step UI wizard that turns Secrets Audit + CIS Benchmark findings into actionable fixes. Pick findings → preview compose YAML diff + live CLI commands → apply live (with auto-rollback) OR open a Git PR. 20-entry catalog, 4 live-updatable (memory/CPU/pids/restart) with zero downtime, 16 require recreation with `depends_on` ordering + health-check rollback window.

@@ -383,7 +383,7 @@ async function executeRollback(jobId) {
     await dockerRunner.rollback({
       snapshots,
       onLog: appendLog,
-      hostId: 0,  // TODO multi-host
+      hostId: job.host_id || 0,
     });
     db.prepare(`UPDATE remediation_jobs SET status='rolled_back', completed_at=datetime('now') WHERE id=?`).run(jobId);
     appendLog(`✓ Rollback complete`);

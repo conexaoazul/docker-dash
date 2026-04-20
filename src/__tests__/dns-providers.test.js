@@ -87,7 +87,7 @@ describe('dns-providers — Cloudflare provider', () => {
 });
 
 describe('dns-providers — Tier 1 coverage', () => {
-  const TIER1 = ['cloudflare', 'route53', 'digitalocean', 'hetzner', 'linode'];
+  const TIER1 = ['cloudflare', 'route53', 'digitalocean', 'hetzner', 'linode', 'namecheap', 'gandi', 'porkbun', 'ovh'];
 
   it.each(TIER1)('Tier 1 provider %s is registered', (id) => {
     const p = dnsProviders.get(id);
@@ -105,7 +105,7 @@ describe('dns-providers — Tier 1 coverage', () => {
     }
   });
 
-  it('list() includes all 5 Tier-1 providers', () => {
+  it('list() includes all 9 providers (5 Tier-1 + 4 Tier-2)', () => {
     const ids = dnsProviders.list().map((p) => p.id).sort();
     expect(ids).toEqual([...TIER1].sort());
   });

@@ -4091,6 +4091,7 @@ DB_PASS=secret"></textarea>
                   + '<td>' + statusBadge + '</td>'
                   + '<td>'
                   + '<button class="btn btn-xs btn-secondary acme-cred-validate-btn" data-id="' + c.id + '" title="Re-validate"><i class="fas fa-check-circle"></i></button> '
+                  + '<button class="btn btn-xs btn-secondary acme-cred-rotate-btn" data-id="' + c.id + '" data-name="' + Utils.escapeHtml(c.name) + '" data-provider="' + Utils.escapeHtml(c.providerId) + '" title="Rotate credential value"><i class="fas fa-sync"></i></button> '
                   + '<button class="btn btn-xs btn-danger acme-cred-delete-btn" data-id="' + c.id + '" data-name="' + Utils.escapeHtml(c.name) + '" title="Delete"><i class="fas fa-trash"></i></button>'
                   + '</td></tr>';
               }).join('')
@@ -4144,6 +4145,11 @@ DB_PASS=secret"></textarea>
           (r.ok ? Toast.success : Toast.error)(r.message);
           this._renderCertificates(el);
         } catch (err) { Toast.error(err.message); }
+      }));
+      el.querySelectorAll('.acme-cred-rotate-btn').forEach(btn => btn.addEventListener('click', () => {
+        this._showAcmeRotateModal({
+          id: btn.dataset.id, name: btn.dataset.name, providerId: btn.dataset.provider, parentEl: el,
+        });
       }));
       el.querySelectorAll('.acme-cred-delete-btn').forEach(btn => btn.addEventListener('click', async () => {
         if (!confirm('Delete credential "' + btn.dataset.name + '"?')) return;
@@ -4246,6 +4252,54 @@ DB_PASS=secret"></textarea>
         mc.querySelector('#csr-download-csr').onclick = () => dl(data.commonName + '.csr', res.csr);
       } catch (err) { Toast.error(err.message); }
     });
+  },
+
+  // ─── ACME credential rotation modal (v6.6.1) ─────────
+  _showAcmeRotateModal({ id, name, providerId, parentEl }) {
+    Api.acmeListProviders().then(r => {
+      const provider = (r.providers || []).find(p => p.id === providerId);
+      if (!provider) { Toast.error('Unknown provider: ' + providerId); return; }
+
+      const fieldsHtml = provider.fields.map(f =>
+        '<div class="form-group"><label>' + Utils.escapeHtml(f.label) + (f.required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>'
+        + '<input id="rot-field-' + Utils.escapeHtml(f.key) + '" class="form-control" type="' + f.type + '" data-field="' + Utils.escapeHtml(f.key) + '" placeholder="' + Utils.escapeHtml(f.placeholder || '') + '" style="font-family:var(--mono);font-size:12px">'
+        + (f.helpText ? '<div class="text-xs text-muted" style="margin-top:4px">' + Utils.escapeHtml(f.helpText) + '</div>' : '')
+        + '</div>'
+      ).join('');
+
+      Modal.open('<div class="modal-header"><h3><i class="fas fa-sync" style="margin-right:6px"></i>Rotate Credential — <span class="text-muted text-sm">' + Utils.escapeHtml(name) + '</span></h3><button class="modal-close-btn" id="rot-close"><i class="fas fa-times"></i></button></div>'
+        + '<div class="modal-body">'
+        + '<div style="padding:10px 12px;background:var(--accent-dim);border-left:3px solid var(--accent);border-radius:4px;margin-bottom:12px;font-size:12px">'
+        + '<i class="fas fa-info-circle"></i> Enter the NEW credential values below. Caddy reads credentials per-request, so <strong>zero downtime</strong> — no reload needed. Old value is replaced atomically.'
+        + '</div>'
+        + fieldsHtml
+        + '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="rot-validate" checked> Validate new credential against provider API before saving</label></div>'
+        + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn btn-secondary" id="rot-cancel">Cancel</button><button class="btn btn-primary" id="rot-save"><i class="fas fa-check"></i> Rotate</button></div>'
+        + '</div>', { width: '560px' });
+
+      const mc = Modal._content;
+      mc.querySelector('#rot-close')?.addEventListener('click', () => Modal.close());
+      mc.querySelector('#rot-cancel')?.addEventListener('click', () => Modal.close());
+      mc.querySelector('#rot-save')?.addEventListener('click', async () => {
+        const credentials = {};
+        for (const f of provider.fields) {
+          const val = mc.querySelector('#rot-field-' + f.key)?.value?.trim() || '';
+          if (f.required && !val) { Toast.warning(f.label + ' required'); return; }
+          if (val) credentials[f.key] = val;
+        }
+        try {
+          await Api.acmeRotateCredential(id, credentials);
+          if (mc.querySelector('#rot-validate')?.checked) {
+            const validation = await Api.acmeValidateCredential(id);
+            (validation.ok ? Toast.success : Toast.error)('Rotated — validation: ' + validation.message);
+          } else {
+            Toast.success('Credential rotated (zero downtime)');
+          }
+          Modal.close();
+          this._renderCertificates(parentEl);
+        } catch (err) { Toast.error(err.message); }
+      });
+    }).catch(err => Toast.error('Cannot load provider: ' + err.message));
   },
 
   // ─── Let's Encrypt Wizard (v6.5) ────────────────────────────

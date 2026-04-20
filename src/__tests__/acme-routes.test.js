@@ -60,9 +60,9 @@ describe('GET /api/system/acme/providers', () => {
       .set(auth());
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.providers)).toBe(true);
-    expect(res.body.providers.length).toBeGreaterThanOrEqual(5);
+    expect(res.body.providers.length).toBeGreaterThanOrEqual(9);
     const ids = res.body.providers.map((p) => p.id).sort();
-    expect(ids).toEqual(['cloudflare', 'digitalocean', 'hetzner', 'linode', 'route53']);
+    expect(ids).toEqual(['cloudflare', 'digitalocean', 'gandi', 'hetzner', 'linode', 'namecheap', 'ovh', 'porkbun', 'route53']);
   });
 
   it('does not leak validator/toCaddyConfig functions in JSON response', async () => {

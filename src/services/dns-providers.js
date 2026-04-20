@@ -323,6 +323,144 @@ const PROVIDERS = {
       };
     },
   },
+
+  // ─── Namecheap ─────────────────────────────────────────
+  namecheap: {
+    id: 'namecheap',
+    name: 'Namecheap',
+    docsUrl: 'https://www.namecheap.com/support/api/intro/',
+    instructionsKey: 'acme.providers.namecheap.instructions',
+    fields: [
+      { key: 'api_key', label: 'API Key', type: 'password', required: true, helpText: 'Namecheap Dashboard → Profile → Tools → Namecheap API Access → enable + copy key' },
+      { key: 'user', label: 'API Username', type: 'text', required: true, placeholder: 'your-namecheap-username' },
+      { key: 'api_endpoint', label: 'API Endpoint', type: 'text', required: false, placeholder: 'https://api.namecheap.com/xml.response (default)', helpText: 'Use https://api.sandbox.namecheap.com/xml.response for testing' },
+    ],
+    caddyConfigKey: 'namecheap',
+    supportsValidation: false,
+    async validate(creds) {
+      if (!creds.api_key || !creds.user) return { ok: false, message: 'api_key and user required' };
+      return { ok: true, message: 'Credentials saved. Full validation happens at first cert issuance (Namecheap requires IP whitelist — test in sandbox first).' };
+    },
+    toCaddyConfig(credentialId) {
+      return {
+        name: 'namecheap',
+        api_key: `{file./etc/caddy/secrets/${credentialId}/api_key}`,
+        user: `{file./etc/caddy/secrets/${credentialId}/user}`,
+        api_endpoint: `{file./etc/caddy/secrets/${credentialId}/api_endpoint}`,
+      };
+    },
+  },
+
+  // ─── Gandi ─────────────────────────────────────────────
+  gandi: {
+    id: 'gandi',
+    name: 'Gandi LiveDNS',
+    docsUrl: 'https://docs.gandi.net/en/domain_names/advanced_users/api.html',
+    instructionsKey: 'acme.providers.gandi.instructions',
+    fields: [
+      { key: 'bearer_token', label: 'Personal Access Token (PAT)', type: 'password', required: true, helpText: 'Gandi Account → API Keys → Create new PAT with "Manage DNS" scope. LiveDNS API key (deprecated) also works but PAT is preferred.' },
+    ],
+    caddyConfigKey: 'gandi',
+    supportsValidation: true,
+    async validate(creds) {
+      if (!creds.bearer_token) return { ok: false, message: 'bearer_token required' };
+      try {
+        const { status, body } = await httpsGetJson(
+          'https://api.gandi.net/v5/livedns/domains?per_page=1',
+          { Authorization: 'Bearer ' + creds.bearer_token },
+        );
+        if (status === 401 || status === 403) return { ok: false, message: 'Token invalid or lacks LiveDNS scope' };
+        if (status !== 200) return { ok: false, message: 'Unexpected response (HTTP ' + status + ')' };
+        return { ok: true, message: 'Token valid (' + (Array.isArray(body) ? body.length : 0) + '+ domains accessible)' };
+      } catch (e) {
+        return { ok: false, message: 'Gandi API unreachable: ' + e.message };
+      }
+    },
+    toCaddyConfig(credentialId) {
+      return {
+        name: 'gandi',
+        bearer_token: `{file./etc/caddy/secrets/${credentialId}/bearer_token}`,
+      };
+    },
+  },
+
+  // ─── Porkbun ───────────────────────────────────────────
+  porkbun: {
+    id: 'porkbun',
+    name: 'Porkbun',
+    docsUrl: 'https://porkbun.com/api/json/v3/documentation',
+    instructionsKey: 'acme.providers.porkbun.instructions',
+    fields: [
+      { key: 'api_key', label: 'API Key', type: 'password', required: true, placeholder: 'pk1_...', helpText: 'Porkbun Account → API Access → Create API Key. Also enable API Access per-domain under each domain\'s settings.' },
+      { key: 'api_secret_key', label: 'API Secret Key', type: 'password', required: true, placeholder: 'sk1_...' },
+    ],
+    caddyConfigKey: 'porkbun',
+    supportsValidation: true,
+    async validate(creds) {
+      if (!creds.api_key || !creds.api_secret_key) return { ok: false, message: 'api_key and api_secret_key required' };
+      // Porkbun has a /api/json/v3/ping endpoint that validates credentials
+      try {
+        const https = require('https');
+        const body = JSON.stringify({ apikey: creds.api_key, secretapikey: creds.api_secret_key });
+        const resBody = await new Promise((resolve, reject) => {
+          const req = https.request({
+            hostname: 'api.porkbun.com', path: '/api/json/v3/ping', method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+            timeout: 5000,
+          }, (res) => {
+            let data = '';
+            res.on('data', c => { data += c; });
+            res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve({ status: 'ERROR' }); } });
+          });
+          req.on('error', reject);
+          req.on('timeout', () => req.destroy(new Error('timeout')));
+          req.write(body); req.end();
+        });
+        if (resBody.status === 'SUCCESS') return { ok: true, message: 'Credentials valid (yourIp: ' + (resBody.yourIp || '?') + ')' };
+        return { ok: false, message: 'Porkbun rejected: ' + (resBody.message || 'unknown error') };
+      } catch (e) {
+        return { ok: false, message: 'Porkbun API unreachable: ' + e.message };
+      }
+    },
+    toCaddyConfig(credentialId) {
+      return {
+        name: 'porkbun',
+        api_key: `{file./etc/caddy/secrets/${credentialId}/api_key}`,
+        api_secret_key: `{file./etc/caddy/secrets/${credentialId}/api_secret_key}`,
+      };
+    },
+  },
+
+  // ─── OVH ──────────────────────────────────────────────
+  ovh: {
+    id: 'ovh',
+    name: 'OVH',
+    docsUrl: 'https://help.ovhcloud.com/csm/en-api-getting-started-ovhcloud-api?id=kb_article_view&sysparm_article=KB0042777',
+    instructionsKey: 'acme.providers.ovh.instructions',
+    fields: [
+      { key: 'endpoint', label: 'API Endpoint', type: 'text', required: true, placeholder: 'ovh-eu', helpText: 'One of: ovh-eu, ovh-ca, ovh-us, kimsufi-eu, kimsufi-ca, soyoustart-eu, soyoustart-ca' },
+      { key: 'application_key', label: 'Application Key', type: 'password', required: true },
+      { key: 'application_secret', label: 'Application Secret', type: 'password', required: true },
+      { key: 'consumer_key', label: 'Consumer Key', type: 'password', required: true, helpText: 'Generated via OVH API validation flow. See docs link above.' },
+    ],
+    caddyConfigKey: 'ovh',
+    supportsValidation: false,
+    async validate(creds) {
+      if (!creds.endpoint || !creds.application_key || !creds.application_secret || !creds.consumer_key) {
+        return { ok: false, message: 'All 4 fields required (endpoint + 3 keys)' };
+      }
+      return { ok: true, message: 'Credentials saved. OVH uses its own signature scheme — full validation happens at first cert issuance.' };
+    },
+    toCaddyConfig(credentialId) {
+      return {
+        name: 'ovh',
+        endpoint: `{file./etc/caddy/secrets/${credentialId}/endpoint}`,
+        application_key: `{file./etc/caddy/secrets/${credentialId}/application_key}`,
+        application_secret: `{file./etc/caddy/secrets/${credentialId}/application_secret}`,
+        consumer_key: `{file./etc/caddy/secrets/${credentialId}/consumer_key}`,
+      };
+    },
+  },
 };
 
 /**
