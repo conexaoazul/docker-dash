@@ -3302,7 +3302,11 @@ DB_PASS=secret"></textarea>
                     </div>
                   `).join('')
               }
-              ${!passAll ? `<div style="margin-top:12px;text-align:right"><button class="btn btn-sm btn-accent cis-hardened-btn" data-container="${Utils.escapeHtml(item.title)}" style="font-size:11px"><i class="fas fa-shield-alt" style="margin-right:5px"></i>Generate CIS-hardened compose</button></div>` : ''}
+              ${!passAll ? `<div style="margin-top:12px;text-align:right;display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">
+                ${item.containerId ? `<button class="btn btn-sm btn-primary cis-remediate-btn" data-container-id="${Utils.escapeHtml(item.containerId)}" data-container-name="${Utils.escapeHtml(item.title)}" style="font-size:11px" title="Open Remediation Wizard for this container"><i class="fas fa-tools" style="margin-right:5px"></i>Fix with Wizard</button>` : ''}
+                ${item.containerId && item.stack ? `<button class="btn btn-sm btn-secondary cis-remediate-stack-btn" data-stack="${Utils.escapeHtml(item.stack)}" style="font-size:11px" title="Remediate whole stack"><i class="fas fa-cubes" style="margin-right:5px"></i>Stack</button>` : ''}
+                <button class="btn btn-sm btn-accent cis-hardened-btn" data-container="${Utils.escapeHtml(item.title)}" style="font-size:11px"><i class="fas fa-shield-alt" style="margin-right:5px"></i>Generate CIS-hardened compose</button>
+              </div>` : ''}
             </div>
           </details>
         `;
@@ -3387,6 +3391,26 @@ DB_PASS=secret"></textarea>
       } finally {
         runBtn.disabled = false;
         runBtn.innerHTML = '<i class="fas fa-sync-alt" style="margin-right:4px"></i>Run Again';
+      }
+    });
+
+    // Remediation Wizard — container entry point
+    el.querySelector('#cis-container-panel').addEventListener('click', (e) => {
+      const fixBtn = e.target.closest('.cis-remediate-btn');
+      if (fixBtn) {
+        if (typeof RemediateWizard === 'undefined') { Toast.error('Remediation Wizard not loaded'); return; }
+        RemediateWizard.open({
+          scope: { type: 'container', id: fixBtn.dataset.containerId, hostId: Api.getHostId(), displayName: fixBtn.dataset.containerName },
+        });
+        return;
+      }
+      const stackBtn = e.target.closest('.cis-remediate-stack-btn');
+      if (stackBtn) {
+        if (typeof RemediateWizard === 'undefined') { Toast.error('Remediation Wizard not loaded'); return; }
+        RemediateWizard.open({
+          scope: { type: 'stack', name: stackBtn.dataset.stack, hostId: Api.getHostId(), displayName: 'stack: ' + stackBtn.dataset.stack },
+        });
+        return;
       }
     });
 

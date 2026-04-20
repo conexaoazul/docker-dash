@@ -2,6 +2,29 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.6.3] - 2026-04-20 — "Remediation Wizard entry points"
+
+Patch release that wires the v6.6.0 Remediation Wizard into two more pages it was always designed to reach from.
+
+### Added
+
+- **CIS Benchmark per-container row** (System → CIS → Containers) now shows a **Fix with Wizard** button alongside the existing Generate-hardened-compose button, plus a **Stack** shortcut when the container belongs to a compose project. Clicking either opens the Remediation Wizard pre-targeted at that scope.
+- **Stacks page** (compose stacks with ≥1 container) now shows a **Remediate** action button (`fa-tools`) alongside Up / Down / Restart / Pull. Opens the wizard in stack-mode, auto-detecting applicable findings across every service in the stack.
+
+### Backend
+
+- `src/services/cis-benchmark.js` — container results now include `containerId` (real Docker id) and `stack` (compose project label) so the frontend can pass them straight to `RemediateWizard.open()` without a round-trip.
+
+### Not in this release (by design)
+
+- **Security page (image vulnerability scanner)** — still no entry point. That page is image-focused; the wizard is container-focused. A proper integration needs a "containers using this image" surface that doesn't exist yet. Scoped in BACKLOG as a v6.7+ UX change rather than a mechanical edit.
+
+### Tests
+
+- 549 tests pass across 39 suites (no new tests — pure UI wiring + one backend field addition).
+
+---
+
 ## [6.6.2] - 2026-04-20 — "Egress Audit"
 
 Minor release adding a read-only egress-posture audit that flags containers able to reach the public internet and cloud-metadata endpoints (IMDS — e.g. AWS <code>169.254.169.254</code>). Part of the Outbound Network Filter work (BACKLOG). Enforcement remains planned for v6.7.

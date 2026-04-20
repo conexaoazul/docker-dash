@@ -111,6 +111,17 @@ const StacksPage = {
         });
       });
 
+      // Remediation Wizard — stack entry point (compose only; v6.6.3)
+      el.querySelectorAll('.stack-remediate-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof RemediateWizard === 'undefined') { Toast.error('Remediation Wizard not loaded'); return; }
+          RemediateWizard.open({
+            scope: { type: 'stack', name: btn.dataset.stack, hostId: Api.getHostId(), displayName: 'stack: ' + btn.dataset.stack },
+          });
+        });
+      });
+
       // Action buttons
       el.querySelectorAll('.stack-action-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
@@ -174,6 +185,7 @@ const StacksPage = {
               <button class="action-btn stack-action-btn" data-source="compose" data-stack="${Utils.escapeHtml(s.name)}" data-action="down" title="Down"><i class="fas fa-stop"></i></button>
               <button class="action-btn stack-action-btn" data-source="compose" data-stack="${Utils.escapeHtml(s.name)}" data-action="restart" title="Restart"><i class="fas fa-sync-alt"></i></button>
               <button class="action-btn stack-action-btn" data-source="compose" data-stack="${Utils.escapeHtml(s.name)}" data-action="pull" title="Pull"><i class="fas fa-download"></i></button>
+              ${s.total > 0 ? `<button class="action-btn stack-remediate-btn" data-stack="${Utils.escapeHtml(s.name)}" title="Remediate stack (security fixes)"><i class="fas fa-tools"></i></button>` : ''}
             `}
           </div>
         </div>

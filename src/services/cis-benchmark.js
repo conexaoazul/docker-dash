@@ -198,6 +198,8 @@ async function runBenchmark(docker) {
 
       containerResults.push({
         id: `C-${name}`,
+        containerId: c.Id,
+        stack: (inspect.Config?.Labels || {})['com.docker.compose.project'] || null,
         title: name,
         category: 'Container',
         status: worstSeverity,
