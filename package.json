@@ -1,6 +1,6 @@
 {
   "name": "docker-dash",
-  "version": "6.9.4",
+  "version": "6.10.0",
   "description": "Full-featured Docker management dashboard",
   "main": "src/server.js",
   "scripts": {
@@ -16,7 +16,7 @@
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.9.0",
     "cookie-parser": "^1.4.7",
-    "diff": "^5.2.2",
+    "diff": "^9.0.0",
     "dockerode": "^4.0.4",
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
@@ -35,7 +35,7 @@
     "minimatch": "^9.0.7",
     "tar": "^7.5.11",
     "brace-expansion": "^2.0.3",
-    "diff": "^5.2.2",
+    "diff": "^9.0.0",
     "protobufjs": "^7.5.5",
     "basic-ftp": "^5.2.3",
     "path-to-regexp": "^0.1.13"

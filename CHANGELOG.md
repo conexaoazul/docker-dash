@@ -2,6 +2,53 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.10.0] - 2026-04-21 — "Per-container Security tab + diff major bump"
+
+Two changes. One adds a user-visible polish tab (so this bumps the minor). One closes a P2 dep-bump BACKLOG item.
+
+### Added — Container-detail **Security** sub-tab
+
+Every container's detail page gains a new **Security** tab alongside Info / Logs / Terminal / Stats / Env / Mounts / Network / Labels / Files / Changes / Pipeline / Inspect. The tab shows a 2×2 grid of cards covering the full security posture for just this container:
+
+| Card | Data source | Actions |
+|---|---|---|
+| **Secrets** | `/api/system/secrets-audit` filtered by container id/name | Score badge + top 5 issues + **Fix with Wizard** (opens RemediateWizard scoped to container) |
+| **Egress** | `/api/system/egress-audit` + `/api/egress-filter/policies` filtered | Network mode · reachability verdict · score · filter-policy badge. **Enable filter** (routes to System → Egress) or **Manage policy →** link when policy active |
+| **CIS Benchmark** | `/api/system/cis-benchmark` (user-triggered via play button — CIS is the slow one) | Pass/fail/warn tally + top 5 findings |
+| **Image Vulnerabilities** | `/api/images/scan-history?image=...&limit=1` | Critical / High / Medium / Fixable tally + last scan timestamp + **Full report** link |
+
+Each card has a refresh button (⟳) in its header.
+
+**Design (reuse-first):** same pattern as v6.9.3 (stack modals) and v6.9.4 (image drill-down). Zero new backend endpoints — parallel fetches to existing audits, client-filter by container id OR short-id OR name (handles the 12-char-prefix vs full-id mismatch seen elsewhere in the app). Zero new tests.
+
+**Why this completes the security story:** v6.9.3 gave stack-level actions on the Containers page. v6.9.4 gave image → container drill-down from the Security page. v6.10.0 closes the last gap: when you're looking at one specific container, you see its full posture in one place without bouncing between System tabs.
+
+### Changed — `diff` 5 → 9 (major)
+
+- Upgraded `diff` `^5.2.2` → `^9.0.0`. Used exclusively in `src/services/compose-diff.js` (`Diff.createPatch` for unified diff display in the Remediation Wizard).
+- **Tested:** `compose-diff.test.js` all 10 tests pass unchanged on v9. API for `createPatch` stayed backward-compatible despite the major version jump (v6/7/8 major bumps were mostly about TypeScript types and internal refactors).
+- Also bumped in the `overrides` block to prevent nested deps pinning the old version.
+- `npm audit` → 0 vulnerabilities.
+- Closes a BACKLOG P2 dep-major deferral from v6.6.4.
+
+### Tests
+
+- **678 passing + 4 skipped (live CF tests)** / 46 suites. Unchanged vs v6.9.4. Syntax clean on all modified files.
+
+### Files touched
+
+- `public/js/pages/containers.js` — 1 new tab button (line ~1359), 1 dispatch case (line ~2140), 1 new render method `_renderSecurityTab` (~150 LOC).
+- `package.json` — `diff` bumped in dependencies + overrides.
+
+### What's now fully done from BACKLOG
+
+- `diff 5→9` — shipped
+- Remediation entry points on security.js — shipped (v6.9.4)
+
+Remaining BACKLOG P2: `express 4→5` (wants its own session — bigger API surface). All P1 items still need real fixtures or scope decisions.
+
+---
+
 ## [6.9.4] - 2026-04-21 — "Remediation drill-down from Security page (closes BACKLOG deferral)"
 
 Bridges the image-focused Security page with the container-focused Remediation Wizard. Closes a deferred BACKLOG item from v6.6.3 that's been sitting open.

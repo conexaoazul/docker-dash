@@ -10,6 +10,16 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.10.0',
+      date: '2026-04-21',
+      title: 'Per-container Security tab + diff 5→9 dep bump',
+      changes: [
+        { type: 'feature', text: 'Every container\'s detail page gains a new "Security" sub-tab. 2×2 grid: Secrets (score + top 5 issues + Fix with Wizard), Egress (network mode + reachability + filter policy + Enable filter button), CIS Benchmark (pass/warn/fail + top 5 findings, user-triggered), Image Vulnerabilities (Critical/High/Medium/Fixable tally + last scan + Full report link).' },
+        { type: 'feature', text: 'Closes the security-story gap: v6.9.3 = stack-level actions, v6.9.4 = image→container drill-down, v6.10.0 = per-container unified view. All four reuse the same global audit endpoints with client-side filtering — zero new backend code, zero new tests.' },
+        { type: 'improvement', text: 'Dep bump: diff ^5.2.2 → ^9.0.0 (major). Used in compose-diff.js for Remediation Wizard unified diff. v6/v7/v8 major versions were mostly TypeScript types + internal refactors — createPatch API stayed backward-compatible. All 10 compose-diff tests pass unchanged. Closes BACKLOG P2 deferral from v6.6.4. npm audit at 0 vulnerabilities.' },
+      ],
+    },
+    {
       version: '6.9.4',
       date: '2026-04-21',
       title: 'Remediation drill-down from Security page — closes a BACKLOG deferral',

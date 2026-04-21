@@ -1356,6 +1356,7 @@ const ContainersPage = {
         <button class="tab" data-tab="logs">${i18n.t('pages.containers.tabs.logs')}</button>
         <button class="tab" data-tab="terminal">${i18n.t('pages.containers.tabs.terminal')}</button>
         <button class="tab" data-tab="stats">${i18n.t('pages.containers.tabs.stats')}</button>
+        <button class="tab" data-tab="security"><i class="fas fa-shield-alt" style="margin-right:4px"></i>Security</button>
         <button class="tab" data-tab="pipeline"><i class="fas fa-rocket" style="margin-right:4px"></i>Pipeline</button>
         <button class="tab" data-tab="env"><i class="fas fa-key" style="margin-right:4px"></i>Env</button>
         <button class="tab" data-tab="mounts"><i class="fas fa-hdd" style="margin-right:4px"></i>Mounts</button>
@@ -2137,7 +2138,177 @@ const ContainersPage = {
     else if (tab === 'files') this._renderFilesTab(content);
     else if (tab === 'changes') this._renderChangesTab(content);
     else if (tab === 'pipeline') this._renderPipelineTab(content);
+    else if (tab === 'security') this._renderSecurityTab(content);
     else if (tab === 'inspect') this._renderInspectTab(content);
+  },
+
+  // v6.9.5: Unified per-container Security tab. Four sections in parallel,
+  // each hitting the global audit endpoint and client-filtering to this
+  // container. Same reuse-first pattern as v6.9.3 (stack modals) and v6.9.4
+  // (image drill-down) — no new backend, no new tests, just composition.
+  async _renderSecurityTab(el) {
+    const cid = this._detailId;
+    const info = this._detailData || {};
+    const cname = info.name || Utils.shortId(cid);
+    const image = info.image || info.Config?.Image || '';
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="card" style="margin:0">
+          <div class="card-header" style="display:flex;align-items:center;gap:6px">
+            <h4 style="margin:0;flex:1"><i class="fas fa-user-secret" style="color:#a78bfa;margin-right:8px"></i>Secrets</h4>
+            <button class="btn btn-xs btn-secondary" id="sec-refresh-secrets" title="Re-scan"><i class="fas fa-sync-alt"></i></button>
+          </div>
+          <div class="card-body" id="sec-secrets"><div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Loading…</div></div>
+        </div>
+        <div class="card" style="margin:0">
+          <div class="card-header" style="display:flex;align-items:center;gap:6px">
+            <h4 style="margin:0;flex:1"><i class="fas fa-network-wired" style="color:#06b6d4;margin-right:8px"></i>Egress</h4>
+            <button class="btn btn-xs btn-secondary" id="sec-refresh-egress" title="Re-scan"><i class="fas fa-sync-alt"></i></button>
+          </div>
+          <div class="card-body" id="sec-egress"><div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Loading…</div></div>
+        </div>
+        <div class="card" style="margin:0">
+          <div class="card-header" style="display:flex;align-items:center;gap:6px">
+            <h4 style="margin:0;flex:1"><i class="fas fa-clipboard-check" style="color:var(--green,#4ade80);margin-right:8px"></i>CIS Benchmark</h4>
+            <button class="btn btn-xs btn-secondary" id="sec-refresh-cis" title="Run benchmark"><i class="fas fa-play"></i></button>
+          </div>
+          <div class="card-body" id="sec-cis"><div class="text-muted text-sm">Click <i class="fas fa-play"></i> to run CIS checks for this container.</div></div>
+        </div>
+        <div class="card" style="margin:0">
+          <div class="card-header" style="display:flex;align-items:center;gap:6px">
+            <h4 style="margin:0;flex:1"><i class="fas fa-search-plus" style="color:var(--yellow,#ffc107);margin-right:8px"></i>Image Vulnerabilities</h4>
+            <button class="btn btn-xs btn-secondary" id="sec-refresh-vulns" title="Scan image"><i class="fas fa-sync-alt"></i></button>
+          </div>
+          <div class="card-body" id="sec-vulns"><div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Loading…</div></div>
+        </div>
+      </div>
+    `;
+
+    const shortId = (cid || '').slice(0, 12);
+    const cleanName = (cname || '').replace(/^\//, '');
+
+    // ─── Secrets ──────────────────────────────
+    const loadSecrets = async () => {
+      const slot = el.querySelector('#sec-secrets');
+      slot.innerHTML = `<div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Loading…</div>`;
+      try {
+        const data = await Api.getSecretsAudit();
+        const row = (data.containers || []).find(r => r.id === shortId || r.name === cleanName);
+        if (!row) { slot.innerHTML = `<div class="text-muted text-sm">No audit data for this container (may be stopped).</div>`; return; }
+        const scoreColor = row.score >= 80 ? 'var(--green)' : row.score >= 60 ? 'var(--yellow)' : 'var(--red)';
+        const badge = (s) => ({ critical: '#ef4444', warning: '#f59e0b', info: '#64748b' })[s] || '#64748b';
+        slot.innerHTML = `
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+            <div style="font-size:28px;font-weight:700;color:${scoreColor}">${row.score}</div>
+            <div>
+              <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase">Score</div>
+              <div style="font-size:12px"><strong style="color:#ef4444">${(row.issues || []).filter(i => i.severity === 'critical').length}</strong> critical · <strong style="color:#f59e0b">${(row.issues || []).filter(i => i.severity === 'warning').length}</strong> warning</div>
+            </div>
+          </div>
+          ${(row.issues || []).length === 0 ? '<div style="color:var(--green);font-size:12px">✓ No issues</div>' : `
+            <div style="max-height:160px;overflow-y:auto">${(row.issues || []).slice(0, 5).map(i => `
+              <div style="padding:6px 8px;border-bottom:1px solid var(--surface2);font-size:11px">
+                <span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px;color:#fff;background:${badge(i.severity)}">${i.severity.toUpperCase()}</span>
+                <span>${Utils.escapeHtml(i.message)}</span>
+              </div>`).join('')}</div>`}
+          ${(row.issues || []).length > 0 ? `<div style="margin-top:10px"><button class="btn btn-xs btn-primary sec-fix-btn" data-cid="${Utils.escapeHtml(cid)}" data-cname="${Utils.escapeHtml(cleanName)}"><i class="fas fa-tools" style="margin-right:4px"></i>Fix with Wizard</button></div>` : ''}
+        `;
+        slot.querySelector('.sec-fix-btn')?.addEventListener('click', () => {
+          if (typeof RemediateWizard === 'undefined') { Toast.error('Remediation Wizard not loaded'); return; }
+          RemediateWizard.open({ scope: { type: 'container', id: cid, hostId: Api.getHostId(), displayName: cleanName } });
+        });
+      } catch (e) { slot.innerHTML = `<div style="color:var(--red);font-size:11px">Failed: ${Utils.escapeHtml(e.message)}</div>`; }
+    };
+
+    // ─── Egress ───────────────────────────────
+    const loadEgress = async () => {
+      const slot = el.querySelector('#sec-egress');
+      slot.innerHTML = `<div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Loading…</div>`;
+      try {
+        const [data, policies] = await Promise.all([Api.getEgressAudit(), Api.egressFilterListPolicies().catch(() => ({ policies: [] }))]);
+        const row = (data.containers || []).find(r => r.id === shortId || r.name === cleanName);
+        if (!row) { slot.innerHTML = `<div class="text-muted text-sm">No audit data for this container.</div>`; return; }
+        const policy = (policies.policies || []).find(p => p.scopeType === 'container' && (p.scopeKey === cid || p.scopeKey === row.fullId));
+        const verdict = row.canReachInternet
+          ? (row.canReachIMDS ? '<span style="color:#ef4444;font-weight:600">Internet + IMDS</span>' : '<span style="color:#f59e0b;font-weight:600">Internet</span>')
+          : '<span style="color:var(--green);font-weight:600">Isolated</span>';
+        slot.innerHTML = `
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12px;margin-bottom:10px">
+            <div style="color:var(--text-dim)">Network mode:</div><div><code>${Utils.escapeHtml(row.networkMode || 'default')}</code></div>
+            <div style="color:var(--text-dim)">Reachability:</div><div>${verdict}</div>
+            <div style="color:var(--text-dim)">Score:</div><div><strong style="color:${row.score >= 80 ? 'var(--green)' : row.score >= 60 ? 'var(--yellow)' : 'var(--red)'}">${row.score}</strong></div>
+            <div style="color:var(--text-dim)">Filter policy:</div><div>${policy ? `<span style="padding:2px 6px;background:rgba(59,130,246,0.15);border-radius:3px;font-size:11px">${Utils.escapeHtml(policy.preset)} · ${Utils.escapeHtml(policy.mode)}</span>` : '<span class="text-muted text-sm">none</span>'}</div>
+          </div>
+          <div style="margin-top:8px">${policy
+            ? `<a href="#/system" style="font-size:11px;color:var(--accent);text-decoration:none" onclick="setTimeout(()=>document.querySelector('[data-tab=egress]')?.click(),250)">Manage policy →</a>`
+            : `<button class="btn btn-xs btn-primary" id="sec-enable-egress"><i class="fas fa-shield-alt" style="margin-right:4px"></i>Enable filter</button>`
+          }</div>
+        `;
+        slot.querySelector('#sec-enable-egress')?.addEventListener('click', () => {
+          Toast.info('Opening System → Egress to enable filter');
+          location.hash = '#/system';
+          setTimeout(() => document.querySelector('[data-tab=egress]')?.click(), 250);
+        });
+      } catch (e) { slot.innerHTML = `<div style="color:var(--red);font-size:11px">Failed: ${Utils.escapeHtml(e.message)}</div>`; }
+    };
+
+    // ─── CIS (lazy — user clicks Run) ────────
+    const loadCis = async () => {
+      const slot = el.querySelector('#sec-cis');
+      slot.innerHTML = `<div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Running CIS benchmark…</div>`;
+      try {
+        const data = await Api.runCisBenchmark(Api.getHostId() || undefined);
+        const check = (data.checks || []).find(c => c.category === 'Container' && (c.title === cleanName || c.containerId === cid));
+        if (!check) { slot.innerHTML = `<div class="text-muted text-sm">No CIS check for this container — likely not running.</div>`; return; }
+        const findings = check.findings || [];
+        const fail = findings.filter(f => f.severity === 'fail').length;
+        const warn = findings.filter(f => f.severity === 'warn').length;
+        const pass = findings.length === 0;
+        slot.innerHTML = `
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+            <i class="fas ${pass ? 'fa-check-circle' : 'fa-exclamation-triangle'}" style="font-size:22px;color:${pass ? 'var(--green)' : (fail ? 'var(--red)' : 'var(--yellow)')}"></i>
+            <div><strong>${check.status.toUpperCase()}</strong>${!pass ? ` — ${fail} fail · ${warn} warn` : ''}</div>
+          </div>
+          ${findings.length === 0 ? '<div style="color:var(--green);font-size:12px">✓ All CIS checks passed</div>' : `
+            <div style="max-height:160px;overflow-y:auto;font-size:11px">${findings.slice(0, 5).map(f => `<div style="padding:4px 0;border-bottom:1px solid var(--surface2)">[${f.severity.toUpperCase()}] ${Utils.escapeHtml(f.msg)}</div>`).join('')}</div>`}
+        `;
+      } catch (e) { slot.innerHTML = `<div style="color:var(--red);font-size:11px">Failed: ${Utils.escapeHtml(e.message)}</div>`; }
+    };
+
+    // ─── Vulnerability scan ───────────────────
+    const loadVulns = async () => {
+      const slot = el.querySelector('#sec-vulns');
+      slot.innerHTML = `<div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Loading last scan…</div>`;
+      try {
+        if (!image) { slot.innerHTML = '<div class="text-muted text-sm">No image associated with this container.</div>'; return; }
+        const res = await Api.get(`/images/scan-history?image=${encodeURIComponent(image)}&limit=1`).catch(() => ({ scans: [] }));
+        const scan = (res.scans || [])[0];
+        if (!scan) {
+          slot.innerHTML = `<div class="text-muted text-sm">No vulnerability scan yet for <code>${Utils.escapeHtml(image)}</code>.</div>
+            <div style="margin-top:8px"><a href="#/system" class="btn btn-xs btn-secondary" onclick="setTimeout(()=>{location.hash='#/security'},50);return false"><i class="fas fa-search-plus" style="margin-right:4px"></i>Go to Security → scan</a></div>`;
+          return;
+        }
+        slot.innerHTML = `
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:11px;text-align:center;margin-bottom:8px">
+            <div><div style="color:#ef4444;font-size:18px;font-weight:700">${scan.summary_critical}</div><div style="color:var(--text-dim)">Critical</div></div>
+            <div><div style="color:#f97316;font-size:18px;font-weight:700">${scan.summary_high}</div><div style="color:var(--text-dim)">High</div></div>
+            <div><div style="font-size:18px;font-weight:700">${scan.summary_medium}</div><div style="color:var(--text-dim)">Medium</div></div>
+            <div><div style="color:var(--green);font-size:18px;font-weight:700">${scan.fixable_count || 0}</div><div style="color:var(--text-dim)">Fixable</div></div>
+          </div>
+          <div class="text-muted text-sm">Last scan: ${Utils.timeAgo(scan.scanned_at)}</div>
+          <div style="margin-top:8px"><a href="#/security" class="btn btn-xs btn-secondary"><i class="fas fa-eye" style="margin-right:4px"></i>Full report</a></div>
+        `;
+      } catch (e) { slot.innerHTML = `<div style="color:var(--red);font-size:11px">Failed: ${Utils.escapeHtml(e.message)}</div>`; }
+    };
+
+    el.querySelector('#sec-refresh-secrets').addEventListener('click', loadSecrets);
+    el.querySelector('#sec-refresh-egress').addEventListener('click', loadEgress);
+    el.querySelector('#sec-refresh-cis').addEventListener('click', loadCis);
+    el.querySelector('#sec-refresh-vulns').addEventListener('click', loadVulns);
+
+    // Initial parallel loads for fast ones; CIS is gated (user-triggered)
+    loadSecrets(); loadEgress(); loadVulns();
   },
 
   async _renderPipelineTab(el) {
