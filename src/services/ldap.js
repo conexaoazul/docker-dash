@@ -11,9 +11,14 @@
  *  - Attribute mapping (uid, mail, displayName)
  *
  * Config stored in `settings` table under key `ldap_config` (JSON).
+ *
+ * Implementation uses `ldapts` (modern Promise-based LDAP client).
+ * The public interface (getConfig / saveConfig / deleteConfig / testConnection /
+ * authenticate / listUsers) is preserved bit-for-bit against the previous
+ * `ldapjs` implementation so callers do not need to change.
  */
 
-const ldap = require('ldapjs');
+const { Client } = require('ldapts');
 const { getDb } = require('../db');
 const log = require('../utils/logger')('ldap');
 
@@ -43,41 +48,82 @@ function deleteConfig() {
   getDb().prepare("DELETE FROM settings WHERE key = ?").run(CONFIG_KEY);
 }
 
+// ── Filter escaping (RFC 4515) ───────────────────────────────
+//
+// `ldapjs` exposed `ldap.escapeFilter`. `ldapts` uses Filter classes that
+// escape internally, but many callers build filter strings directly, so we
+// keep a standalone helper with the same semantics.
+//
+// RFC 4515 specifies that '*', '(', ')', '\' and NUL must be encoded as
+// '\xx' where xx is the two-hex-digit byte value. We also escape other
+// low control bytes defensively.
+function _escapeFilter(value) {
+  if (value == null) return '';
+  const s = String(value);
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    switch (c) {
+      case 0x00: out += '\\00'; break;
+      case 0x28: out += '\\28'; break; // (
+      case 0x29: out += '\\29'; break; // )
+      case 0x2a: out += '\\2a'; break; // *
+      case 0x5c: out += '\\5c'; break; // \
+      default:   out += s[i];
+    }
+  }
+  return out;
+}
+
 // ── LDAP client factory ──────────────────────────────────────
 
 function _createClient(cfg) {
   const url = `${cfg.tls ? 'ldaps' : 'ldap'}://${cfg.host}:${cfg.port || (cfg.tls ? 636 : 389)}`;
-  return ldap.createClient({
+  const opts = {
     url,
     timeout: 5000,
     connectTimeout: 5000,
-    tlsOptions: cfg.tls && cfg.tlsSkipVerify ? { rejectUnauthorized: false } : undefined,
-  });
+  };
+  if (cfg.tls && cfg.tlsSkipVerify) {
+    opts.tlsOptions = { rejectUnauthorized: false };
+  }
+  return new Client(opts);
 }
 
-function _bind(client, dn, password) {
-  return new Promise((resolve, reject) => {
-    client.bind(dn, password, (err) => {
-      if (err) return reject(err);
-      resolve();
-    });
-  });
+async function _destroy(client) {
+  try {
+    await client.unbind();
+  } catch {
+    /* ignore — unbind can throw if already disconnected */
+  }
 }
 
-function _search(client, base, options) {
-  return new Promise((resolve, reject) => {
-    client.search(base, options, (err, res) => {
-      if (err) return reject(err);
-      const entries = [];
-      res.on('searchEntry', e => entries.push(e.object));
-      res.on('error', reject);
-      res.on('end', () => resolve(entries));
-    });
-  });
-}
-
-function _destroy(client) {
-  try { client.destroy(); } catch { /* ignore */ }
+/**
+ * Normalize an ldapts search entry into the shape previous callers expect
+ * from ldapjs (`entry.object`): a plain object with `dn` plus attribute
+ * fields where single-valued attributes are strings, multi-valued are
+ * arrays. ldapts already returns a similar shape from `SearchEntry.toObject()`
+ * via the `searchEntries` collection, so mostly this is a pass-through.
+ *
+ * ldapts `Entry` value types: `Buffer | Buffer[] | string[] | string`.
+ * For our use (uid, mail, displayName, cn, memberOf) we expect strings, but
+ * we coerce Buffer values defensively to match the previous behavior where
+ * ldapjs returned strings for these text attributes.
+ */
+function _normalizeEntry(entry) {
+  const out = { dn: entry.dn };
+  for (const k of Object.keys(entry)) {
+    if (k === 'dn') continue;
+    const v = entry[k];
+    if (Buffer.isBuffer(v)) {
+      out[k] = v.toString('utf8');
+    } else if (Array.isArray(v)) {
+      out[k] = v.map(x => Buffer.isBuffer(x) ? x.toString('utf8') : x);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 // ── Core operations ─────────────────────────────────────────
@@ -88,17 +134,17 @@ function _destroy(client) {
 async function testConnection(cfg) {
   const client = _createClient(cfg);
   try {
-    await _bind(client, cfg.bindDn, cfg.bindPassword);
-    const entries = await _search(client, cfg.baseDn, {
+    await client.bind(cfg.bindDn, cfg.bindPassword);
+    const { searchEntries } = await client.search(cfg.baseDn, {
       scope: 'sub',
       filter: cfg.userFilter || '(objectClass=person)',
       attributes: [cfg.uidAttr || 'uid'],
       sizeLimit: 1,
       timeLimit: 5,
     });
-    return { ok: true, usersFound: entries.length };
+    return { ok: true, usersFound: searchEntries.length };
   } finally {
-    _destroy(client);
+    await _destroy(client);
   }
 }
 
@@ -113,14 +159,14 @@ async function authenticate(username, password) {
   const client = _createClient(cfg);
   try {
     // Step 1: Bind with service account to find the user DN
-    await _bind(client, cfg.bindDn, cfg.bindPassword);
+    await client.bind(cfg.bindDn, cfg.bindPassword);
 
     const uidAttr = cfg.uidAttr || 'uid';
     const filter = cfg.userFilter
-      ? `(&${cfg.userFilter}(${uidAttr}=${ldap.escapeFilter(username)}))`
-      : `(${uidAttr}=${ldap.escapeFilter(username)})`;
+      ? `(&${cfg.userFilter}(${uidAttr}=${_escapeFilter(username)}))`
+      : `(${uidAttr}=${_escapeFilter(username)})`;
 
-    const entries = await _search(client, cfg.baseDn, {
+    const { searchEntries } = await client.search(cfg.baseDn, {
       scope: 'sub',
       filter,
       attributes: [uidAttr, 'mail', 'displayName', 'cn', 'memberOf'],
@@ -128,20 +174,20 @@ async function authenticate(username, password) {
       timeLimit: 5,
     });
 
-    if (!entries.length) {
+    if (!searchEntries.length) {
       log.warn(`LDAP: user "${username}" not found`);
       return null;
     }
 
-    const entry = entries[0];
+    const entry = _normalizeEntry(searchEntries[0]);
     const userDn = entry.dn;
 
     // Step 2: Bind as the user to verify password
     const userClient = _createClient(cfg);
     try {
-      await _bind(userClient, userDn, password);
+      await userClient.bind(userDn, password);
     } finally {
-      _destroy(userClient);
+      await _destroy(userClient);
     }
 
     // Step 3: Check group membership (if configured)
@@ -170,7 +216,7 @@ async function authenticate(username, password) {
       source: 'ldap',
     };
   } finally {
-    _destroy(client);
+    await _destroy(client);
   }
 }
 
@@ -180,23 +226,26 @@ async function authenticate(username, password) {
 async function listUsers(cfg, limit = 50) {
   const client = _createClient(cfg);
   try {
-    await _bind(client, cfg.bindDn, cfg.bindPassword);
+    await client.bind(cfg.bindDn, cfg.bindPassword);
     const uidAttr = cfg.uidAttr || 'uid';
-    const entries = await _search(client, cfg.baseDn, {
+    const { searchEntries } = await client.search(cfg.baseDn, {
       scope: 'sub',
       filter: cfg.userFilter || '(objectClass=person)',
       attributes: [uidAttr, 'mail', 'displayName', 'cn'],
       sizeLimit: limit,
       timeLimit: 10,
     });
-    return entries.map(e => ({
-      dn: e.dn,
-      username: [].concat(e[uidAttr] || [])[0] || e.cn,
-      email: [].concat(e.mail || [])[0] || '',
-      displayName: e.displayName || e.cn || '',
-    }));
+    return searchEntries.map(raw => {
+      const e = _normalizeEntry(raw);
+      return {
+        dn: e.dn,
+        username: [].concat(e[uidAttr] || [])[0] || e.cn,
+        email: [].concat(e.mail || [])[0] || '',
+        displayName: e.displayName || e.cn || '',
+      };
+    });
   } finally {
-    _destroy(client);
+    await _destroy(client);
   }
 }
 

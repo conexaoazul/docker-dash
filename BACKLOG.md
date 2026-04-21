@@ -10,19 +10,20 @@ This is the single source of truth for deferred work. Each item lists WHY it's d
 
 ### F16 — `ldapjs` replacement with `ldapts`
 
-**Why deferred:** `ldapjs` 3.x is flagged as decommissioned by upstream. `ldapts` is the modern replacement but has a different Promise-based API. A proper migration requires:
-- Rewriting `src/services/ldap.js` (~400 LOC) against the new API
-- Behavior testing matrix: OpenLDAP, Active Directory, 389DS (schema quirks, referrals, SASL, startTLS, TLS cert validation)
-- Compatibility testing against at least 3 real LDAP deployments
-- Integration test rewrite
+**Status (updated 2026-04-22):** ✅ Shipped in v6.13.0. `src/services/ldap.js` rewritten against `ldapts`'s Promise-based API; public interface preserved bit-for-bit so no caller changes needed. `ldapjs` and its 9 deprecated `@ldapjs/*` sub-packages fully removed. 740 tests passing (unchanged — no LDAP tests in repo; change statically verified).
 
-**Estimated effort:** 2-3 days.
-**Proposed approach:** stage as a feature branch `ldapts-migration`; test against a Dockerized OpenLDAP + AD (samba-ad-dc) fixture stack in CI; release as v6.7.
+**Remaining follow-up (manual staging tests before next enterprise rollout):**
+1. OpenLDAP simple bind + search with `userFilter` containing nested `(&(...)(...))`
+2. Active Directory bind with quoted CN in DN (`CN="Last, First",OU=...`) — `strictDN: true` default in ldapts may reject what ldapjs accepted
+3. AD `memberOf` group-matching case-insensitive substring match
+4. LDAPS with self-signed cert + `tlsSkipVerify: true`
+5. LDAPS with valid CA + `tlsSkipVerify: false` (no accidental bypass)
+6. UTF-8 in username (e.g. `müller`)
+7. Username containing `*` / `(` / `)` / `\` (injection-escape path)
+8. Connection timeout on unreachable host (~5s)
+9. Empty search result handling
 
-**Current risk mitigation:**
-- Existing `ldapjs` is not known to have an unpatched CVE (as of 2026-04-20)
-- User login failures fall back to local auth cleanly
-- No LDAP-specific security alerts in current staging
+**Enterprise LDAP users:** test on staging before updating production. Confidence is medium (code correct per docs, but unverified against a live server).
 
 ### F30 — Distributed rate limiter (Redis-backed)
 
@@ -75,11 +76,11 @@ All of the above = 3-5 days of infra work. Out of scope for a single-box product
 
 Available major upgrades, deliberately not taken:
 
-- **bcrypt 5 → 6** — native binding change. Needs rebuild against Node 24. No functional gain; defer.
-- **better-sqlite3 11 → 12** — new prepared-statement API, no breaking changes for our usage, but native binding rebuild. Low-priority opportunistic bump.
+- ~~**bcrypt 5 → 6**~~ — ✅ shipped in v6.7.1 (native deps refresh). Rebuilt against Node 24.
+- ~~**better-sqlite3 11 → 12**~~ — ✅ shipped in v6.7.1 (native deps refresh). Prepared-statement API stayed backward-compatible.
 - ~~**diff 5 → 9**~~ — ✅ shipped in v6.10.0. API for `createPatch` stayed compatible across v5→v9; no code change needed beyond `npm install` + overrides bump. All 10 compose-diff tests green.
 - **express 4 → 5** — async router rewrite. Middleware ordering changes. Test matrix would be large. Defer to a dedicated upgrade session (8-12h).
-- **node-cron 3 → 4** — new scheduler internals, API mostly compatible. Low-risk bump; do it opportunistically.
+- ~~**node-cron 3 → 4**~~ — ✅ shipped in v6.9.2. API for `schedule()` / `validate()` / `.stop()` stayed backward-compatible; no call-site changes.
 - **helmet 8 → 9** (if/when released) — tracked separately in security audit cycle.
 
 **Proposed approach:** bundle these into one "major-dep bump" session in v6.8+ with a full regression run, not sprinkle them into feature PRs.

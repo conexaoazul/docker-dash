@@ -1,6 +1,6 @@
 {
   "name": "docker-dash",
-  "version": "6.12.2",
+  "version": "6.13.0",
   "description": "Full-featured Docker management dashboard",
   "main": "src/server.js",
   "scripts": {
@@ -21,7 +21,7 @@
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
-    "ldapjs": "^3.0.7",
+    "ldapts": "^8.1.7",
     "node-cron": "^4.2.1",
     "nodemailer": "^8.0.5",
     "simple-git": "^3.36.0",

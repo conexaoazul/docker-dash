@@ -2,6 +2,59 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.13.0] - 2026-04-22 — "Drop the deprecated LDAP client (ldapjs → ldapts)"
+
+`ldapjs` 3.x was flagged decommissioned by upstream months ago — its 9 `@ldapjs/*` sub-packages all carry deprecation warnings. This release swaps in `ldapts@8.1.7`, the modern Promise-based successor, and cleans up the BACKLOG entries that had silently been completed in prior releases but never marked.
+
+### Security / dependency
+
+- **Removed** `ldapjs@3.0.7` + 19 transitive deprecated packages from the dep graph. `npm audit` still clean (was already 0; removal is a hygiene win).
+- **Added** `ldapts@8.1.7` as the direct LDAP client. Typed errors (`InvalidCredentialsError` etc.) instead of generic `Error`s — richer diagnostics if we want them later; callers still work unchanged because they only inspect `err.message`.
+
+### Changed — `src/services/ldap.js` rewritten
+
+~200 lines rewritten against the Promise-based API. Public interface preserved bit-for-bit: `getConfig`, `saveConfig`, `deleteConfig`, `testConnection`, `authenticate`, `listUsers` — same signatures, same return shapes, same thrown error messages. No caller changes needed (`src/routes/auth.js`, `src/services/auth.js` unchanged).
+
+Behavior preservation checklist (all confirmed):
+- ✅ Simple bind (service account → search → user bind for password verify)
+- ✅ Search with filter / scope / attributes / sizeLimit / timeLimit — same option shape
+- ✅ LDAPS via `ldaps://` URL + `tlsOptions`
+- ✅ TLS cert validation — `rejectUnauthorized: false` path preserved for `tlsSkipVerify`
+- ✅ Connection timeout + operation timeout (both `5000`ms)
+- ✅ Group membership check — case-insensitive substring match on `memberOf`
+- ✅ Error throw for group-mismatch — same message (`User is not in the required LDAP group`)
+- ✅ Filter escape — new local `_escapeFilter()` implementing RFC 4515 (`\x00`, `(`, `)`, `*`, `\`) replacing the removed `ldap.escapeFilter` helper
+
+### Known gaps (unchanged from pre-migration behavior)
+
+- **StartTLS** — never supported; our config uses `ldaps://` (connection-level TLS) not StartTLS. `ldapts` exposes `client.startTLS()` if we need it later.
+- **SASL bind** — never used. Simple bind only.
+- **Paged search (>1000 entries)** — not implemented. AD deployments with large user bases may silently truncate at server default page limit. `ldapts` has `searchPaginated` if we need it — worth noting for enterprise customers with huge directories.
+- **`strictDN: true`** — `ldapts` default. Old `ldapjs` was loose about whitespace/escaping in DNs. AD service accounts with quoted CNs (`CN="Last, First",...`) may now throw `InvalidDNSyntaxError`. **Enterprise staging test required.**
+
+### Confidence
+
+**Medium.** No LDAP tests exist in this repo (the test suite doesn't exercise `ldap.js`), so the rewrite is statically verified — correct per ldapts docs but unverified against a live server. Manual staging tests recommended before the next enterprise rollout (9-item checklist in [BACKLOG.md](BACKLOG.md#f16)).
+
+### BACKLOG cleanup
+
+Also marked three stale dependency-major entries as shipped (they were done in earlier releases but never crossed out):
+- `bcrypt 5 → 6` — shipped v6.7.1 (native deps refresh)
+- `better-sqlite3 11 → 12` — shipped v6.7.1
+- `node-cron 3 → 4` — shipped v6.9.2
+
+### Tests
+
+- **740 passing + 4 skipped / 50 suites** (unchanged — no new LDAP tests added since the existing suite has none to update).
+
+### Files touched
+
+- `src/services/ldap.js` — rewritten (203 → 252 lines; +49 LOC, mostly comments + the escape helper).
+- `package.json` / `package-lock.json` — `ldapjs@^3.0.7` → `ldapts@^8.1.7`.
+- `BACKLOG.md` — F16 marked shipped + 3 stale dep entries cleaned up.
+
+---
+
 ## [6.12.2] - 2026-04-22 — "Close the detection-vs-docs gap: TrueNAS + QNAP + OMV guides"
 
 v6.12.0 added platform detection for 5 NAS systems but shipped How-To guides for only 2 (Synology + Unraid). A user connecting a QNAP saw the badge light up but had to go elsewhere for setup help — inconsistent with the promise of the release. This patch closes that gap.

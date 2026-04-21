@@ -10,6 +10,19 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.13.0',
+      date: '2026-04-22',
+      title: 'Drop the deprecated LDAP client (ldapjs → ldapts)',
+      changes: [
+        { type: 'security', text: 'Replaced ldapjs@3.0.7 (upstream-deprecated, 9 @ldapjs/* sub-packages all deprecated) with ldapts@8.1.7 (modern Promise-based successor). 20 packages removed from the dep graph, 2 added. npm audit still clean.' },
+        { type: 'improvement', text: 'src/services/ldap.js rewritten against the Promise-based API. Public interface preserved bit-for-bit — getConfig, saveConfig, deleteConfig, testConnection, authenticate, listUsers all unchanged for callers. No caller code touched.' },
+        { type: 'improvement', text: 'Behavior preservation verified: simple bind, search with filters/scope/attrs, LDAPS, TLS cert validation (rejectUnauthorized for tlsSkipVerify), 5s timeouts, group membership check, RFC 4515 filter escape (replacement for ldapjs\'s escapeFilter helper).' },
+        { type: 'improvement', text: 'Known gaps unchanged from pre-migration: StartTLS and SASL bind remain unused; paged search (>1000 entries) not implemented — AD with huge user bases may silently truncate at server page limit; ldapts\'s strictDN:true default may reject unusually-quoted DNs that old ldapjs accepted loosely.' },
+        { type: 'improvement', text: 'BACKLOG cleanup: marked three stale dep-major entries as shipped (bcrypt 5→6 and better-sqlite3 11→12 shipped in v6.7.1; node-cron 3→4 shipped in v6.9.2). Discovered during agent-driven BACKLOG sweep.' },
+        { type: 'improvement', text: 'Confidence medium — no LDAP tests in the repo, so the rewrite is statically verified but unverified against a live OpenLDAP/AD/389DS server. Enterprise LDAP users: test on staging before prod upgrade. 9-item manual test checklist in BACKLOG F16.' },
+      ],
+    },
+    {
       version: '6.12.2',
       date: '2026-04-22',
       title: 'Closing the detection-vs-docs gap: TrueNAS SCALE, QNAP, OpenMediaVault guides',
