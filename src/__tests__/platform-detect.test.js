@@ -148,6 +148,140 @@ describe('edge cases', () => {
   });
 });
 
+// ─── Cloud DMI detection (v6.12.1) ──────────────
+
+describe('detectFromDmi — public cloud', () => {
+  const { detectFromDmi } = platformDetect;
+
+  it('recognizes AWS EC2', () => {
+    const r = detectFromDmi('Amazon EC2', 't3.micro');
+    expect(r.vendor).toBe('aws');
+    expect(r.label).toBe('AWS EC2');
+  });
+
+  it('recognizes GCE via sys_vendor', () => {
+    const r = detectFromDmi('Google', 'Google Compute Engine');
+    expect(r.vendor).toBe('gce');
+    expect(r.label).toBe('Google Cloud');
+  });
+
+  it('recognizes GCE via product_name when vendor is generic', () => {
+    const r = detectFromDmi('Google', 'Google Compute Engine');
+    expect(r.vendor).toBe('gce');
+  });
+
+  it('recognizes Azure', () => {
+    const r = detectFromDmi('Microsoft Corporation', 'Virtual Machine');
+    expect(r.vendor).toBe('azure');
+    expect(r.label).toBe('Azure VM');
+  });
+
+  it('distinguishes Azure from generic Microsoft (no Virtual Machine product)', () => {
+    const r = detectFromDmi('Microsoft Corporation', 'Surface Pro');
+    expect(r.vendor).not.toBe('azure');
+  });
+
+  it('recognizes DigitalOcean via vendor', () => {
+    const r = detectFromDmi('DigitalOcean', 'Droplet');
+    expect(r.vendor).toBe('do');
+  });
+
+  it('recognizes DigitalOcean via product when vendor is empty', () => {
+    const r = detectFromDmi('', 'Droplet');
+    expect(r.vendor).toBe('do');
+  });
+
+  it('recognizes Hetzner', () => {
+    const r = detectFromDmi('Hetzner', 'vServer');
+    expect(r.vendor).toBe('hetzner');
+  });
+
+  it('recognizes Linode', () => {
+    const r = detectFromDmi('Linode', '');
+    expect(r.vendor).toBe('linode');
+  });
+
+  it('recognizes Vultr', () => {
+    const r = detectFromDmi('Vultr', 'Cloud Compute');
+    expect(r.vendor).toBe('vultr');
+  });
+
+  it('recognizes Oracle Cloud', () => {
+    const r = detectFromDmi('Oracle Corporation', 'VM.Standard2.1');
+    expect(r.vendor).toBe('oci');
+  });
+
+  it('does NOT match VirtualBox as Oracle Cloud', () => {
+    const r = detectFromDmi('Oracle Corporation', 'VirtualBox');
+    expect(r.vendor).toBe('virtualbox');
+  });
+
+  it('recognizes Scaleway', () => {
+    const r = detectFromDmi('Scaleway', 'SCW-START1-XS');
+    expect(r.vendor).toBe('scaleway');
+  });
+});
+
+describe('detectFromDmi — virtualization', () => {
+  const { detectFromDmi } = platformDetect;
+
+  it('recognizes VMware', () => {
+    const r = detectFromDmi('VMware, Inc.', 'VMware Virtual Platform');
+    expect(r.vendor).toBe('vmware');
+  });
+
+  it('recognizes VirtualBox', () => {
+    const r = detectFromDmi('innotek GmbH', 'VirtualBox');
+    expect(r.vendor).toBe('virtualbox');
+  });
+
+  it('recognizes Xen (paravirt AWS-style)', () => {
+    const r = detectFromDmi('Xen', 'HVM domU');
+    expect(r.vendor).toBe('xen');
+  });
+
+  it('recognizes KVM/QEMU generic', () => {
+    const r = detectFromDmi('QEMU', 'Standard PC (i440FX + PIIX, 1996)');
+    expect(r.vendor).toBe('kvm');
+  });
+
+  it('recognizes Parallels', () => {
+    const r = detectFromDmi('Parallels International GmbH', 'Parallels Virtual Platform');
+    expect(r.vendor).toBe('parallels');
+  });
+});
+
+describe('detectFromDmi — bare metal / edge', () => {
+  const { detectFromDmi } = platformDetect;
+
+  it('returns baremetal with raw vendor for unrecognized sys_vendor', () => {
+    const r = detectFromDmi('Dell Inc.', 'PowerEdge R730');
+    expect(r.vendor).toBe('baremetal');
+    expect(r.label).toBe('Dell Inc.');
+    expect(r.raw.product_name).toBe('PowerEdge R730');
+  });
+
+  it('returns null when both fields are empty', () => {
+    expect(detectFromDmi('', '')).toBeNull();
+    expect(detectFromDmi(null, null)).toBeNull();
+    expect(detectFromDmi(undefined, undefined)).toBeNull();
+  });
+
+  it('trims whitespace from DMI strings', () => {
+    const r = detectFromDmi('  Amazon EC2\n', ' t3.small\n');
+    expect(r.vendor).toBe('aws');
+    expect(r.raw.sys_vendor).toBe('Amazon EC2');
+  });
+});
+
+describe('peekCloud cache semantics', () => {
+  beforeEach(() => platformDetect.invalidate());
+
+  it('returns undefined when not probed', () => {
+    expect(platformDetect.peekCloud(42)).toBeUndefined();
+  });
+});
+
 // ─── Cache behavior ─────────────────────────────
 
 describe('cache', () => {

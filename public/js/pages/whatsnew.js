@@ -10,6 +10,19 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.12.1',
+      date: '2026-04-22',
+      title: 'Cloud vendor badges via DMI — AWS, Azure, GCE, Hetzner, DO, VMware + more',
+      changes: [
+        { type: 'feature', text: 'Second platform pill on the Multi-Host card identifies the underlying cloud or hypervisor. Public cloud: AWS EC2, Google Cloud, Azure VM, DigitalOcean, Hetzner, Linode, Vultr, Oracle Cloud, Scaleway, OVHcloud. Virtualization: VMware, VirtualBox, KVM/QEMU, Xen, Parallels. Bare metal: shows motherboard vendor ("Dell Inc.", "ASUSTeK", etc.).' },
+        { type: 'feature', text: 'New detectFromDmi() pure function maps /sys/class/dmi/id/sys_vendor + /product_name → {vendor, label, iconClass, color}. Disambiguates tricky cases: Azure VM vs generic Microsoft product, Oracle Cloud vs Oracle VirtualBox. Trims whitespace, handles empty / null inputs.' },
+        { type: 'feature', text: 'probeCloudForHost(hostId) reads DMI via the existing remote-fs dispatcher — local fs read for the local host, SSH exec for remote hosts (reuses v6.8.0 tunnel). Degrades silently to null when DMI access is denied. Cached per-host; sentinel undefined-vs-null semantics prevent re-probe loops on permanently-unavailable hosts.' },
+        { type: 'feature', text: 'GET /api/hosts/:id/info now includes info.cloud alongside info.platform. First call kicks off the probe in the background (zero added latency); subsequent calls hit the cache.' },
+        { type: 'improvement', text: 'Tooltip on the cloud pill shows the raw DMI sys_vendor string so power users can confirm the match. CLOUD tag for public-cloud providers, VM tag for hypervisors, no tag for bare metal.' },
+        { type: 'improvement', text: 'Tests: 718 → 740 (+22 DMI parser tests). Closes the v6.12.0 follow-up called out in BACKLOG.' },
+      ],
+    },
+    {
       version: '6.12.0',
       date: '2026-04-22',
       title: 'Docker runs everywhere — platform auto-detection + NAS/cloud How-Tos',

@@ -1,11 +1,17 @@
 'use strict';
 
-// Platform detection — v6.12.0
+// Platform detection — v6.12.0 (OS) + v6.12.1 (cloud DMI)
 //
 // Infers the host's platform (Synology DSM, Unraid, TrueNAS SCALE, QNAP,
 // OpenMediaVault, or a generic Linux distro) from Docker's `info` response —
 // no SSH probes needed. The `OperatingSystem` / `Name` / `KernelVersion`
 // fields already carry enough signal for NAS identification.
+//
+// v6.12.1 adds OPTIONAL cloud-vendor detection via `/sys/class/dmi/id/`
+// (Amazon EC2, Google GCE, Azure, Hetzner, DigitalOcean, Linode, Vultr,
+// Oracle Cloud, VMware, VirtualBox, QEMU/KVM). Separate probe because DMI
+// isn't in `docker info` — requires one local fs read (local host) or one
+// SSH exec (remote host, reusing v6.8.0 tunnel).
 //
 // Returns a normalized `{platform, label, version, category, iconClass}`
 // object that the UI uses to render a branded badge next to the OS string.
@@ -14,13 +20,13 @@
 // cached via a small Map by hostId to skip the regex work.
 //
 // Known limitations:
-//   - Cloud-vendor detection (AWS / GCP / Azure / Hetzner / DO) requires DMI
-//     data which isn't in `docker info`. That's a v6.12.1 follow-up — runs
-//     SSH `cat /sys/class/dmi/id/sys_vendor` over the existing tunnel.
 //   - Synology DSM before 6.x isn't officially supported by Docker anymore.
 //   - QNAP QTS variants are numerous; we do a best-effort match on known markers.
+//   - DMI files may be restricted in some hardened containers; probe degrades
+//     silently to `null` in that case.
 
-const _cache = new Map();  // hostId → detected info
+const _cache = new Map();  // hostId → detected OS info
+const _cloudCache = new Map();  // hostId → detected cloud info (or null)
 
 /** Detect platform from a dockerInfo object (the `info` field returned by
  *  dockerService.getInfo). Returns null if nothing specific matched. */
@@ -165,12 +171,106 @@ function detectForHost(hostId, dockerInfo) {
 }
 
 function invalidate(hostId) {
-  if (hostId == null) _cache.clear();
-  else _cache.delete(hostId);
+  if (hostId == null) { _cache.clear(); _cloudCache.clear(); return; }
+  _cache.delete(hostId);
+  _cloudCache.delete(hostId);
 }
 
 function peek(hostId) {
   return _cache.get(hostId) || null;
+}
+
+// Returns cached cloud info, or `undefined` if not yet probed for this host.
+// A cached `null` means "probed but DMI unreadable" (different from "not probed").
+function peekCloud(hostId) {
+  return _cloudCache.has(hostId) ? _cloudCache.get(hostId) : undefined;
+}
+
+// ─── Cloud-vendor detection (v6.12.1) ─────────────
+//
+// DMI strings come from `/sys/class/dmi/id/sys_vendor` and `/product_name`.
+// Canonical signatures documented by each provider. Generic "QEMU" vendor
+// (common on OVH, Scaleway, Oracle's pre-2020 shapes, homelab Proxmox) is
+// mapped to "KVM" — we can't reliably distinguish them without more probes.
+
+const _CLOUD_SIGNATURES = [
+  // Public cloud
+  { match: v => /amazon\s*ec2/i.test(v.vendor), vendor: 'aws',        label: 'AWS EC2',          iconClass: 'fab fa-aws',             color: '#ff9900' },
+  { match: v => /google/i.test(v.vendor) || /google\s+compute/i.test(v.product), vendor: 'gce', label: 'Google Cloud', iconClass: 'fab fa-google', color: '#4285f4' },
+  { match: v => /microsoft/i.test(v.vendor) && /virtual\s+machine/i.test(v.product), vendor: 'azure', label: 'Azure VM', iconClass: 'fab fa-microsoft', color: '#0078d4' },
+  { match: v => /digitalocean/i.test(v.vendor) || /droplet/i.test(v.product), vendor: 'do', label: 'DigitalOcean', iconClass: 'fab fa-digital-ocean', color: '#0080ff' },
+  { match: v => /hetzner/i.test(v.vendor) || /hetzner/i.test(v.product), vendor: 'hetzner', label: 'Hetzner',       iconClass: 'fas fa-cloud',            color: '#d50c2d' },
+  { match: v => /linode/i.test(v.vendor) || /linode/i.test(v.product),   vendor: 'linode',  label: 'Linode',         iconClass: 'fas fa-cloud',            color: '#00a95c' },
+  { match: v => /vultr/i.test(v.vendor) || /vultr/i.test(v.product),     vendor: 'vultr',   label: 'Vultr',          iconClass: 'fas fa-cloud',            color: '#007bfc' },
+  { match: v => /oracle/i.test(v.vendor) && !/virtualbox/i.test(v.product), vendor: 'oci', label: 'Oracle Cloud',     iconClass: 'fas fa-cloud',            color: '#c74634' },
+  { match: v => /scaleway/i.test(v.vendor) || /scaleway/i.test(v.product), vendor: 'scaleway', label: 'Scaleway',     iconClass: 'fas fa-cloud',            color: '#4f0599' },
+  { match: v => /ovh/i.test(v.vendor) || /ovh/i.test(v.product),         vendor: 'ovh',     label: 'OVHcloud',       iconClass: 'fas fa-cloud',            color: '#123f6d' },
+
+  // Virtualization (on-prem / homelab)
+  { match: v => /vmware/i.test(v.vendor) || /vmware/i.test(v.product),   vendor: 'vmware',  label: 'VMware',         iconClass: 'fas fa-server',           color: '#607078' },
+  { match: v => /innotek|virtualbox/i.test(v.vendor) || /virtualbox/i.test(v.product), vendor: 'virtualbox', label: 'VirtualBox', iconClass: 'fas fa-box',  color: '#183a61' },
+  { match: v => /xen/i.test(v.vendor) || /hvm\s+domu/i.test(v.product),  vendor: 'xen',     label: 'Xen',            iconClass: 'fas fa-server',           color: '#eb8c1b' },
+  { match: v => /qemu/i.test(v.vendor),                                   vendor: 'kvm',     label: 'KVM/QEMU',       iconClass: 'fas fa-server',           color: '#e7442b' },
+  { match: v => /parallels/i.test(v.vendor),                              vendor: 'parallels', label: 'Parallels',    iconClass: 'fas fa-server',           color: '#dd0031' },
+];
+
+/** Pure function — takes raw DMI strings (sys_vendor + product_name) and
+ *  returns a normalized cloud info object, or null for bare-metal / unknown. */
+function detectFromDmi(sysVendor, productName) {
+  const v = {
+    vendor: String(sysVendor || '').trim(),
+    product: String(productName || '').trim(),
+  };
+  if (!v.vendor && !v.product) return null;
+
+  for (const sig of _CLOUD_SIGNATURES) {
+    if (sig.match(v)) {
+      return {
+        vendor: sig.vendor,
+        label: sig.label,
+        iconClass: sig.iconClass,
+        color: sig.color,
+        raw: { sys_vendor: v.vendor, product_name: v.product },
+      };
+    }
+  }
+  // Not recognized — return the raw vendor string as label so users can at
+  // least see what their motherboard says ("Dell Inc.", "ASUSTeK", etc.).
+  // Category "baremetal" distinguishes this from cloud in the UI.
+  return {
+    vendor: 'baremetal',
+    label: v.vendor || 'Bare metal',
+    iconClass: 'fas fa-microchip',
+    color: '#64748b',
+    raw: { sys_vendor: v.vendor, product_name: v.product },
+  };
+}
+
+/** Probe DMI files for hostId (0 = local, >0 = remote via SSH tunnel).
+ *  Returns a normalized cloud info object or null if probing failed.
+ *  Caches the result; call `invalidate(hostId)` to re-probe. */
+async function probeCloudForHost(hostId) {
+  if (_cloudCache.has(hostId)) return _cloudCache.get(hostId);
+
+  const remoteFs = require('./remote-fs');
+  let sysVendor = '';
+  let productName = '';
+
+  try {
+    if (await remoteFs.fileExists(hostId, '/sys/class/dmi/id/sys_vendor')) {
+      sysVendor = (await remoteFs.readFile(hostId, '/sys/class/dmi/id/sys_vendor')).trim();
+    }
+  } catch { /* proceed with empty vendor */ }
+
+  try {
+    if (await remoteFs.fileExists(hostId, '/sys/class/dmi/id/product_name')) {
+      productName = (await remoteFs.readFile(hostId, '/sys/class/dmi/id/product_name')).trim();
+    }
+  } catch { /* proceed with empty product */ }
+
+  const result = detectFromDmi(sysVendor, productName);
+  _cloudCache.set(hostId, result);
+  return result;
 }
 
 module.exports = {
@@ -178,5 +278,8 @@ module.exports = {
   detectForHost,
   invalidate,
   peek,
-  _internals: { _detectGenericLinux, _genericLinux },
+  peekCloud,
+  detectFromDmi,
+  probeCloudForHost,
+  _internals: { _detectGenericLinux, _genericLinux, _CLOUD_SIGNATURES },
 };

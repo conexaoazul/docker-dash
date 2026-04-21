@@ -2,6 +2,47 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.12.1] - 2026-04-22 — "Cloud vendor badges via DMI — the follow-up v6.12.0 promised"
+
+Second platform pill on the Multi-Host card: which cloud (or hypervisor) is this Docker daemon actually running on? AWS EC2, Google Cloud, Azure VM, DigitalOcean, Hetzner, Linode, Vultr, Oracle Cloud, Scaleway, OVHcloud — plus on-prem hypervisors (VMware, VirtualBox, KVM/QEMU, Xen, Parallels) and bare-metal motherboard vendors.
+
+**Why this release:** v6.12.0 called out the gap: `docker info` carries the OS but never says "AWS". The answer is in `/sys/class/dmi/id/sys_vendor` + `/product_name`, which require one local fs read (local host) or one SSH exec (remote host via the v6.8.0 tunnel). Both paths already existed — this release wires them up.
+
+### Added — Cloud DMI probe
+
+- **`detectFromDmi(sysVendor, productName)`** — pure function in `platform-detect.js`. Maps DMI strings to `{vendor, label, iconClass, color, raw}`. Covers:
+  - **Public cloud:** AWS, GCE, Azure, DigitalOcean, Hetzner, Linode, Vultr, Oracle Cloud, Scaleway, OVHcloud.
+  - **Virtualization:** VMware, VirtualBox, KVM/QEMU, Xen, Parallels.
+  - **Bare metal:** returns `{vendor: 'baremetal', label: <sys_vendor>}` so users see "Dell Inc." or "ASUSTeK" on unmanaged hardware instead of an empty badge.
+- **`probeCloudForHost(hostId)`** — async helper that reads `/sys/class/dmi/id/sys_vendor` + `/product_name` via the existing `remote-fs` dispatcher (local fs for hostId 0, SSH tunnel for remote hosts). Degrades silently to `null` if DMI access is denied (some hardened containers).
+- **Cache + sentinel semantics** — `peekCloud(hostId)` returns `undefined` if not yet probed, distinct from a cached `null` (probed but DMI unreadable). Prevents re-probe loops on hosts where DMI is permanently unavailable.
+
+### Changed — `GET /api/hosts/:id/info` enrichment
+
+- Returns `info.cloud` alongside `info.platform`. First call kicks off the probe in the background and returns `cloud: null`; subsequent calls pick up the cached result. Cost on first call: zero added latency. Cost on re-render: zero (cache hit).
+
+### Changed — Multi-Host card renders a second pill
+
+- Cloud pill appears next to the platform pill when detection succeeded. Examples:
+  - AWS EC2 (orange `fab fa-aws` icon) with `CLOUD` tag
+  - VMware (gray `fas fa-server` icon) with `VM` tag
+  - Dell Inc. (slate `fas fa-microchip` icon) with no tag — bare metal
+- Tooltip shows the raw DMI `sys_vendor` string so power users can confirm the match.
+
+### Tests
+
+- 22 new tests in `platform-detect.test.js` covering all cloud signatures, the Azure-vs-generic-Microsoft disambiguation, the Oracle-Cloud-vs-VirtualBox disambiguation, trim + empty-string edge cases, and the cache sentinel semantics.
+- **Total: 740 passing + 4 skipped / 50 suites** (was 718 — 22 new tests added).
+
+### Files touched
+
+- `src/services/platform-detect.js` — added `detectFromDmi`, `probeCloudForHost`, `peekCloud`, `_cloudCache`.
+- `src/__tests__/platform-detect.test.js` — +22 tests.
+- `src/routes/hosts.js` — `GET /:id/info` now includes `info.cloud` with background-probe pattern.
+- `public/js/pages/multihost.js` — second pill in `_renderHostCard`.
+
+---
+
 ## [6.12.0] - 2026-04-22 — "Docker runs everywhere — let's recognize it"
 
 Tier 1 NAS/cloud platform support: auto-detect the host's platform (Synology DSM, Unraid, TrueNAS SCALE, QNAP, OpenMediaVault, plus the major Linux distros) from Docker's `info` response and render a branded badge on the Multi-Host page. Ships with three bilingual How-To guides covering the most common deployment targets: Synology Container Manager, Unraid, and generic cloud VPS (Hetzner, DigitalOcean, AWS EC2, GCE, Azure, Linode, Vultr).

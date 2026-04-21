@@ -105,10 +105,20 @@ router.get('/:id/info', requireAuth, async (req, res) => {
     const info = await dockerService.getInfo(hostId);
     // v6.12.0: auto-detect platform (Synology DSM, Unraid, TrueNAS SCALE,
     // QNAP, OMV, or a generic Linux distro) from the docker info response.
+    const platformDetect = require('../services/platform-detect');
     try {
-      const platformDetect = require('../services/platform-detect');
       info.platform = platformDetect.detectForHost(hostId, info);
     } catch { /* best-effort, never fail the whole /info call over detection */ }
+    // v6.12.1: reuse cached cloud probe if we've already run it; otherwise
+    // kick it off in the background so the first /info call returns fast
+    // and subsequent calls pick up the vendor label.
+    const cachedCloud = platformDetect.peekCloud(hostId);
+    if (cachedCloud === undefined) {
+      info.cloud = null;
+      platformDetect.probeCloudForHost(hostId).catch(() => { /* cached as null on failure */ });
+    } else {
+      info.cloud = cachedCloud;
+    }
     res.json(info);
   } catch (err) {
     res.status(500).json({ error: err.message });
