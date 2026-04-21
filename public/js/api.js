@@ -421,6 +421,7 @@ const Api = {
   remediateListCodes() { return this.get('/remediate/findings/codes'); },
   remediatePlan(data) { return this.post('/remediate/plan', data); },
   remediateApply(data) { return this.post('/remediate/apply', data); },
+  remediateConfig() { return this.get('/remediate/config'); },
   remediateJob(jobId) { return this.get(`/remediate/job/${jobId}`); },
   remediateRollback(jobId) { return this.post(`/remediate/job/${jobId}/rollback`); },
   remediateListJobs(limit) { return this.get(`/remediate/jobs${limit ? '?limit=' + limit : ''}`); },

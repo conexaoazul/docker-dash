@@ -17,6 +17,73 @@ const remoteFs = require('./remote-fs');
 // WS publisher — injected at server boot via setWsBroadcaster().
 let _wsBroadcaster = null;
 function setWsBroadcaster(fn) { _wsBroadcaster = fn; }
+
+// v6.9.0: Snapshot cleanup. Remediation snapshots (gzipped inspect + compose
+// content) can grow to ~50-200KB each × thousands over time. Cleanup job
+// deletes pre_apply_snapshot + output from completed jobs older than the
+// retention window — row stays (for audit) but the heavy blob is freed.
+function pruneOldSnapshots({ retentionDays = null } = {}) {
+  const days = Math.max(1, Number(retentionDays ?? process.env.DD_REMEDIATION_SNAPSHOT_RETENTION_DAYS) || 7);
+  const result = getDb().prepare(`
+    UPDATE remediation_jobs
+    SET pre_apply_snapshot = NULL
+    WHERE pre_apply_snapshot IS NOT NULL
+      AND status IN ('success', 'failed', 'rolled_back')
+      AND (completed_at IS NOT NULL AND completed_at < datetime('now', '-' || ? || ' days'))
+  `).run(days);
+  if (result.changes > 0) {
+    log.info('Pruned remediation snapshots', { deletedBlobs: result.changes, retentionDays: days });
+  }
+  return { deletedBlobs: result.changes, retentionDays: days };
+}
+
+function getRollbackConfig() {
+  return {
+    rollbackSeconds: Math.min(3600, Math.max(30, Number(process.env.DD_REMEDIATION_ROLLBACK_SECONDS) || 60)),
+    snapshotRetentionDays: Math.max(1, Number(process.env.DD_REMEDIATION_SNAPSHOT_RETENTION_DAYS) || 7),
+  };
+}
+
+// v6.9.0: Notifications on apply success / failure / rollback. Fire-and-forget
+// — a broken Slack webhook should NEVER block a remediation. We require()
+// lazily so tests that don't exercise remediation don't load the full channel
+// provider list.
+function _notify(jobId, eventType, extra = {}) {
+  try {
+    const row = getDb().prepare(
+      'SELECT id, scope_type, scope_id, host_id, mode, error_class FROM remediation_jobs WHERE id = ?'
+    ).get(jobId);
+    if (!row) return;
+    const titles = {
+      remediate_success: 'Remediation succeeded',
+      remediate_failed: 'Remediation FAILED',
+      remediate_rolled_back: 'Remediation rolled back',
+      remediate_scheduled: 'Remediation scheduled',
+    };
+    const severity = eventType === 'remediate_failed' ? 'critical'
+      : eventType === 'remediate_rolled_back' ? 'warning'
+      : 'info';
+    const scope = `${row.scope_type}:${row.scope_id}${row.host_id ? ` @host${row.host_id}` : ''}`;
+    const parts = [
+      `Scope: ${scope}`,
+      `Mode: ${row.mode}`,
+      row.error_class ? `Error: ${row.error_class}` : null,
+      extra.scheduledAt ? `Scheduled for: ${extra.scheduledAt}` : null,
+    ].filter(Boolean);
+
+    // Require lazily — breaks a circular-require risk and keeps tests fast.
+    const channels = require('./notificationChannels');
+    channels.sendToAll({
+      title: `${titles[eventType] || eventType} (job #${jobId})`,
+      text: parts.join(' · '),
+      severity,
+      event: eventType,
+      embed: true,
+    }).catch((err) => log.debug('notification dispatch failed (non-fatal)', { jobId, eventType, error: err.message }));
+  } catch (err) {
+    log.debug('notification wiring failed (non-fatal)', { jobId, eventType, error: err.message });
+  }
+}
 function _publishJobUpdate(jobId) {
   if (!_wsBroadcaster) return;
   try {
@@ -199,35 +266,59 @@ async function plan({ containers, findings }) {
 
 /**
  * Create a remediation_jobs row + kick off async apply.
- * @param {object} args { plan, mode, userId, hostId, scope }
- * @returns {{jobId: number}}
+ *
+ * If `scheduledAt` is provided (ISO 8601 datetime), the job is persisted with
+ * status='scheduled' and remediation-scheduler picks it up when the time
+ * arrives. If omitted, status='pending' and the caller should invoke runJob.
+ *
+ * @param {object} args { plan, mode, userId, hostId, scope, scheduledAt? }
+ * @returns {{jobId: number, scheduled: boolean}}
  */
-function createJob({ plan, mode, userId, hostId, scope }) {
+function createJob({ plan, mode, userId, hostId, scope, scheduledAt }) {
   const db = getDb();
 
-  // Concurrency: refuse if another job is running for the same scope
+  // Concurrency: refuse if another job is running / scheduled for the same scope.
+  // 'scheduled' counts as in-progress for this check — we don't want two
+  // overlapping future jobs on one container.
   const existing = db.prepare(`
     SELECT id FROM remediation_jobs
-    WHERE status IN ('pending', 'running')
+    WHERE status IN ('pending', 'running', 'scheduled')
       AND scope_type = ?
       AND scope_id = ?
       AND host_id = ?
     LIMIT 1
   `).get(scope.type, scope.id, hostId || 0);
   if (existing) {
-    const err = new Error(`A remediation is already in progress for ${scope.type}:${scope.id} (job ${existing.id})`);
+    const err = new Error(`A remediation is already in progress or scheduled for ${scope.type}:${scope.id} (job ${existing.id})`);
     err.code = 'CONCURRENT_JOB';
     err.existingJobId = existing.id;
     throw err;
   }
 
+  // Validate scheduledAt if provided
+  let scheduledIso = null;
+  if (scheduledAt) {
+    const ts = new Date(scheduledAt);
+    if (Number.isNaN(ts.getTime())) throw new Error('scheduledAt must be a valid ISO datetime');
+    const nowMs = Date.now();
+    if (ts.getTime() < nowMs + 60_000) throw new Error('scheduledAt must be at least 60 seconds in the future');
+    if (ts.getTime() > nowMs + 30 * 24 * 3600_000) throw new Error('scheduledAt must be within 30 days');
+    // Normalize to SQLite-friendly UTC string
+    scheduledIso = ts.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+  }
+
+  const initialStatus = scheduledIso ? 'scheduled' : 'pending';
+
   const result = db.prepare(`
     INSERT INTO remediation_jobs
-      (mode, scope_type, scope_id, host_id, plan_json, status, created_by)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?)
-  `).run(mode, scope.type, String(scope.id), hostId || 0, JSON.stringify(plan), userId || null);
+      (mode, scope_type, scope_id, host_id, plan_json, status, created_by, scheduled_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(mode, scope.type, String(scope.id), hostId || 0, JSON.stringify(plan), initialStatus, userId || null, scheduledIso);
 
-  return { jobId: result.lastInsertRowid };
+  const jobId = result.lastInsertRowid;
+  if (scheduledIso) _notify(jobId, 'remediate_scheduled', { scheduledAt: scheduledIso });
+
+  return { jobId, scheduled: Boolean(scheduledIso), scheduledAt: scheduledIso };
 }
 
 /**
@@ -241,7 +332,9 @@ async function runJob(jobId) {
   const db = getDb();
   const job = db.prepare('SELECT * FROM remediation_jobs WHERE id = ?').get(jobId);
   if (!job) throw new Error(`Job ${jobId} not found`);
-  if (job.status !== 'pending') throw new Error(`Job ${jobId} is ${job.status}, not pending`);
+  if (job.status !== 'pending' && job.status !== 'scheduled') {
+    throw new Error(`Job ${jobId} is ${job.status}, not pending or scheduled`);
+  }
 
   const plan = JSON.parse(job.plan_json);
 
@@ -269,6 +362,7 @@ async function runJob(jobId) {
       WHERE id=?
     `).run(_classifyError(e), (db.prepare('SELECT output FROM remediation_jobs WHERE id=?').get(jobId).output || '') + '\n[ERROR] ' + e.message, jobId);
     _publishJobUpdate(jobId);
+    _notify(jobId, 'remediate_failed');
   }
 }
 
@@ -379,25 +473,30 @@ async function _applyLocal(jobId, plan) {
           .run(_classifyError(e), jobId);
         appendLog(`✓ Rollback complete`);
         _publishJobUpdate(jobId);
+        _notify(jobId, 'remediate_rolled_back');
       } catch (rollbackErr) {
         db.prepare(`UPDATE remediation_jobs SET status='failed', error_class='rollback', output=?, completed_at=datetime('now') WHERE id=?`)
           .run(output.join('\n') + '\n[ROLLBACK FAILED] ' + rollbackErr.message, jobId);
         appendLog(`✗ ROLLBACK FAILED — manual intervention required`);
         _publishJobUpdate(jobId);
+        _notify(jobId, 'remediate_failed');
       }
       throw e;
     }
   }
 
+  // v6.9.0: rollback window configurable via env (default 60s). Range [30, 3600].
+  const rollbackSeconds = Math.min(3600, Math.max(30, Number(process.env.DD_REMEDIATION_ROLLBACK_SECONDS) || 60));
   db.prepare(`
     UPDATE remediation_jobs
     SET status='success', completed_at=datetime('now'),
-        rollback_deadline=datetime('now', '+60 seconds')
+        rollback_deadline=datetime('now', '+' || ? || ' seconds')
     WHERE id=?
-  `).run(jobId);
-  appendLog(`✓ Job complete. Rollback available for 60 seconds.`);
+  `).run(rollbackSeconds, jobId);
+  appendLog(`✓ Job complete. Rollback available for ${rollbackSeconds} seconds.`);
   _publishJobUpdate(jobId);
-  log.info('Remediation job succeeded', { jobId });
+  _notify(jobId, 'remediate_success');
+  log.info('Remediation job succeeded', { jobId, rollbackSeconds });
 }
 
 // ─── Manual rollback (called from route) ───────────────
@@ -431,12 +530,14 @@ async function executeRollback(jobId) {
     db.prepare(`UPDATE remediation_jobs SET status='rolled_back', completed_at=datetime('now') WHERE id=?`).run(jobId);
     appendLog(`✓ Rollback complete`);
     _publishJobUpdate(jobId);
+    _notify(jobId, 'remediate_rolled_back');
     log.info('Manual rollback succeeded', { jobId });
     return { ok: true };
   } catch (e) {
     db.prepare(`UPDATE remediation_jobs SET status='failed', error_class='rollback' WHERE id=?`).run(jobId);
     appendLog(`✗ Rollback failed: ${e.message}`);
     _publishJobUpdate(jobId);
+    _notify(jobId, 'remediate_failed');
     throw e;
   }
 }
@@ -547,6 +648,7 @@ async function _openPr(jobId, plan) {
       WHERE id=?
     `).run(branchName, prUrl, jobId);
     _publishJobUpdate(jobId);
+    _notify(jobId, 'remediate_success');
 
     log.info('Git-PR remediation pushed', { jobId, branchName, prUrl });
   } finally {
@@ -613,6 +715,8 @@ module.exports = {
   createJob,
   runJob,
   executeRollback,
+  pruneOldSnapshots,
+  getRollbackConfig,
   setWsBroadcaster,
   _classifyError,
   mergePatch,

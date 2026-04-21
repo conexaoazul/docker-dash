@@ -110,6 +110,18 @@ function purgeAllOldData() {
   // Expired sessions
   try { authService.cleanSessions(); } catch (e) { log.error('Session cleanup failed', e.message); }
 
+  // v6.9.0: Remediation snapshot cleanup (free large gzipped inspect blobs
+  // from long-completed jobs). Retention via DD_REMEDIATION_SNAPSHOT_RETENTION_DAYS.
+  try {
+    const r = require('../services/remediate').pruneOldSnapshots();
+    if (r.deletedBlobs > 0) deleted.remediation_snapshots = r.deletedBlobs;
+  } catch (e) { log.error('Remediation snapshot cleanup failed', e.message); }
+
+  // v6.9.0: Egress Filter block log retention (already implemented in service).
+  try {
+    require('../services/egress-filter').pruneOldBlockLog();
+  } catch { /* service may not be loaded in some test configs */ }
+
   if (Object.keys(deleted).length > 0) {
     log.info('Purge completed', deleted);
   }

@@ -289,9 +289,17 @@ async function start() {
   acmeWatcher.start();
 
   // Remediation Wizard — per-job WS progress
-  require('./services/remediate').setWsBroadcaster(
+  const remediateService = require('./services/remediate');
+  remediateService.setWsBroadcaster(
     (channel, data) => wsServer.broadcast('remediate:job:update', data, channel)
   );
+
+  // Remediation Scheduler (v6.9.0): promotes scheduled jobs when their
+  // scheduled_at arrives. Wired AFTER remediate so we can inject the runner
+  // without a circular require.
+  const remediationScheduler = require('./services/remediation-scheduler');
+  remediationScheduler.setRunner((jobId) => remediateService.runJob(jobId));
+  remediationScheduler.start();
 
   // Egress Filter block-log ingester (v6.7.0-rc1): tails the sidecar's
   // deny log and inserts new entries into egress_block_log every 30s.

@@ -27,6 +27,17 @@ router.get('/findings/codes', requireAuth, requireRole('admin', 'operator'), (re
   }
 });
 
+// GET /config — runtime config (v6.9.0: rollback window + snapshot retention)
+// so the UI can display actual values instead of hard-coding "60 seconds"
+router.get('/config', requireAuth, requireRole('admin', 'operator'), (req, res) => {
+  try {
+    res.json(remediate.getRollbackConfig());
+  } catch (err) {
+    log.error('get config', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ─── Plan ──────────────────────────────────────────────
 
 // POST /plan — build a remediation plan
@@ -80,7 +91,7 @@ router.post('/plan', requireAuth, requireRole('admin'), async (req, res) => {
 // POST /apply — create a job from a plan and execute async
 router.post('/apply', requireAuth, requireRole('admin'), writeable, async (req, res) => {
   try {
-    const { plan, mode, scope } = req.body || {};
+    const { plan, mode, scope, scheduledAt } = req.body || {};
     if (!plan || !Array.isArray(plan.steps)) return res.status(400).json({ error: 'plan with steps array required' });
     if (!['apply-local', 'pr', 'artifact'].includes(mode)) {
       return res.status(400).json({ error: `Invalid mode: ${mode}` });
@@ -95,25 +106,32 @@ router.post('/apply', requireAuth, requireRole('admin'), writeable, async (req, 
         plan, mode, userId: req.user.id,
         hostId: scope.hostId || 0,
         scope: { type: scope.type, id: scope.id || scope.name },
+        scheduledAt: scheduledAt || null,
       });
     } catch (e) {
       if (e.code === 'CONCURRENT_JOB') {
         return res.status(409).json({ error: e.message, existingJobId: e.existingJobId });
       }
+      if (/scheduledAt/i.test(e.message)) {
+        return res.status(400).json({ error: e.message });
+      }
       throw e;
     }
 
-    // Kick off async — don't await
-    remediate.runJob(job.jobId).catch(err => log.error('async run failed', { jobId: job.jobId, error: err.message }));
+    // Kick off async ONLY if not scheduled — scheduler picks it up later
+    if (!job.scheduled) {
+      remediate.runJob(job.jobId).catch(err => log.error('async run failed', { jobId: job.jobId, error: err.message }));
+    }
 
     auditService.log({
       userId: req.user.id, username: req.user.username,
-      action: 'remediate_apply_start', targetType: scope.type, targetId: String(scope.id || scope.name),
-      details: { jobId: job.jobId, mode, planId: plan.planId, stepsCount: plan.steps.length },
+      action: job.scheduled ? 'remediate_scheduled' : 'remediate_apply_start',
+      targetType: scope.type, targetId: String(scope.id || scope.name),
+      details: { jobId: job.jobId, mode, planId: plan.planId, stepsCount: plan.steps.length, scheduledAt: job.scheduledAt || null },
       ip: getClientIp(req),
     });
 
-    res.status(202).json({ jobId: job.jobId });
+    res.status(202).json({ jobId: job.jobId, scheduled: job.scheduled, scheduledAt: job.scheduledAt || null });
   } catch (err) {
     log.error('apply', err);
     res.status(500).json({ error: 'Internal server error' });

@@ -2,6 +2,60 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.9.0] - 2026-04-21 — "Remediation Wizard polish — scheduled, notified, configurable"
+
+Three polish features that round out the Remediation Wizard's story. Nothing revolutionary, but each closes a real gap called out in BACKLOG.
+
+### Added — Scheduled remediation (apply at a specific time)
+
+- Step 3 of the Remediation Wizard gains a **Schedule for later** checkbox + `datetime-local` picker. Set a time, click Execute — the job is persisted with `status='scheduled'` and the background scheduler picks it up when the time arrives.
+- Migration `056_remediation_scheduling.js` — adds `scheduled_at` column + partial index on scheduled rows for cheap polling.
+- New `src/services/remediation-scheduler.js` — polls every 60s (`DD_REMEDIATION_SCHEDULER_POLL_MS` to override), promotes jobs from `scheduled` to `pending` in `ORDER BY scheduled_at ASC` then kicks off the runner. Concurrency-safe via atomic `WHERE status='scheduled'` update guard.
+- `createJob` rejects `scheduledAt` values within the next 60 seconds (too-soon) or beyond 30 days (too-far). Concurrency check expanded to refuse a second scheduled job on the same scope.
+- Audit log event: `remediate_scheduled` (separate from `remediate_apply_start` so downstream dashboards can differentiate).
+- **Not** for `artifact` mode (download patch has no async job to schedule) — UI disables the checkbox in that mode.
+
+### Added — Notifications on remediation events
+
+- Every lifecycle transition now dispatches through the existing `notificationChannels.sendToAll` (Discord / Slack / Telegram / ntfy / Gotify / email / webhook — 7 providers):
+  - `remediate_scheduled` (info) — when a future job is created
+  - `remediate_success` (info) — after apply-local or git-PR mode completes
+  - `remediate_failed` (critical) — apply failure with `error_class`
+  - `remediate_rolled_back` (warning) — auto-rollback or manual rollback
+- Fire-and-forget: a broken Slack webhook will never block an apply. All dispatch failures log at debug level.
+- No new notification channel types — reuses the v6-era channel configuration UI under System → Notifications.
+
+### Added — Rollback UX improvements
+
+- **Configurable rollback window** via `DD_REMEDIATION_ROLLBACK_SECONDS` env (default 60, clamped to [30, 3600]). Replaces the hardcoded 60s in the SQL `UPDATE rollback_deadline=datetime('now', '+60 seconds')` pattern.
+- **Snapshot cleanup job** — the daily purge tick now calls `remediate.pruneOldSnapshots()` which nulls out `pre_apply_snapshot` (gzipped inspect blobs, ~50-200 KB each) for completed jobs older than `DD_REMEDIATION_SNAPSHOT_RETENTION_DAYS` (default 7). Row stays for audit; only the heavy blob is freed.
+- **`GET /api/remediate/config`** endpoint — UI can display actual configured window instead of hard-coding "60 seconds" in user-facing copy.
+
+### Incidental improvements shipped with v6.9.0
+
+- Daily purge tick also now calls `egressFilter.pruneOldBlockLog()` (already implemented in v6.7 but wasn't wired to the scheduled job).
+- `runJob` precondition relaxed: accepts both `pending` and `scheduled` status (the scheduler promotes before invoking).
+
+### Tests
+
+- `remediation-scheduler.test.js` — 6 tests: promote-due, skip-future, ignore-non-scheduled-status, runner-missing fail-safe, runner-error tolerated, ORDER BY scheduled_at ASC.
+- **Total: 670 passing / 45 suites** (+6).
+
+### Operator notes
+
+To opt into the scheduler you don't need to do anything — it starts with Docker Dash on every v6.9.0+ boot. Scheduled jobs that survive a restart are promoted on the next tick.
+
+To tune retention + rollback window:
+
+```
+# .env
+DD_REMEDIATION_ROLLBACK_SECONDS=300            # 5 min rollback window (default 60)
+DD_REMEDIATION_SNAPSHOT_RETENTION_DAYS=30      # keep snapshots for audit (default 7)
+DD_REMEDIATION_SCHEDULER_POLL_MS=30000         # check every 30s instead of 60s
+```
+
+---
+
 ## [6.8.0] - 2026-04-20 — "Multi-host SSH exec — Remediation Wizard Apply on remote hosts"
 
 Closes a long-standing gap: the Remediation Wizard's **Apply (local)** mode was restricted to the local Docker host. Remote hosts could only use Git-PR or artifact modes. v6.8.0 extends the SSH tunnel with `exec` + SFTP-based file operations, so Apply mode now works transparently on any SSH-connected host.

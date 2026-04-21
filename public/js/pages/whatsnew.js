@@ -10,6 +10,21 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.9.0',
+      date: '2026-04-21',
+      title: 'Remediation Wizard polish — scheduled, notified, configurable',
+      changes: [
+        { type: 'feature', text: 'Scheduled remediation. Step 3 of the Remediation Wizard gains a "Schedule for later" checkbox + datetime picker. Set a time, click Execute — the job persists with status=scheduled, and a background scheduler (polls every 60s) picks it up when the time arrives. Rejects scheduledAt values within 60s (too-soon) or beyond 30 days (too-far). Concurrency-safe via atomic WHERE status=scheduled guard. Works for apply-local + git-PR modes (not artifact — no async job to schedule).' },
+        { type: 'feature', text: 'Notifications on every remediation lifecycle event. Reuses the existing notification channels infra (7 providers: Discord/Slack/Telegram/ntfy/Gotify/email/webhook): remediate_scheduled (info), remediate_success (info), remediate_failed (critical), remediate_rolled_back (warning). Fire-and-forget — a broken webhook never blocks an apply.' },
+        { type: 'feature', text: 'Configurable rollback window via DD_REMEDIATION_ROLLBACK_SECONDS (default 60, range [30, 3600]). Replaces the hardcoded 60s deadline. Useful for teams that want a longer "are we sure?" buffer on production rollouts.' },
+        { type: 'feature', text: 'Snapshot cleanup job — daily purge tick now nulls out pre_apply_snapshot blobs (gzipped inspect, ~50-200KB each) for completed jobs older than DD_REMEDIATION_SNAPSHOT_RETENTION_DAYS (default 7). Row stays for audit; only the heavy blob is freed.' },
+        { type: 'feature', text: 'GET /api/remediate/config — UI can now read the actual rollback window + retention days instead of hard-coding "60 seconds" in user-facing copy.' },
+        { type: 'improvement', text: 'Daily purge tick also cleans up egress_block_log entries (implementation was already there from v6.7, just wasn\'t wired to the job).' },
+        { type: 'improvement', text: 'Migration 056: adds scheduled_at column + partial index on scheduled rows for cheap polling.' },
+        { type: 'improvement', text: 'Tests: 664 → 670 (+6). remediation-scheduler.test.js covers promote-due, skip-future, ignore-non-scheduled, runner-missing fail-safe, runner-error tolerance, ORDER BY scheduled_at ASC.' },
+      ],
+    },
+    {
       version: '6.8.0',
       date: '2026-04-20',
       title: 'Multi-host SSH exec — Remediation Wizard Apply mode works on remote hosts',

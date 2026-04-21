@@ -24,6 +24,7 @@ const RemediateWizard = {
       selectedCodes: new Set(findings || []),
       plan: null,            // result of /plan
       mode: 'apply-local',
+      scheduledAt: null,     // v6.9.0: ISO datetime for future-dated jobs
       jobId: null,
       jobStatus: null,
       jobOutput: '',
@@ -221,8 +222,28 @@ const RemediateWizard = {
         + '<input type="radio" name="rem-mode" value="artifact"' + (state.mode === 'artifact' ? ' checked' : '') + '>'
         + '<div><strong><i class="fas fa-download" style="color:var(--text-dim)"></i> Download patch</strong>'
         + '<div class="text-sm text-muted">Export unified diff + shell script. Apply manually later (escape hatch for offline use).</div></div></label>'
-        + '</div>';
+        + '</div>'
+        // v6.9.0: Optional schedule-for-later. Disabled for artifact mode (no job to schedule).
+        + '<div style="margin-top:14px;padding:10px;border:1px dashed var(--border);border-radius:6px">'
+        + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer"'
+        + (state.mode === 'artifact' ? ' style="opacity:0.5;pointer-events:none"' : '') + '>'
+        + '<input type="checkbox" id="rem-schedule-on"' + (state.scheduledAt ? ' checked' : '')
+        + (state.mode === 'artifact' ? ' disabled' : '') + '>'
+        + '<strong><i class="fas fa-clock" style="margin-right:4px"></i>Schedule for later</strong>'
+        + '</label>'
+        + '<div id="rem-schedule-picker" style="margin-top:8px;display:' + (state.scheduledAt ? 'block' : 'none') + '">'
+        + '<input type="datetime-local" id="rem-schedule-at" value="' + (state.scheduledAt || '') + '" min="' + _minScheduleLocal() + '" '
+        + 'style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);width:260px">'
+        + '<div class="text-sm text-muted" style="margin-top:4px">The job will sit in <code>scheduled</code> state until this time. Scheduler picks up every 60s.</div>'
+        + '</div></div>';
     };
+
+    // Helper: min attribute for datetime-local (now + 2min, local timezone)
+    function _minScheduleLocal() {
+      const d = new Date(Date.now() + 2 * 60_000);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
 
     // ─── Main render loop ─────────────────────────
     const render = async () => {
@@ -291,8 +312,25 @@ const RemediateWizard = {
       // Step 3 handlers
       if (state.step === 3) {
         mc.querySelectorAll('input[name="rem-mode"]').forEach(r => r.addEventListener('change', (e) => {
-          state.mode = e.target.value; render();
+          state.mode = e.target.value;
+          // Artifact mode has no server-side job, so schedule doesn't apply
+          if (state.mode === 'artifact') state.scheduledAt = null;
+          render();
         }));
+        mc.querySelector('#rem-schedule-on')?.addEventListener('change', (e) => {
+          if (e.target.checked) {
+            // Default to now + 15 minutes (local time)
+            const d = new Date(Date.now() + 15 * 60_000);
+            const pad = (n) => String(n).padStart(2, '0');
+            state.scheduledAt = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          } else {
+            state.scheduledAt = null;
+          }
+          render();
+        });
+        mc.querySelector('#rem-schedule-at')?.addEventListener('change', (e) => {
+          state.scheduledAt = e.target.value || null;
+        });
         mc.querySelector('#rem-rollback')?.addEventListener('click', async () => {
           if (!confirm('Rollback job #' + state.jobId + '? This will restore pre-apply container state and may cause a brief outage.')) return;
           try {
@@ -325,11 +363,30 @@ const RemediateWizard = {
             Toast.success('Patch downloaded');
             return;
           }
-          const res = await Api.remediateApply({ plan: state.plan, mode: state.mode, scope: state.scope });
+          // Convert datetime-local to ISO if scheduled; backend expects UTC.
+          let scheduledIso = null;
+          if (state.scheduledAt) {
+            const d = new Date(state.scheduledAt);
+            if (Number.isNaN(d.getTime())) { Toast.warning('Invalid schedule datetime'); return; }
+            scheduledIso = d.toISOString();
+          }
+          const res = await Api.remediateApply({
+            plan: state.plan,
+            mode: state.mode,
+            scope: state.scope,
+            scheduledAt: scheduledIso,
+          });
           state.jobId = res.jobId;
-          state.jobStatus = 'pending';
-          render();
-          _startPoll();
+          if (res.scheduled) {
+            state.jobStatus = 'scheduled';
+            Toast.success(`Scheduled for ${new Date(res.scheduledAt + 'Z').toLocaleString()}`);
+            render();
+            // No polling for scheduled jobs — user can close the modal.
+          } else {
+            state.jobStatus = 'pending';
+            render();
+            _startPoll();
+          }
         } catch (err) { Toast.error(err.message); }
       });
     };
