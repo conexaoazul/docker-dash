@@ -160,6 +160,7 @@ const SecurityPage = {
                   <td>
                     <div class="action-btns">
                       <button class="action-btn" data-action="view-scan" data-scan-id="${scan.id}" title="View Details"><i class="fas fa-eye"></i></button>
+                      <button class="action-btn" data-action="image-containers" data-image="${eName}" title="Containers using this image — remediate per container" style="color:#a78bfa"><i class="fas fa-tools"></i></button>
                       <button class="action-btn scan-menu-trigger" data-image="${eName}" title="Re-scan"><i class="fas fa-sync-alt"></i></button>
                     </div>
                   </td>
@@ -278,6 +279,14 @@ Please:
       btn.addEventListener('click', () => this._viewScanDetail(parseInt(btn.dataset.scanId)));
     });
 
+    // v6.9.4: Containers using this image — drill-down to per-container remediation
+    el.querySelectorAll('[data-action="image-containers"]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._showImageContainersModal(btn.dataset.image);
+      });
+    });
+
     // Scan menu dropdowns
     el.querySelectorAll('.scan-menu-trigger').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -285,6 +294,95 @@ Please:
         this._showScanDropdown(e, btn.dataset.image);
       });
     });
+  },
+
+  // v6.9.4: Bridges the image-focused Security page with the container-focused
+  // Remediation Wizard. Shows which running containers are using the image,
+  // lets the operator open RemediateWizard for each. Closes the BACKLOG
+  // deferral from v6.6.3.
+  async _showImageContainersModal(imageName) {
+    Modal.open(`
+      <div class="modal-header">
+        <h3><i class="fas fa-tools" style="color:#a78bfa;margin-right:10px"></i>
+          Containers using <span style="color:var(--accent);font-family:var(--mono);font-size:14px">${Utils.escapeHtml(imageName)}</span>
+        </h3>
+        <button class="modal-close-btn" id="modal-x"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" id="img-containers-body">
+        <div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Loading containers…</div>
+      </div>
+      <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" id="modal-ok">Close</button>
+      </div>
+    `, { width: '720px' });
+
+    const mc = Modal._content;
+    mc.querySelector('#modal-x').addEventListener('click', () => Modal.close());
+    mc.querySelector('#modal-ok').addEventListener('click', () => Modal.close());
+    const body = mc.querySelector('#img-containers-body');
+
+    try {
+      // listContainers returns summary rows; the `image` field is the tag the
+      // container was created with. Match exact image name first; if image was
+      // renamed/retagged, nothing matches (expected — tell user).
+      const containers = await Api.listContainers();
+      // Match by exact image OR by image ID prefix (12-char) if the tag resolves
+      const matches = (containers || []).filter(c => {
+        if (c.image === imageName) return true;
+        // Sometimes `image` is a digest form — unusual. Skip these.
+        return false;
+      });
+      const running = matches.filter(c => c.state === 'running');
+      const other = matches.filter(c => c.state !== 'running');
+
+      if (matches.length === 0) {
+        body.innerHTML = `
+          <div class="empty-msg">
+            <i class="fas fa-info-circle"></i>
+            <p>No running containers are using <code>${Utils.escapeHtml(imageName)}</code>.</p>
+            <p class="text-muted text-sm">The image's vulnerabilities only matter once it's in production. Start a container from this image, then come back.</p>
+          </div>`;
+        return;
+      }
+
+      const row = (c, dim) => `
+        <tr style="border-bottom:1px solid var(--surface2);${dim ? 'opacity:0.6' : ''}">
+          <td style="padding:8px"><strong>${Utils.escapeHtml(c.name)}</strong>${c.stack ? `<div style="font-size:10px;color:var(--text-dim)">${Utils.escapeHtml(c.stack)}${c.service ? ' / ' + Utils.escapeHtml(c.service) : ''}</div>` : ''}</td>
+          <td style="padding:8px;font-family:var(--mono);font-size:11px">${Utils.escapeHtml((c.id || '').slice(0, 12))}</td>
+          <td style="padding:8px"><span class="badge ${c.state === 'running' ? 'badge-running' : 'badge-stopped'}" style="font-size:10px">${Utils.escapeHtml(c.state || '')}</span></td>
+          <td style="padding:8px;text-align:right">
+            ${c.state === 'running' ? `<button class="btn btn-xs btn-primary img-remediate-btn" data-cid="${Utils.escapeHtml(c.id)}" data-cname="${Utils.escapeHtml(c.name)}" title="Open Remediation Wizard"><i class="fas fa-tools" style="margin-right:4px"></i>Fix</button>` : '<span class="text-muted text-sm">stopped</span>'}
+          </td>
+        </tr>`;
+
+      body.innerHTML = `
+        <div style="margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <span class="text-muted text-sm"><i class="fas fa-box" style="margin-right:5px"></i>${running.length} running${other.length > 0 ? ` · ${other.length} stopped (not remediable until started)` : ''}</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:var(--bg-dim);border-bottom:1px solid var(--border)">
+            <th style="padding:8px;text-align:left">Container</th>
+            <th style="padding:8px;text-align:left;width:120px">ID</th>
+            <th style="padding:8px;text-align:left;width:90px">State</th>
+            <th style="padding:8px;text-align:right;width:90px"></th>
+          </tr></thead>
+          <tbody>
+            ${running.map(c => row(c, false)).join('')}
+            ${other.map(c => row(c, true)).join('')}
+          </tbody>
+        </table>
+        <div class="text-muted text-sm" style="margin-top:10px"><i class="fas fa-info-circle" style="margin-right:5px"></i>Fix opens the Remediation Wizard scoped to the chosen container — pick hardening fixes + apply or generate Git PR.</div>`;
+
+      body.querySelectorAll('.img-remediate-btn').forEach(b => b.addEventListener('click', () => {
+        if (typeof RemediateWizard === 'undefined') { Toast.error('Remediation Wizard not loaded'); return; }
+        Modal.close();
+        RemediateWizard.open({
+          scope: { type: 'container', id: b.dataset.cid, hostId: Api.getHostId(), displayName: b.dataset.cname },
+        });
+      }));
+    } catch (err) {
+      body.innerHTML = `<div class="empty-msg" style="color:var(--red)">Failed to load containers: ${Utils.escapeHtml(err.message)}</div>`;
+    }
   },
 
   _showScanDropdown(event, imageName) {

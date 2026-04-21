@@ -59,9 +59,7 @@ All of the above = 3-5 days of infra work. Out of scope for a single-box product
 
 ### Remediation Wizard: entry points on security.js / stacks.js / cis.js
 
-**Status (updated 2026-04-20):** ✅ Shipped in v6.6.3 for CIS + stacks. `security.js` intentionally skipped — that page is image-focused, not container-focused, and the Remediation Wizard operates on containers/stacks. A proper integration needs a separate "containers using this image" modal that lists running instances with per-container Fix buttons; that's a design change, not a mechanical edit.
-
-**Still deferred:** `security.js` image-page integration. Design decision needed: either (a) add a modal listing running containers per image with Fix buttons, or (b) move the entry point to the Trivy/Grype scan-detail view once that has per-container context. Either way, ~3-4 hours of UI work — not mechanical. Candidate for v6.7+.
+**Status (updated 2026-04-21):** ✅ Fully shipped. v6.6.3 added CIS + stacks entry points. v6.9.4 closes the `security.js` gap with "Containers using this image" drill-down modal — click the wrench icon on any image scan row → lists running containers using that image → Fix button opens RemediateWizard scoped to container.
 
 ### i18n: 25% of keys missing in non-EN locales
 

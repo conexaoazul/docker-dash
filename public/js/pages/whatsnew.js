@@ -10,6 +10,18 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.9.4',
+      date: '2026-04-21',
+      title: 'Remediation drill-down from Security page — closes a BACKLOG deferral',
+      changes: [
+        { type: 'feature', text: 'New wrench icon on every image row in System → Security. Click → "Containers using this image" modal with per-container Fix button that opens the Remediation Wizard scoped to that container.' },
+        { type: 'feature', text: 'Bridges the image-focused Security page with the container-focused Remediation Wizard — previously users had to bounce via Containers/Stacks to find the right container after a vuln scan. Now: one click on the image row → pick container → Fix.' },
+        { type: 'feature', text: 'Empty-state message when no containers use the image ("The image\'s vulnerabilities only matter once it\'s in production. Start a container from this image, then come back.") instead of an empty table.' },
+        { type: 'improvement', text: 'Zero new backend, zero new tests — reuses Api.listContainers() and client-filters by c.image === imageName. Same reuse-first pattern as v6.9.3.' },
+        { type: 'improvement', text: 'Closes a BACKLOG deferral open since v6.6.3.' },
+      ],
+    },
+    {
       version: '6.9.3',
       date: '2026-04-21',
       title: 'Secrets + Egress audit actions at the stack level',

@@ -2,6 +2,38 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.9.4] - 2026-04-21 — "Remediation drill-down from Security page (closes BACKLOG deferral)"
+
+Bridges the image-focused Security page with the container-focused Remediation Wizard. Closes a deferred BACKLOG item from v6.6.3 that's been sitting open.
+
+### Added
+
+- **Wrench icon (🔧 `fa-tools`, purple)** on every image row in System → Security's image vulnerability table. Click → opens "Containers using this image" modal.
+- **Modal lists** running + stopped containers currently using that image tag, with per-running-container **Fix** button.
+- **Fix** closes the security modal and opens the Remediation Wizard scoped to that container — same handoff pattern used by v6.6.3 Secrets / CIS and v6.9.3 stack modals.
+- **Empty-state messaging** — when no containers are using the image, tells the operator clearly ("The image's vulnerabilities only matter once it's in production. Start a container from this image, then come back.") instead of an empty table.
+
+### Why this closes a gap
+
+The Security page has always been image-scoped (Trivy/Grype scan per image). The Remediation Wizard has always been container-scoped. Users wanting to patch a vulnerable container's runtime hardening on the back of a vuln scan had to bounce via Containers / Stacks / Secrets tabs to find the right container. Now: one click on the image row → pick which container to fix → Fix.
+
+### Design notes
+
+- **Zero new backend** — uses the existing `Api.listContainers()` plus client-side filter by `c.image === imageName` (the `image` field on the Docker summary is the tag used to create the container).
+- **Zero new tests** — pure UI composition over tested endpoints, same pattern as v6.9.3.
+- **Image-tag match only** — retagged / digest-reference containers won't match. Acceptable: the common case is "I scanned `nginx:1.25` and I see it's in use, let me fix those containers." Digest-reference is a power-user edge.
+
+### Files touched
+
+- `public/js/pages/security.js` — 1 new icon in image-row action-btns (line ~163), 1 new click handler (line ~282), 1 new modal method `_showImageContainersModal` (~90 LOC appended to the page module).
+- `BACKLOG.md` — "Remediation entry points on security.js" marked ✅ shipped.
+
+### Tests
+
+- 678 passing / 46 suites — unchanged. No new tests (UI composition).
+
+---
+
 ## [6.9.3] - 2026-04-21 — "Secrets + Egress audit actions at the stack level"
 
 Extends the existing Security Scan + CIS Benchmark per-stack actions on the Containers page (`#/containers`) with two more: **Secrets Audit** and **Egress Audit**. Context-preserving modals — users no longer need to bounce to System → Secrets or System → Egress and re-filter for the stack they're already looking at.
