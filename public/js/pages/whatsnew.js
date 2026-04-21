@@ -10,6 +10,18 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.14.0',
+      date: '2026-04-22',
+      title: 'Express 4 → Express 5',
+      changes: [
+        { type: 'improvement', text: 'Framework dependency bump: Express 4.21.2 → Express 5.2.1. Transitive deps: router 2.2.0, path-to-regexp 8.4.2. Closes BACKLOG P2 item that was marked "defer to dedicated session (8-12h)" for months — real effort was ~2h because the codebase was already Express-5-idiomatic.' },
+        { type: 'improvement', text: 'Two path-to-regexp v8 syntax changes: registries.js (:repo(*) → *repo splat) with Array.isArray→join shim for downstream; server.js SPA fallback (app.get(*) → app.get(/*splat)). No other breaking surface hit us.' },
+        { type: 'fix', text: 'Removed the obsolete "path-to-regexp: ^0.1.13" override from package.json that was blocking the upgrade. The override patched a v4-era ReDoS CVE; Express 5 uses path-to-regexp@8.4.2 which has no such CVE. Lesson (added to deep-spec methodology): always audit overrides alongside dependencies when doing major bumps.' },
+        { type: 'improvement', text: 'Try/catch wrappers on the 24 async route handlers kept as-is. Express 5 auto-forwards rejected promises so wrappers are now technically redundant — but removing them would change error response bodies and touch 24+ files. Tracked as a separate refactor opportunity.' },
+        { type: 'improvement', text: '740 tests passing (unchanged). Deep-spec at plans/deep-spec-express5-migration.md documents the full migration analysis for reference.' },
+      ],
+    },
+    {
       version: '6.13.1',
       date: '2026-04-22',
       title: 'SSH key How-To + GitHub Actions Node 24 future-proofing',

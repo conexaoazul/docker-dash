@@ -152,8 +152,9 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
   index: false,
 }));
 
-// SPA fallback — all non-static HTML requests get the version-injected index
-app.get('*', (req, res) => {
+// SPA fallback — all non-static HTML requests get the version-injected index.
+// Express 5 / path-to-regexp v8 requires named splat syntax instead of bare '*'.
+app.get('/*splat', (req, res) => {
   if (req.accepts('html')) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');

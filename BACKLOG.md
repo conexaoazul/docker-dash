@@ -79,7 +79,7 @@ Available major upgrades, deliberately not taken:
 - ~~**bcrypt 5 → 6**~~ — ✅ shipped in v6.7.1 (native deps refresh). Rebuilt against Node 24.
 - ~~**better-sqlite3 11 → 12**~~ — ✅ shipped in v6.7.1 (native deps refresh). Prepared-statement API stayed backward-compatible.
 - ~~**diff 5 → 9**~~ — ✅ shipped in v6.10.0. API for `createPatch` stayed compatible across v5→v9; no code change needed beyond `npm install` + overrides bump. All 10 compose-diff tests green.
-- **express 4 → 5** — async router rewrite. Middleware ordering changes. Test matrix would be large. Defer to a dedicated upgrade session (8-12h).
+- ~~**express 4 → 5**~~ — ✅ shipped in v6.14.0. Actually only needed 2 line changes + dropping an obsolete `path-to-regexp: ^0.1.13` override from `overrides` (added for a v4 CVE that's irrelevant on v5 where the transitive dep is `path-to-regexp@8.4.2`). 740 tests passing unchanged. BACKLOG's 8-12h estimate was too pessimistic — real cost was ~2h because the codebase was already v5-idiomatic. Deep-spec at `plans/deep-spec-express5-migration.md` for details.
 - ~~**node-cron 3 → 4**~~ — ✅ shipped in v6.9.2. API for `schedule()` / `validate()` / `.stop()` stayed backward-compatible; no call-site changes.
 - **helmet 8 → 9** (if/when released) — tracked separately in security audit cycle.
 

@@ -74,9 +74,12 @@ router.get('/:id/catalog', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/:id/tags/:repo(*)', requireAuth, async (req, res) => {
+router.get('/:id/tags/*repo', requireAuth, async (req, res) => {
   try {
-    const tags = await registryService.tags(parseInt(req.params.id), req.params.repo);
+    // Express 5 / path-to-regexp v8 returns splat params as arrays. Re-join
+    // so downstream code keeps receiving "library/nginx"-style strings.
+    const repo = Array.isArray(req.params.repo) ? req.params.repo.join('/') : req.params.repo;
+    const tags = await registryService.tags(parseInt(req.params.id), repo);
     res.json(tags);
   } catch (err) {
     res.status(500).json({ error: err.message });

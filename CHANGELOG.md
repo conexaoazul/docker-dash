@@ -2,6 +2,44 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.14.0] - 2026-04-22 — "Express 4 → Express 5"
+
+BACKLOG P2 item closed. Deep-spec ([plans/deep-spec-express5-migration.md](plans/deep-spec-express5-migration.md)) predicted 3-5h based on evidence that the codebase was already v5-idiomatic. Actual execution cost ~2h with one mid-flight snag (see below).
+
+### Changed — Express 4.21.2 → Express 5.2.1
+
+- Dependency bump. `router` transitively upgraded to `2.2.0` and `path-to-regexp` to `8.4.2`.
+- 2 code changes for path-to-regexp v8 syntax (the only breaking surface we hit):
+  - [src/routes/registries.js:77](src/routes/registries.js#L77) — `'/:id/tags/:repo(*)'` → `'/:id/tags/*repo'`. Added `Array.isArray(req.params.repo) ? repo.join('/') : repo` because v8 returns splat params as arrays; downstream `registryService.tags(id, repo)` still receives the `"library/nginx"`-style string.
+  - [src/server.js:156](src/server.js#L156) — `app.get('*', …)` → `app.get('/*splat', …)` for the SPA fallback. No downstream consumer of the captured value.
+
+### Removed — obsolete `path-to-regexp` override
+
+`package.json` had `"path-to-regexp": "^0.1.13"` in `overrides` (added in commit `8164516` to patch a ReDoS CVE in v4's transitive `0.1.12`). On v5 the override was **blocking the upgrade** because it forced the incompatible v0.x branch. Removed. Express 5 pulls `path-to-regexp@8.4.2` transitively with no CVEs.
+
+**Worth noting:** the deep-spec missed this. Spec said "no direct `path-to-regexp` dep to touch" — true in principle (we don't declare it directly) but the override was effectively a version pin. `npm install express@^5` resolved fine but the first test run crashed with `TypeError: pathRegexp.match is not a function` because Express 5's router calls v8's API on what was actually still v0.x. Lesson for future dep-migration specs: **always audit `overrides` alongside `dependencies`.**
+
+### What we deliberately did NOT change
+
+Per the spec's §4.4: the 24 async-handler try/catch wrappers stay. Express 5's auto-forward of rejected promises makes them redundant, but removing them changes error response shapes and touches 24+ files. Out of scope; tracked as a post-migration opportunity.
+
+### Tests
+
+- **740 passing + 4 skipped / 50 suites** (identical to v6.13.1 — the regression net held).
+
+### Effort reality check
+
+Deep-spec estimated 3.75h nominal, 6-8h worst case. Actual: ~2h (including fixing the overrides miss). BACKLOG's original 8-12h estimate was pessimistic because it assumed a v4-style codebase with custom error middleware, `:param?` optional syntax, and the other v5 removals we actually don't use.
+
+### Files touched
+
+- `src/routes/registries.js` — 1 path + array-join shim.
+- `src/server.js` — 1 SPA fallback path.
+- `package.json` / `package-lock.json` — express major bump + overrides cleanup.
+- `BACKLOG.md` — mark P2 item shipped.
+
+---
+
 ## [6.13.1] - 2026-04-22 — "SSH key How-To + GHA Node 24 future-proofing"
 
 Two unrelated-but-small cleanups in one release:
