@@ -5433,20 +5433,30 @@ DB_PASS=secret"></textarea>
               </label>
               <button class="btn btn-sm btn-secondary" id="t-select-all">Select all</button>
               <button class="btn btn-sm btn-secondary" id="t-select-none">None</button>
-              <button class="btn btn-sm btn-primary" id="t-translate"><i class="fas fa-language" style="margin-right:4px"></i>Translate selected (max 50)</button>
+              <button class="btn btn-sm btn-primary" id="t-translate"><i class="fas fa-language" style="margin-right:4px"></i>Translate selected</button>
+            </div>
+            <div id="t-progress" style="display:none;margin-bottom:10px;padding:10px;background:var(--bg-dim);border-radius:6px">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:12px">
+                <span id="t-progress-label"><i class="fas fa-spinner fa-spin" style="margin-right:6px"></i>Translating…</span>
+                <span id="t-progress-stats" style="margin-left:auto;color:var(--text-dim)"></span>
+                <button class="btn btn-xs btn-danger" id="t-cancel" title="Stop after current batch"><i class="fas fa-stop" style="margin-right:4px"></i>Cancel</button>
+              </div>
+              <div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+                <div id="t-progress-bar" style="height:100%;width:0;background:var(--accent);transition:width 0.2s"></div>
+              </div>
             </div>
             <table style="width:100%;border-collapse:collapse;font-size:12px">
               <thead><tr style="background:var(--bg-dim);border-bottom:1px solid var(--border)">
-                <th style="padding:6px;width:30px"></th>
+                <th style="padding:6px;width:30px"><input type="checkbox" id="t-check-all" checked></th>
                 <th style="padding:6px;text-align:left">Key</th>
                 <th style="padding:6px;text-align:left">English source</th>
                 <th style="padding:6px;text-align:right;width:60px">Chars</th>
                 <th style="padding:6px;text-align:left;width:120px">Cached</th>
               </tr></thead>
               <tbody>
-              ${missing.map((m, i) => `
+              ${missing.map(m => `
                 <tr style="border-bottom:1px solid var(--surface2)">
-                  <td style="padding:6px"><input type="checkbox" class="t-key-cb" value="${Utils.escapeHtml(m.key)}" ${i < 20 ? 'checked' : ''}></td>
+                  <td style="padding:6px"><input type="checkbox" class="t-key-cb" value="${Utils.escapeHtml(m.key)}" checked></td>
                   <td style="padding:6px;font-family:var(--mono);font-size:11px">${Utils.escapeHtml(m.key)}</td>
                   <td style="padding:6px">${Utils.escapeHtml(m.source_text)}</td>
                   <td style="padding:6px;text-align:right">${(m.source_text || '').length}</td>
@@ -5455,34 +5465,87 @@ DB_PASS=secret"></textarea>
               </tbody>
             </table>`;
 
+          // Master checkbox toggles all rows
+          panel.querySelector('#t-check-all').addEventListener('change', (e) => {
+            panel.querySelectorAll('.t-key-cb').forEach(cb => cb.checked = e.target.checked);
+          });
           panel.querySelector('#t-select-all').addEventListener('click', () => {
-            panel.querySelectorAll('.t-key-cb').forEach((cb, i) => { cb.checked = i < 50; });
+            panel.querySelectorAll('.t-key-cb').forEach(cb => cb.checked = true);
+            panel.querySelector('#t-check-all').checked = true;
           });
           panel.querySelector('#t-select-none').addEventListener('click', () => {
             panel.querySelectorAll('.t-key-cb').forEach(cb => cb.checked = false);
+            panel.querySelector('#t-check-all').checked = false;
           });
+
+          // v6.11.2: chunked batch translate with progress bar. No arbitrary UI cap —
+          // internally sends 50 keys per API call (Google v2 + DeepL Free limit),
+          // keeps going across batches until done, quota-exceeded, or user cancels.
           panel.querySelector('#t-translate').addEventListener('click', async () => {
             const selected = [...panel.querySelectorAll('.t-key-cb:checked')].map(cb => cb.value);
             if (selected.length === 0) { Toast.warning('Select at least one key'); return; }
-            if (selected.length > 50) { Toast.warning('Maximum 50 keys per batch'); return; }
             const provider = el.querySelector('#t-provider').value;
             const autoAccept = panel.querySelector('#t-auto-accept').checked;
             const btn = panel.querySelector('#t-translate');
+            const progressEl = panel.querySelector('#t-progress');
+            const progressBar = panel.querySelector('#t-progress-bar');
+            const progressLabel = panel.querySelector('#t-progress-label');
+            const progressStats = panel.querySelector('#t-progress-stats');
+            const cancelBtn = panel.querySelector('#t-cancel');
+
+            const BATCH_SIZE = 50;
+            const batches = [];
+            for (let i = 0; i < selected.length; i += BATCH_SIZE) batches.push(selected.slice(i, i + BATCH_SIZE));
+
+            this._translationsCancelled = false;
+            cancelBtn.onclick = () => { this._translationsCancelled = true; };
+
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:4px"></i>Translating…';
+            progressEl.style.display = '';
+
+            let totalTranslated = 0;
+            let totalChars = 0;
+            let lastError = null;
             try {
-              const r = await Api.translationsBatch({ provider, language: lang, keys: selected, autoAccept });
-              if (r.autoAccepted) {
-                // v6.11.1: hot-reload i18n so the new strings appear immediately in the UI
-                await i18n.loadOverrides(lang);
-                Toast.success(`Translated ${r.translated.length} keys (${r.chars} chars via ${r.provider}) — live now`);
-              } else {
-                Toast.success(`Translated ${r.translated.length} keys (${r.chars} chars via ${r.provider}). Review and accept in the Review tab.`);
+              for (let i = 0; i < batches.length; i++) {
+                if (this._translationsCancelled) break;
+                const chunk = batches[i];
+                progressLabel.innerHTML = `<i class="fas fa-spinner fa-spin" style="margin-right:6px"></i>Batch ${i + 1} of ${batches.length} (${chunk.length} keys)…`;
+                progressStats.textContent = `${totalTranslated.toLocaleString()} / ${selected.length.toLocaleString()} translated · ${totalChars.toLocaleString()} chars used`;
+                progressBar.style.width = `${Math.round((i / batches.length) * 100)}%`;
+                try {
+                  const r = await Api.translationsBatch({ provider, language: lang, keys: chunk, autoAccept });
+                  totalTranslated += r.translated.length;
+                  totalChars += r.chars;
+                  // Apply live per batch if auto-accept so user sees UI updating
+                  if (r.autoAccepted) await i18n.loadOverrides(lang);
+                } catch (err) {
+                  lastError = err;
+                  break;  // stop on first failure (quota, network, etc.)
+                }
               }
-              this._tTab = 'review';
-              this._renderTranslations(document.getElementById('sys-content'));
-            } catch (err) {
-              Toast.error(err.message);
+              progressBar.style.width = '100%';
+              const label = this._translationsCancelled ? 'Cancelled' : lastError ? 'Stopped at error' : 'Done';
+              progressLabel.innerHTML = `<i class="fas ${lastError ? 'fa-exclamation-triangle' : 'fa-check-circle'}" style="color:${lastError ? 'var(--red)' : 'var(--green)'};margin-right:6px"></i>${label}`;
+              progressStats.textContent = `${totalTranslated.toLocaleString()} / ${selected.length.toLocaleString()} translated · ${totalChars.toLocaleString()} chars used`;
+              cancelBtn.style.display = 'none';
+
+              if (lastError) {
+                Toast.error(lastError.message);
+              } else if (totalTranslated > 0) {
+                const live = autoAccept ? ' — live now' : '. Review in the Review tab.';
+                Toast.success(`Translated ${totalTranslated} keys (${totalChars.toLocaleString()} chars via ${provider})${live}`);
+              }
+
+              // After 2s, if no error, jump to Review tab so user can see results
+              if (!lastError && !this._translationsCancelled && totalTranslated > 0) {
+                setTimeout(() => {
+                  this._tTab = 'review';
+                  this._renderTranslations(document.getElementById('sys-content'));
+                }, 1500);
+              }
+            } finally {
               btn.disabled = false;
               btn.innerHTML = '<i class="fas fa-language" style="margin-right:4px"></i>Translate selected';
             }
@@ -5556,14 +5619,9 @@ DB_PASS=secret"></textarea>
       const reload = () => this._renderTranslationsReview(el);
       el.querySelector('#r-lang').addEventListener('change', e => { this._reviewLang = e.target.value; reload(); });
       el.querySelector('#r-status').addEventListener('change', e => { this._reviewStatus = e.target.value; reload(); });
-      el.querySelector('#r-mark-exported').addEventListener('click', async () => {
-        if (!confirm(`Mark all accepted translations for "${this._reviewLang}" as applied? This indicates you've committed the exported locale file to source control.`)) return;
-        try {
-          await Api.translationsMarkExported(this._reviewLang);
-          Toast.success('Marked as applied');
-          reload();
-        } catch (err) { Toast.error(err.message); }
-      });
+      // v6.11.1 removed the "Mark as applied" button; it was tied to the export
+      // flow which is now optional. Leaving the orphan listener caused a null-ref
+      // crash when the Review panel opened. Fixed in v6.11.2.
       el.querySelectorAll('.r-accept').forEach(b => b.addEventListener('click', async () => {
         const tr = b.closest('tr');
         const id = tr.dataset.id;

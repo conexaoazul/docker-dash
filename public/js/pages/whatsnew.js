@@ -10,6 +10,19 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.11.2',
+      date: '2026-04-21',
+      title: 'Translate everything with a progress bar (+ fix Review panel crash)',
+      changes: [
+        { type: 'fix', text: 'Fixed "Cannot read properties of null (reading \'addEventListener\')" crash when opening the Review panel. v6.11.1 demoted the "Mark as applied" button but left an orphan event listener wired to it; removed.' },
+        { type: 'feature', text: 'Removed the arbitrary 50-key UI cap. Select ALL missing keys with one click. Internal chunking sends 50 at a time (Google v2 + DeepL Free provider limits) — the UI loops through every batch automatically.' },
+        { type: 'feature', text: 'Progress bar during translation: "Batch N of M (X keys)…" label + running total "Y / Z translated · W chars used" + visual bar + Cancel button. Stops cleanly at the batch boundary when cancelled or when quota hits.' },
+        { type: 'feature', text: 'Master checkbox in the missing-keys table header — toggle every row at once. Rows default to all-checked on load.' },
+        { type: 'feature', text: 'Auto-navigate to Review tab after a successful full run so users see their results without extra clicks. Graceful mid-run error handling: quota exceeded / network failure halts, reports where it stopped, keeps everything translated up to that point already in DB (auto-accepted if toggle was on).' },
+        { type: 'improvement', text: 'Typical run: ~1,500 missing keys in a language = 30 batches, ~90 seconds, one click. Old flow required 30 manual reloads.' },
+      ],
+    },
+    {
       version: '6.11.1',
       date: '2026-04-21',
       title: 'Translations go live automatically — no more download-the-file nonsense',

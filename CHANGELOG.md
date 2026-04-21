@@ -2,6 +2,45 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.11.2] - 2026-04-21 — "Translate everything with a progress bar (and fix a regression)"
+
+Two fixes to the Translations tab based on direct user feedback.
+
+### Fixed — Null-ref crash when opening Review panel
+
+- v6.11.1 demoted the "Mark as applied" button (since Export is optional now) but left an orphan `document.querySelector('#r-mark-exported').addEventListener(...)` wired to it. When the Review tab loaded, that selector returned `null` and JS threw `Cannot read properties of null (reading 'addEventListener')`. Removed the orphan listener.
+
+### Changed — No more 50-key UI cap
+
+The 50-key limit was always an **internal batching constraint** (Google v2 + DeepL Free both practically cap at 50 per-call), not a product decision. Exposing it to the UI was my mistake.
+
+- **Select-all now selects literally all** of the missing keys (no more "max 50" warning in the toast).
+- **Master checkbox** in the table header — click to toggle every row at once. Rows default to checked when the missing-keys table first loads.
+- **Internal chunking** — the UI sends batches of 50 keys to `/api/translations/batch` in sequence. Each call goes through the existing per-call quota pre-check, so the worst case of a mid-way quota exhaustion stops cleanly at the batch boundary (no partial charges).
+- **Progress bar** — appears when translation starts, shows:
+  - `Batch N of M (X keys)…` label + spinner
+  - Running total: `Y / Z translated · W chars used`
+  - Visual progress bar (0% → 100%)
+  - **Cancel** button — stops after the current in-flight batch so no chars are lost mid-API-call
+- **Auto-navigate to Review** after a successful full run — users see their translations without clicking through tabs.
+- **Graceful mid-run errors** — quota exceeded / network failure at batch N halts, shows `Stopped at error` label + the exact error, but keeps everything translated up to that point (already in DB).
+
+### Sample run
+
+~1,500 missing keys in RO:
+- Old v6.11.1: user had to manually select 50, translate, reload, select next 50... 30× repeats.
+- New v6.11.2: "Select all → Translate selected" → 30 batches run sequentially → ~90 seconds, progress bar ticks through 0-100, done. All keys land in `accepted` (auto-accept default) and the RO language is fully live.
+
+### Files touched
+
+- `public/js/pages/system.js` — removed orphan listener, added master checkbox, added chunked batch loop with progress UI + cancel support.
+
+### Tests
+
+- 695 passing + 4 skipped / 48 suites. Same count as v6.11.1 — UI logic change only.
+
+---
+
 ## [6.11.1] - 2026-04-21 — "Translations go live automatically (no more download-the-file nonsense)"
 
 Direct reaction to user feedback on v6.11.0: *"ce o sa fac eu cu fisierul descarcat?"* — fair point. The download-and-manually-commit flow made no sense for a self-hosted container tool. Translations are now applied at runtime from the DB. **No file editing. No git commit. No container rebuild.**
