@@ -10,6 +10,18 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.9.3',
+      date: '2026-04-21',
+      title: 'Secrets + Egress audit actions at the stack level',
+      changes: [
+        { type: 'feature', text: 'Two new per-stack action buttons on the Containers page, matching Security Scan + CIS Benchmark: Secrets Audit (purple, fa-user-secret) and Egress Audit (cyan, fa-network-wired). One click → context-preserving modal shows that stack\'s audit results without bouncing to System tabs.' },
+        { type: 'feature', text: 'Stack Secrets modal: summary pills (Avg Score / Critical / Warnings / Containers), per-container rows with top 2 issues, Fix button hands off to Remediation Wizard scoped to that container. "Remediate whole stack" button opens the wizard at stack scope when findings exist.' },
+        { type: 'feature', text: 'Stack Egress modal: summary pills (Containers / Internet reach / IMDS reach / Critical), per-container row with network mode + reachability + filter-policy state (preset + mode badge when policy active, Enable button when not). "Enable filter for whole stack" button surfaces when any container has internet reach without a stack-wide policy.' },
+        { type: 'improvement', text: 'Design is reuse-first: both modals fetch from existing /api/system/secrets-audit + /api/system/egress-audit + /api/egress-filter/policies endpoints and client-filter by c.stack === stackName. Zero new backend code, zero drift risk between global and stack views. Same pattern as the existing _showStackCisModal.' },
+        { type: 'improvement', text: 'Both modals stay in context (Containers page, modal overlay) matching Security Scan + CIS UX — no page navigation mid-action. Optional "Open full Secrets/Egress tab →" link available for users who want the full view.' },
+      ],
+    },
+    {
       version: '6.9.2',
       date: '2026-04-21',
       title: 'Hygiene — node-cron 4 + Cloudflare CI smoke test',

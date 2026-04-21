@@ -419,6 +419,8 @@ const ContainersPage = {
               <div class="stack-actions" data-stop-propagation style="display:flex;align-items:center;gap:2px">
                 <button class="action-btn" data-stack-sec="vuln" data-stack="${Utils.escapeHtml(stack)}" title="Security scan — scan all images in this stack" style="color:var(--yellow,#ffc107)"><i class="fas fa-search-plus"></i></button>
                 <button class="action-btn" data-stack-sec="cis" data-stack="${Utils.escapeHtml(stack)}" title="CIS Benchmark — check containers in this stack" style="color:var(--green,#4ade80)"><i class="fas fa-clipboard-check"></i></button>
+                <button class="action-btn" data-stack-sec="secrets" data-stack="${Utils.escapeHtml(stack)}" title="Secrets Audit — check secret hygiene for this stack" style="color:#a78bfa"><i class="fas fa-user-secret"></i></button>
+                <button class="action-btn" data-stack-sec="egress" data-stack="${Utils.escapeHtml(stack)}" title="Egress Audit — outbound network posture for this stack" style="color:#06b6d4"><i class="fas fa-network-wired"></i></button>
                 ${!isStandalone ? `<span class="toggle-divider" style="margin:0 2px;width:1px;height:16px;background:var(--border)"></span>` : ''}
               </div>
               ${!isStandalone ? `
@@ -744,7 +746,7 @@ const ContainersPage = {
       });
     });
 
-    // Stack security buttons (vuln scan + CIS)
+    // Stack security buttons (vuln scan + CIS + secrets + egress) — v6.9.3 adds last two
     el.querySelectorAll('[data-stack-sec]').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -755,8 +757,12 @@ const ContainersPage = {
         );
         if (type === 'vuln') {
           await this._showStackVulnModal(stackName, stackContainers);
-        } else {
+        } else if (type === 'cis') {
           await this._showStackCisModal(stackName, stackContainers);
+        } else if (type === 'secrets') {
+          await this._showStackSecretsModal(stackName, stackContainers);
+        } else if (type === 'egress') {
+          await this._showStackEgressModal(stackName, stackContainers);
         }
       });
     });
@@ -5319,6 +5325,241 @@ const ContainersPage = {
     // Reset filters so returning to page shows everything
     this._filter = '';
     this._stateFilter = '';
+  },
+
+  // ─── Stack-scoped Secrets Audit modal (v6.9.3) ─────────────
+  //
+  // Reuses the global /system/secrets-audit endpoint and client-filters to this
+  // stack. Shows per-container score + top issues + a one-click Fix button
+  // that hands off to RemediateWizard with container scope (already reusable).
+  async _showStackSecretsModal(stackName, containers) {
+    const running = containers.filter(c => c.state === 'running');
+    Modal.open(`
+      <div class="modal-header">
+        <h3><i class="fas fa-user-secret" style="color:#a78bfa;margin-right:10px"></i>
+          Secrets Audit — <span style="color:var(--accent)">${Utils.escapeHtml(stackName)}</span>
+        </h3>
+        <button class="modal-close-btn" id="modal-x"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" id="stack-secrets-body">
+        <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span class="text-muted text-sm"><i class="fas fa-box" style="margin-right:5px"></i>${running.length} running container${running.length === 1 ? '' : 's'} will be scanned</span>
+          ${containers.length > running.length ? `<span class="badge badge-warning" style="font-size:10px"><i class="fas fa-info-circle" style="margin-right:3px"></i>${containers.length - running.length} stopped (skipped)</span>` : ''}
+        </div>
+        <div id="stack-secrets-results"><div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Loading secrets audit…</div></div>
+      </div>
+      <div class="modal-footer" style="display:flex;gap:8px;justify-content:space-between;align-items:center">
+        <button class="btn btn-secondary" id="secrets-remediate-stack" style="display:none"><i class="fas fa-tools" style="margin-right:6px"></i>Remediate whole stack</button>
+        <div style="display:flex;gap:8px;margin-left:auto">
+          <a href="#/system" style="align-self:center;font-size:12px;color:var(--accent);text-decoration:none" onclick="setTimeout(()=>document.querySelector('[data-tab=secrets]')?.click(),250)">Open full Secrets tab →</a>
+          <button class="btn btn-secondary" id="modal-ok">Close</button>
+        </div>
+      </div>
+    `, { width: '860px' });
+
+    const mc = Modal._content;
+    mc.querySelector('#modal-x').addEventListener('click', () => Modal.close());
+    mc.querySelector('#modal-ok').addEventListener('click', () => Modal.close());
+
+    const results = mc.querySelector('#stack-secrets-results');
+    try {
+      const data = await Api.getSecretsAudit();
+      const stackRows = (data.containers || []).filter(c => c.stack === stackName);
+      if (stackRows.length === 0) {
+        results.innerHTML = `<div class="empty-msg"><i class="fas fa-info-circle"></i><p>No secrets audit results for this stack. Containers may be stopped, or rescan via System → Secrets.</p></div>`;
+        return;
+      }
+      const avg = Math.round(stackRows.reduce((s, r) => s + r.score, 0) / stackRows.length);
+      const critical = stackRows.reduce((s, r) => s + (r.issues || []).filter(i => i.severity === 'critical').length, 0);
+      const warning = stackRows.reduce((s, r) => s + (r.issues || []).filter(i => i.severity === 'warning').length, 0);
+      const scoreColor = avg >= 80 ? 'var(--green)' : avg >= 60 ? 'var(--yellow)' : 'var(--red)';
+
+      const pill = (label, val, bg) => `<div style="padding:8px 12px;background:${bg};border-radius:6px;min-width:90px"><div style="font-size:10px;color:var(--text-dim);text-transform:uppercase">${label}</div><div style="font-size:20px;font-weight:700;margin-top:2px">${val}</div></div>`;
+
+      const sorted = [...stackRows].sort((a, b) => a.score - b.score);
+      const badge = (sev) => {
+        const colors = { critical: '#ef4444', warning: '#f59e0b', info: '#64748b' };
+        return `<span style="display:inline-block;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600;color:#fff;background:${colors[sev] || '#64748b'}">${sev.toUpperCase()}</span>`;
+      };
+
+      results.innerHTML = `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          ${pill('Avg Score', avg, `color:${scoreColor};background:rgba(148,163,184,0.15)`)}
+          ${pill('Critical', critical, 'rgba(239,68,68,0.15)')}
+          ${pill('Warnings', warning, 'rgba(234,179,8,0.15)')}
+          ${pill('Containers', stackRows.length, 'rgba(148,163,184,0.15)')}
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:var(--bg-dim);border-bottom:1px solid var(--border)">
+            <th style="padding:8px;text-align:left">Container</th>
+            <th style="padding:8px;text-align:right;width:70px">Score</th>
+            <th style="padding:8px;text-align:left">Top issues</th>
+            <th style="width:60px"></th>
+          </tr></thead>
+          <tbody>
+          ${sorted.map(r => {
+            const topIssues = (r.issues || []).slice(0, 2);
+            const issuesHtml = topIssues.length === 0
+              ? '<span style="color:var(--green)">✓ clean</span>'
+              : topIssues.map(i => `<div style="margin:2px 0">${badge(i.severity)} ${Utils.escapeHtml(i.message.slice(0, 100))}${i.message.length > 100 ? '…' : ''}</div>`).join('');
+            const moreCount = Math.max(0, (r.issues || []).length - 2);
+            return `
+              <tr style="border-bottom:1px solid var(--surface2)">
+                <td style="padding:8px"><strong>${Utils.escapeHtml(r.name)}</strong>${r.service ? `<div style="font-size:10px;color:var(--text-dim)">${Utils.escapeHtml(r.service)}</div>` : ''}</td>
+                <td style="padding:8px;text-align:right"><strong style="color:${r.score >= 80 ? 'var(--green)' : r.score >= 60 ? 'var(--yellow)' : 'var(--red)'}">${r.score}</strong></td>
+                <td style="padding:8px">${issuesHtml}${moreCount > 0 ? `<div style="color:var(--text-dim);font-size:10px">+${moreCount} more</div>` : ''}</td>
+                <td style="padding:8px;text-align:right">${(r.issues || []).length > 0 ? `<button class="btn btn-xs btn-primary stack-secrets-fix" data-cid="${Utils.escapeHtml(r.id)}" data-cname="${Utils.escapeHtml(r.name)}" title="Open Remediation Wizard"><i class="fas fa-tools"></i></button>` : ''}</td>
+              </tr>`;
+          }).join('')}
+          </tbody>
+        </table>`;
+
+      // Show stack-level remediate button only when there's anything to fix
+      if (critical > 0 || warning > 0) {
+        const stackBtn = mc.querySelector('#secrets-remediate-stack');
+        stackBtn.style.display = '';
+        stackBtn.addEventListener('click', () => {
+          if (typeof RemediateWizard === 'undefined') { Toast.error('Remediation Wizard not loaded'); return; }
+          Modal.close();
+          RemediateWizard.open({
+            scope: { type: 'stack', name: stackName, hostId: Api.getHostId(), displayName: 'stack: ' + stackName },
+          });
+        });
+      }
+
+      mc.querySelectorAll('.stack-secrets-fix').forEach(b => b.addEventListener('click', () => {
+        if (typeof RemediateWizard === 'undefined') { Toast.error('Remediation Wizard not loaded'); return; }
+        Modal.close();
+        RemediateWizard.open({
+          scope: { type: 'container', id: b.dataset.cid, hostId: Api.getHostId(), displayName: b.dataset.cname },
+        });
+      }));
+    } catch (err) {
+      results.innerHTML = `<div class="empty-msg" style="color:var(--red)">Failed to load audit: ${Utils.escapeHtml(err.message)}</div>`;
+    }
+  },
+
+  // ─── Stack-scoped Egress Audit modal (v6.9.3) ──────────────
+  //
+  // Same pattern as secrets: full audit → client filter → compact table.
+  // "Enable filter" per row opens the existing egress policy modal scoped
+  // to container. Stack-level "Enable filter" creates a stack-wide policy.
+  async _showStackEgressModal(stackName, containers) {
+    const running = containers.filter(c => c.state === 'running');
+    Modal.open(`
+      <div class="modal-header">
+        <h3><i class="fas fa-network-wired" style="color:#06b6d4;margin-right:10px"></i>
+          Egress Audit — <span style="color:var(--accent)">${Utils.escapeHtml(stackName)}</span>
+        </h3>
+        <button class="modal-close-btn" id="modal-x"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" id="stack-egress-body">
+        <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span class="text-muted text-sm"><i class="fas fa-box" style="margin-right:5px"></i>${running.length} running container${running.length === 1 ? '' : 's'} in scope</span>
+          ${containers.length > running.length ? `<span class="badge badge-warning" style="font-size:10px"><i class="fas fa-info-circle" style="margin-right:3px"></i>${containers.length - running.length} stopped (skipped)</span>` : ''}
+        </div>
+        <div id="stack-egress-results"><div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Loading egress audit…</div></div>
+      </div>
+      <div class="modal-footer" style="display:flex;gap:8px;justify-content:space-between;align-items:center">
+        <button class="btn btn-primary" id="egress-enable-stack" style="display:none"><i class="fas fa-shield-alt" style="margin-right:6px"></i>Enable filter for whole stack</button>
+        <div style="display:flex;gap:8px;margin-left:auto">
+          <a href="#/system" style="align-self:center;font-size:12px;color:var(--accent);text-decoration:none" onclick="setTimeout(()=>document.querySelector('[data-tab=egress]')?.click(),250)">Open full Egress tab →</a>
+          <button class="btn btn-secondary" id="modal-ok">Close</button>
+        </div>
+      </div>
+    `, { width: '860px' });
+
+    const mc = Modal._content;
+    mc.querySelector('#modal-x').addEventListener('click', () => Modal.close());
+    mc.querySelector('#modal-ok').addEventListener('click', () => Modal.close());
+
+    const results = mc.querySelector('#stack-egress-results');
+    try {
+      const [data, policies] = await Promise.all([
+        Api.getEgressAudit(),
+        Api.egressFilterListPolicies().catch(() => ({ policies: [] })),
+      ]);
+      const stackRows = (data.containers || []).filter(c => c.stack === stackName);
+      if (stackRows.length === 0) {
+        results.innerHTML = `<div class="empty-msg"><i class="fas fa-info-circle"></i><p>No egress audit results for this stack.</p></div>`;
+        return;
+      }
+
+      // Index policies by scope for Filter column
+      const polByContainer = new Map();
+      const polByStack = new Map();
+      for (const p of (policies.policies || [])) {
+        if (p.scopeType === 'container') polByContainer.set(p.scopeKey, p);
+        if (p.scopeType === 'stack') polByStack.set(p.scopeKey, p);
+      }
+
+      const reachInternet = stackRows.filter(r => r.canReachInternet).length;
+      const reachIMDS = stackRows.filter(r => r.canReachIMDS).length;
+      const critCount = stackRows.reduce((s, r) => s + (r.findings || []).filter(f => f.severity === 'critical').length, 0);
+
+      const pill = (label, val, bg) => `<div style="padding:8px 12px;background:${bg};border-radius:6px;min-width:90px"><div style="font-size:10px;color:var(--text-dim);text-transform:uppercase">${label}</div><div style="font-size:20px;font-weight:700;margin-top:2px">${val}</div></div>`;
+
+      const stackPolicy = polByStack.get(stackName);
+
+      results.innerHTML = `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          ${pill('Containers', stackRows.length, 'rgba(148,163,184,0.15)')}
+          ${pill('Internet reach', reachInternet, 'rgba(249,115,22,0.15)')}
+          ${pill('IMDS reach', reachIMDS, 'rgba(239,68,68,0.15)')}
+          ${pill('Critical', critCount, 'rgba(239,68,68,0.15)')}
+        </div>
+        ${stackPolicy ? `<div style="padding:10px 12px;background:rgba(59,130,246,0.08);border-left:3px solid #3b82f6;border-radius:4px;font-size:12px;margin-bottom:12px"><i class="fas fa-shield-alt" style="margin-right:6px"></i>Stack policy active: <strong>${Utils.escapeHtml(stackPolicy.preset)}</strong> · ${Utils.escapeHtml(stackPolicy.mode)}</div>` : ''}
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:var(--bg-dim);border-bottom:1px solid var(--border)">
+            <th style="padding:8px;text-align:left">Container</th>
+            <th style="padding:8px;text-align:left;width:110px">Network</th>
+            <th style="padding:8px;text-align:left;width:140px">Reachability</th>
+            <th style="padding:8px;text-align:right;width:70px">Score</th>
+            <th style="padding:8px;text-align:left;width:180px">Filter</th>
+          </tr></thead>
+          <tbody>
+          ${stackRows.map(r => {
+            const verdict = r.canReachInternet
+              ? (r.canReachIMDS ? '<span style="color:#ef4444">Internet + IMDS</span>' : '<span style="color:#f59e0b">Internet</span>')
+              : '<span style="color:var(--green)">Isolated</span>';
+            const fullId = r.fullId || r.id;
+            const policy = polByContainer.get(fullId) || polByContainer.get(r.id) || stackPolicy;
+            const filterCell = policy
+              ? `<span style="padding:2px 6px;background:rgba(59,130,246,0.15);border-radius:3px;font-size:10px;font-weight:600">${Utils.escapeHtml(policy.preset)} · ${Utils.escapeHtml(policy.mode)}</span>`
+              : `<button class="btn btn-xs btn-primary stack-egress-enable" data-cid="${Utils.escapeHtml(fullId)}" data-cname="${Utils.escapeHtml(r.name)}"><i class="fas fa-shield-alt" style="margin-right:4px"></i>Enable</button>`;
+            return `
+              <tr style="border-bottom:1px solid var(--surface2)">
+                <td style="padding:8px"><strong>${Utils.escapeHtml(r.name)}</strong>${r.service ? `<div style="font-size:10px;color:var(--text-dim)">${Utils.escapeHtml(r.service)}</div>` : ''}</td>
+                <td style="padding:8px"><code style="font-size:11px">${Utils.escapeHtml(r.networkMode || 'default')}</code></td>
+                <td style="padding:8px">${verdict}</td>
+                <td style="padding:8px;text-align:right"><strong style="color:${r.score >= 80 ? 'var(--green)' : r.score >= 60 ? 'var(--yellow)' : 'var(--red)'}">${r.score}</strong></td>
+                <td style="padding:8px">${filterCell}</td>
+              </tr>`;
+          }).join('')}
+          </tbody>
+        </table>`;
+
+      if (!stackPolicy && reachInternet > 0) {
+        const stackBtn = mc.querySelector('#egress-enable-stack');
+        stackBtn.style.display = '';
+        stackBtn.addEventListener('click', () => {
+          Modal.close();
+          // Navigate to System → Egress so user sees the full filter modal with stack scope
+          Toast.info('Opening System → Egress to configure stack-wide filter');
+          location.hash = '#/system';
+          setTimeout(() => document.querySelector('[data-tab=egress]')?.click(), 250);
+        });
+      }
+
+      mc.querySelectorAll('.stack-egress-enable').forEach(b => b.addEventListener('click', () => {
+        Modal.close();
+        Toast.info(`Opening System → Egress for ${b.dataset.cname}`);
+        location.hash = '#/system';
+        setTimeout(() => document.querySelector('[data-tab=egress]')?.click(), 250);
+      }));
+    } catch (err) {
+      results.innerHTML = `<div class="empty-msg" style="color:var(--red)">Failed to load audit: ${Utils.escapeHtml(err.message)}</div>`;
+    }
   },
 };
 

@@ -2,6 +2,41 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.9.3] - 2026-04-21 — "Secrets + Egress audit actions at the stack level"
+
+Extends the existing Security Scan + CIS Benchmark per-stack actions on the Containers page (`#/containers`) with two more: **Secrets Audit** and **Egress Audit**. Context-preserving modals — users no longer need to bounce to System → Secrets or System → Egress and re-filter for the stack they're already looking at.
+
+### Added
+
+- **Two new stack-header buttons** on every stack (and the Standalone pseudo-stack) in the Containers page, matching the existing Security Scan + CIS icons:
+  - 🔒 **Secrets Audit** (`fa-user-secret`, purple) — runs the global secrets audit and renders the results filtered for this stack
+  - 🌐 **Egress Audit** (`fa-network-wired`, cyan) — runs the global egress audit and renders reachability + filter status filtered for this stack
+- **`_showStackSecretsModal`** — summary pills (Avg Score / Critical / Warnings / Containers), per-container rows with top 2 issues + "Fix" button that hands off to the Remediation Wizard scoped to that container. Stack-level "Remediate whole stack" button opens the wizard at stack scope. "Open full Secrets tab →" link for when users want the full view.
+- **`_showStackEgressModal`** — summary pills (Containers / Internet reach / IMDS reach / Critical), per-container row with network mode + reachability verdict + filter-policy state. When a container has no policy, an **Enable** button is shown; when it does, the preset + mode badge is shown inline. "Enable filter for whole stack" button appears when the stack has any internet-reachable container with no stack-wide policy.
+
+### Design notes (reuse-first)
+
+Rather than build stack-scoped API endpoints, both modals fetch from the **existing** global endpoints (`/api/system/secrets-audit`, `/api/system/egress-audit`, `/api/egress-filter/policies`) and client-filter by `c.stack === stackName`. This matches the pattern already used by `_showStackCisModal`. Zero new backend code, zero new tests needed for existing surface, zero drift risk between global and stack views.
+
+Both modals keep the user in context (Containers page, modal overlay) — same UX pattern as Security Scan + CIS modals. No page navigation, no tab switching mid-action. The "Open full tab →" link is available but not required.
+
+### Behavior details
+
+- **Stopped containers** are reported as "(N stopped — skipped)" in the header and omitted from the table. Matches CIS modal behavior.
+- **No issues / no reach** — modal shows an empty-state ("No results for this stack") rather than an empty table.
+- **Fix button** on a Secrets row closes the stack modal + opens RemediateWizard scoped to that container, so the user doesn't need to click twice.
+- **Enable button** on an Egress row navigates to System → Egress (the full Enable modal with preset picker lives there; replicating the full policy editor in a second place would be maintenance debt).
+
+### Tests
+
+- No new tests — all logic is UI composition over existing tested backends. 678 passing / 46 suites unchanged. Syntax check passes on the modified file.
+
+### Files touched
+
+- `public/js/pages/containers.js` — 2 new buttons in stack header (lines ~420), dispatch handler extended (line ~755), 2 new modal methods appended (~140 LOC).
+
+---
+
 ## [6.9.2] - 2026-04-21 — "Hygiene: node-cron 4 + LE CI smoke test"
 
 Housekeeping. Two small but useful cleanups.
