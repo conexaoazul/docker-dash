@@ -1,6 +1,6 @@
 # Docker Dash — Known Backlog
 
-**Last updated:** 2026-04-20 · Post-v6.6.0 release
+**Last updated:** 2026-04-22 · Post-v6.13.0 release (sweep cleanup)
 
 This is the single source of truth for deferred work. Each item lists WHY it's deferred (not just WHAT), so future contributors don't waste cycles rediscovering the rationale.
 
@@ -89,17 +89,28 @@ Available major upgrades, deliberately not taken:
 
 ### GHCR push permission for custom Caddy image
 
-**Why deferred:** Not a code issue — requires the repo owner to toggle "Read and write permissions" in Repo Settings → Actions → Workflow permissions. Can't be done via PR.
-
-**Impact:** current GHA workflow builds the custom Caddy image but fails at push. Users building from source get the right image; GHCR users don't (they have to build locally).
-
-**Fix:** one-time user action. Documented in `docs/planning/v6.5/letsencrypt-wizard/05-preflight-results.md`.
+**Status (updated 2026-04-22):** ✅ Resolved. GHA workflows `caddy-image.yml` and `egress-filter-image.yml` now successfully build + push to `ghcr.io/<owner>/docker-dash-caddy` and `docker-dash-egress-filter` on every tag push. Workflow permissions are configured correctly.
 
 ### LE staging integration test in CI
 
-**Why deferred:** Requires storing a Cloudflare token as a GitHub Actions secret. Can't be automated without user action. The integration test code itself is trivial (~50 LOC).
+**Status (updated 2026-04-22):** Code shipped in v6.9.2 — `src/__tests__/acme-cloudflare-live.test.js` hits Cloudflare's `/user/tokens/verify` endpoint when `CLOUDFLARE_TEST_TOKEN` env/secret is set. Intentionally skipped (one of the 4 skipped tests in the suite) when the secret is absent.
 
-**Estimated effort:** 2 hours once the secret is provisioned.
+**Still pending (user action, not code):** provision `CLOUDFLARE_TEST_TOKEN` as a GitHub Actions secret in Repo Settings → Secrets and variables → Actions. After that, the test runs on every push and will catch:
+- Credential-validation drift if Cloudflare deprecates token endpoints
+- Token revocation / expiry
+- Global API Key vs scoped token format regressions
+
+**Effort:** 5 minutes (paste one token into a GHA secret).
+
+### GHA actions on deprecated Node.js 20
+
+**Why deferred:** Informational warning on every CI run. All docker-related actions (`actions/checkout@v4`, `docker/build-push-action@v5`, `docker/login-action@v3`, `docker/metadata-action@v5`, `docker/setup-buildx-action@v3`, `docker/setup-qemu-action@v3`) run on Node.js 20. GitHub forces them to Node.js 24 starting 2026-06-02 and removes Node.js 20 from runners on 2026-09-16.
+
+**Current impact:** none. Warnings only.
+
+**Fix:** bump each action to its newest major version (e.g. `actions/checkout@v5` if released). Done in one PR.
+
+**Estimated effort:** 30 min. **Deadline:** 2026-06-02 (hard — after that GitHub forces the bump; better to test ahead).
 
 ### F20 — Retroactive `down()` for 44 existing migrations
 
@@ -124,14 +135,23 @@ Available major upgrades, deliberately not taken:
 
 ---
 
-## What's in v6.6 (current release)
+## What's in the current release (v6.13.0)
 
 For context — everything above is beyond what's shipped. Current state:
 
+- v6.13.0 ldapjs → ldapts migration (deprecated client replaced; interface preserved)
+- v6.12.2 NAS How-To guides complete (TrueNAS SCALE + QNAP + OMV)
+- v6.12.1 Cloud vendor badges via DMI probe (AWS/GCE/Azure/DO/Hetzner/VMware/etc.)
+- v6.12.0 Platform auto-detection + branded badges on Multi-Host page
+- v6.11.x Translations tooling (Google + DeepL, quota tracking, runtime DB overrides)
+- v6.10.0 Per-container Security sub-tab (Secrets + Egress + CIS + Image Vulns)
+- v6.9.x Per-stack Secrets/Egress audit + Remediation drill-down from Security page
+- v6.8.0 Multi-host SSH exec channel (Remediation Wizard works on remote hosts)
+- v6.7.x Outbound Network Filter sidecar
 - v6.6.0 Container Remediation Wizard (20-entry catalog, 3-step modal, Git-PR mode, auto-rollback)
 - v6.5.0 Let's Encrypt Wizard (9 DNS providers, encrypted credential vault, zero-downtime rotation)
 - v6.4.0 Hardening (31 of 35 pre-sale audit findings closed)
-- 538 tests passing across 38 suites
+- **740 tests passing + 4 skipped across 50 suites**
 
 ---
 
