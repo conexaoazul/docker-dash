@@ -2,6 +2,54 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.12.0] - 2026-04-22 — "Docker runs everywhere — let's recognize it"
+
+Tier 1 NAS/cloud platform support: auto-detect the host's platform (Synology DSM, Unraid, TrueNAS SCALE, QNAP, OpenMediaVault, plus the major Linux distros) from Docker's `info` response and render a branded badge on the Multi-Host page. Ships with three bilingual How-To guides covering the most common deployment targets: Synology Container Manager, Unraid, and generic cloud VPS (Hetzner, DigitalOcean, AWS EC2, GCE, Azure, Linode, Vultr).
+
+**Why this release:** User asked whether Docker-Dash could reach NAS and cloud users. Research showed the answer is "yes, mostly for free" — the v6.8.0 multi-host SSH tunnel already works against any machine exposing `/var/run/docker.sock`. What was missing: telling users that fact, and recognizing their platform once they connect. No SDK bloat, no vendor API integrations — just parse `docker info` and show a badge.
+
+### Added — Platform auto-detection
+
+- **`src/services/platform-detect.js`** — pure function `detectFromDockerInfo({ os, kernelVersion, hostname })` that returns `{platform, label, version, category, iconClass, color, notes}`. Covers:
+  - **NAS:** Synology DSM 6.x/7.x (incl. "Synology DSM …" and bare "DSM …" variants), Unraid (by OS string, kernel marker, or Tower-hostname + Slackware-kernel fallback), TrueNAS SCALE Electric Eel+ (via `-truenas-production` kernel marker), QNAP QTS/QuTS hero, OpenMediaVault.
+  - **Linux distros:** Ubuntu, Debian, Fedora, CentOS, Rocky, AlmaLinux, Alpine, Red Hat/RHEL, Arch, openSUSE — with version extraction.
+  - **Fallback:** generic `linux` badge for unknown distros.
+- **Cache** by `hostId` — detection runs once per host, reused on multi-host page re-renders. `invalidate(hostId)` called on tunnel reconnect so a re-installed OS is picked up.
+- **No SSH probes** — everything comes from the existing `docker info` call. Zero new network round-trips.
+
+### Added — Branded badge on Multi-Host page
+
+- `_renderHostCard()` now shows a colored pill above the OS line with the platform's icon, label, version, and an `NAS` tag for NAS platforms. Hover tooltip surfaces platform-specific notes ("Synology: docker needs sudo or docker-group membership", "Unraid: Community Apps ecosystem available", etc.).
+- Badge is suppressed for generic `linux` (no point adding visual noise when detection didn't find anything interesting).
+
+### Added — Three How-To guides (EN + RO)
+
+Migration `058_howto_platform_guides.js` upserts into the existing `howto_guides` table:
+
+- **`synology-dsm`** — Enable SSH in DSM Control Panel → Terminal, add user to `docker` group, find the IP, add the host in Docker Dash with key or password auth, verify the badge appears. Troubleshooting: `docker` group vs Container Manager's sudo-wrapped CLI, DSM 7.2 permissions changes, shared-folder mount gotchas.
+- **`unraid`** — SSH usually on by default, root user, `/mnt/user/appdata` convention for persistent volumes, Community Apps coexistence notes. When to use Docker Dash vs. the native Unraid Docker tab.
+- **`generic-vps`** — One artifact covers Hetzner, DigitalOcean, AWS EC2, GCE, Azure VM, Linode, Vultr. Cloud-init `user-data` snippet for each provider to install Docker and bootstrap the `docker` user on first boot. Security hardening checklist: UFW/firewall defaults, SSH key-only auth, `docker.sock` exposure warning, fail2ban recommendation.
+
+### Tests
+
+- 23 new tests in `src/__tests__/platform-detect.test.js` (all passing): Synology DSM 7.2 + 6.x, Unraid by OS + Tower-hostname fallback, TrueNAS Electric Eel, QNAP QTS + QuTS hero, OMV, Ubuntu/Debian/Fedora/Rocky/Alma/Alpine/Arch, edge cases (null, missing fields, `OperatingSystem` capital-O fallback), cache hit/miss behavior, `invalidate(id)` vs `invalidate()`.
+- **Total: 718 passing + 4 skipped / 50 suites** (was 695 / 48 — picked up 23 new tests and 2 new suites in this release).
+
+### Out of scope (deliberately)
+
+- **Managed cloud services** (ECS/Fargate, EKS/GKE/AKS, Cloud Run, Azure Container Apps) — wrong paradigm (no Docker daemon to manage) and saturated market. Docker Dash is for self-hosted Docker.
+- **Cloud-vendor detection** (AWS/GCP/Azure/Hetzner/DO) — needs DMI data (`/sys/class/dmi/id/sys_vendor`) that isn't in `docker info`. Planned follow-up: optional SSH probe gated behind a toggle.
+
+### Files touched
+
+- `src/services/platform-detect.js` (new)
+- `src/__tests__/platform-detect.test.js` (new)
+- `src/routes/hosts.js` — enriched `GET /api/hosts/:id/info` with `info.platform = platformDetect.detectForHost(id, info)`.
+- `public/js/pages/multihost.js` — badge renderer in `_renderHostCard`.
+- `src/db/migrations/058_howto_platform_guides.js` (new) — 3 bilingual guides.
+
+---
+
 ## [6.11.2] - 2026-04-21 — "Translate everything with a progress bar (and fix a regression)"
 
 Two fixes to the Translations tab based on direct user feedback.

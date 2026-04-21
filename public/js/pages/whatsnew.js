@@ -10,6 +10,19 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.12.0',
+      date: '2026-04-22',
+      title: 'Docker runs everywhere — platform auto-detection + NAS/cloud How-Tos',
+      changes: [
+        { type: 'feature', text: 'Platform auto-detection: Docker Dash now recognizes Synology DSM, Unraid, TrueNAS SCALE, QNAP QTS/QuTS hero, OpenMediaVault, plus Ubuntu/Debian/Fedora/Rocky/Alma/Alpine/Arch/RHEL/openSUSE — from the docker info response alone. No SSH probes, no vendor SDKs.' },
+        { type: 'feature', text: 'Branded platform badge on the Multi-Host page: colored pill with the platform icon, label, version, and an NAS tag for NAS platforms. Hover tooltip surfaces platform-specific notes (e.g. "Synology: docker commands need sudo or docker-group membership", "Unraid: Community Apps ecosystem available").' },
+        { type: 'feature', text: 'Three new bilingual (EN + RO) How-To guides: Synology DSM Container Manager setup (SSH + docker group + add host + verify badge + troubleshooting), Unraid (SSH defaults + root + /mnt/user/appdata + Community Apps coexistence), Generic VPS covering Hetzner + DigitalOcean + AWS EC2 + GCE + Azure VM + Linode + Vultr with per-provider cloud-init user-data snippets + security hardening checklist.' },
+        { type: 'improvement', text: 'The v6.8.0 multi-host SSH tunnel already works against any machine exposing /var/run/docker.sock — the new badges and guides make that capability discoverable to NAS and cloud users. 80% of addressable market (Synology + Unraid + cloud VMs) now covered without a single new SDK.' },
+        { type: 'improvement', text: 'Out of scope (deliberate): managed cloud services (ECS/Fargate, EKS/GKE/AKS, Cloud Run, Container Apps) — wrong paradigm (no Docker daemon to manage). Docker Dash stays focused on self-hosted Docker.' },
+        { type: 'improvement', text: 'Tests: 695 → 718 (+23 platform-detect tests). Cache behavior (invalidate per-host or global), OS string parsing across all platforms, edge cases (null, missing fields, OperatingSystem capital-O fallback).' },
+      ],
+    },
+    {
       version: '6.11.2',
       date: '2026-04-21',
       title: 'Translate everything with a progress bar (+ fix Review panel crash)',
