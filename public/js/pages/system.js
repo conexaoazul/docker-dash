@@ -4987,21 +4987,108 @@ DB_PASS=secret"></textarea>
   // ─── Egress filter: lazy-load block log into the expanded detail row
   async _loadEgressBlockLog(slotEl) {
     const policyId = slotEl.dataset.policyId;
+    // Toggle between 'recent' (raw events) and 'grouped' (by hostname) — persists per slot
+    if (!slotEl.dataset.view) slotEl.dataset.view = 'grouped';
+    await this._renderEgressBlockLog(slotEl, policyId, slotEl.dataset.view);
+  },
+
+  async _renderEgressBlockLog(slotEl, policyId, view) {
+    slotEl.innerHTML = `<div style="color:var(--text-dim);font-size:12px"><i class="fas fa-spinner fa-spin" style="margin-right:6px"></i>Loading deny log…</div>`;
     try {
-      const res = await Api.egressFilterBlockLog(policyId, { limit: 25 });
-      const entries = res.entries || [];
-      if (entries.length === 0) {
-        slotEl.innerHTML = `<div style="color:var(--text-dim);font-size:12px"><i class="fas fa-shield-check" style="margin-right:6px"></i>${Utils.escapeHtml(res.note || 'No deny events yet.')}</div>`;
-        return;
+      if (view === 'grouped') {
+        const { groups = [] } = await Api.egressFilterBlockLogGrouped(policyId, { sinceHours: 168, limit: 20 });
+        slotEl.innerHTML = this._renderEgressBlockLogHeader(policyId, view, groups.length)
+          + (groups.length === 0
+            ? `<div style="color:var(--text-dim);font-size:12px;padding:8px"><i class="fas fa-shield-check" style="margin-right:6px"></i>No deny events in the last 7 days.</div>`
+            : `<table style="width:100%;border-collapse:collapse;font-size:11px">
+                <thead>
+                  <tr style="background:var(--bg);border-bottom:1px solid var(--border)">
+                    <th style="padding:5px 8px;text-align:left">Hostname</th>
+                    <th style="padding:5px 8px;text-align:right;width:60px">Denies</th>
+                    <th style="padding:5px 8px;text-align:left;width:150px">Last seen</th>
+                    <th style="padding:5px 8px;text-align:left;width:90px">Ports</th>
+                    <th style="padding:5px 8px;width:90px"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                ${groups.map(g => `
+                  <tr style="border-bottom:1px solid var(--surface2)">
+                    <td style="padding:5px 8px;font-family:var(--mono)"><strong>${Utils.escapeHtml(g.hostname)}</strong></td>
+                    <td style="padding:5px 8px;text-align:right;color:#ef4444;font-weight:600">${g.count}</td>
+                    <td style="padding:5px 8px;color:var(--text-dim)">${g.last_seen}</td>
+                    <td style="padding:5px 8px;font-family:var(--mono)">${Utils.escapeHtml(g.ports || '')}</td>
+                    <td style="padding:5px 8px;text-align:right">
+                      <button class="btn btn-xs btn-primary egress-allow-btn" data-policy-id="${policyId}" data-hostname="${Utils.escapeHtml(g.hostname)}" title="Add this hostname to the policy allowlist"><i class="fas fa-check" style="margin-right:4px"></i>Allow</button>
+                    </td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>`);
+      } else {
+        const { entries = [] } = await Api.egressFilterBlockLog(policyId, { limit: 50 });
+        slotEl.innerHTML = this._renderEgressBlockLogHeader(policyId, view, entries.length)
+          + (entries.length === 0
+            ? `<div style="color:var(--text-dim);font-size:12px;padding:8px"><i class="fas fa-shield-check" style="margin-right:6px"></i>No deny events yet.</div>`
+            : `<div style="max-height:200px;overflow-y:auto;font-family:var(--mono);font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px">
+                ${entries.map(e => `<div><span style="color:var(--text-dim)">${e.blocked_at}</span> <strong>${Utils.escapeHtml(e.hostname)}</strong>:<span style="color:var(--accent)">${e.port}</span> <span style="color:#ef4444">[${Utils.escapeHtml(e.reason)}]</span></div>`).join('')}
+              </div>`);
       }
-      slotEl.innerHTML = `
-        <div style="font-size:12px;font-weight:600;margin-bottom:6px"><i class="fas fa-ban" style="margin-right:6px;color:#ef4444"></i>Recent deny events (last ${entries.length})</div>
-        <div style="max-height:180px;overflow-y:auto;font-family:var(--mono);font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px">
-          ${entries.map(e => `<div><span style="color:var(--text-dim)">${e.blocked_at}</span> <strong>${Utils.escapeHtml(e.hostname)}</strong>:<span style="color:var(--accent)">${e.port}</span> <span style="color:#ef4444">[${Utils.escapeHtml(e.reason)}]</span></div>`).join('')}
-        </div>`;
+
+      // Wire interactions
+      slotEl.querySelectorAll('.egress-blocklog-view-btn').forEach(b => b.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        slotEl.dataset.view = b.dataset.view;
+        await this._renderEgressBlockLog(slotEl, policyId, b.dataset.view);
+      }));
+      slotEl.querySelectorAll('.egress-blocklog-csv-btn').forEach(b => b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this._exportEgressBlockLogCsv(policyId);
+      }));
+      slotEl.querySelectorAll('.egress-allow-btn').forEach(b => b.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const hostname = b.dataset.hostname;
+        if (!confirm(`Add "${hostname}" to the allowlist for this policy? The current preset will switch to 'custom'.`)) return;
+        try {
+          const r = await Api.egressFilterAllowHostname(policyId, hostname);
+          if (r.added) Toast.success(`${hostname} added to allowlist`);
+          else Toast.warning(`${hostname}: ${r.reason || 'no change'}`);
+          await this._renderEgressBlockLog(slotEl, policyId, slotEl.dataset.view);
+        } catch (err) { Toast.error(err.message); }
+      }));
     } catch (e) {
       slotEl.innerHTML = `<div style="color:#ef4444;font-size:12px">Failed to load deny log: ${Utils.escapeHtml(e.message)}</div>`;
     }
+  },
+
+  _renderEgressBlockLogHeader(_policyId, view, count) {
+    const btn = (v, label) => `<button class="btn btn-xs ${v === view ? 'btn-primary' : 'btn-secondary'} egress-blocklog-view-btn" data-view="${v}">${label}</button>`;
+    return `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <i class="fas fa-ban" style="color:#ef4444"></i>
+        <strong style="font-size:12px">Deny log</strong>
+        <span style="color:var(--text-dim);font-size:11px">(${count} ${view === 'grouped' ? 'hosts' : 'events'})</span>
+        <div style="flex:1"></div>
+        ${btn('grouped', 'Grouped')}
+        ${btn('recent', 'Recent')}
+        <button class="btn btn-xs btn-secondary egress-blocklog-csv-btn" title="Export CSV"><i class="fas fa-file-csv"></i> CSV</button>
+      </div>`;
+  },
+
+  async _exportEgressBlockLogCsv(policyId) {
+    try {
+      const { entries = [] } = await Api.egressFilterBlockLog(policyId, { limit: 1000 });
+      if (entries.length === 0) { Toast.warning('No deny events to export'); return; }
+      const csv = [
+        ['id', 'blocked_at', 'hostname', 'port', 'proto', 'reason', 'container_id'].join(','),
+        ...entries.map(e => [e.id, e.blocked_at, e.hostname, e.port, e.proto, e.reason, e.container_id || ''].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')),
+      ].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `egress-blocklog-policy${policyId}-${Date.now()}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      Toast.success(`Exported ${entries.length} events`);
+    } catch (e) { Toast.error(e.message); }
   },
 
   // ─── Egress filter modal (Enable or Manage)

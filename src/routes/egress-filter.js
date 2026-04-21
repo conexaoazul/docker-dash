@@ -317,6 +317,51 @@ router.get('/policies/:id/status', requireAuth, requireRole('admin'), async (req
   }
 });
 
+// GET /policies/:id/block-log/grouped — deny counts grouped by hostname (v6.9.1)
+router.get('/policies/:id/block-log/grouped', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const policy = egressFilter.getPolicy(id);
+    if (!policy) return res.status(404).json({ error: 'Policy not found' });
+    const sinceHours = parseInt(req.query.sinceHours, 10) || 168;
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const groups = egressFilter.getBlockLogGrouped(id, { sinceHours, limit });
+    res.json({ policyId: id, sinceHours, groups });
+  } catch (err) {
+    log.error('block log grouped', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /policies/:id/allow-hostname — quick-action: add a hostname to this
+// policy's allowlist. Switches preset to 'custom' if necessary. (v6.9.1)
+router.post('/policies/:id/allow-hostname', requireAuth, requireRole('admin'), writeable, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { hostname } = req.body || {};
+    if (!hostname) return res.status(400).json({ error: 'hostname required' });
+
+    const result = egressFilter.allowHostnameOnPolicy(id, hostname);
+
+    await auditService.log({
+      userId: req.user?.id,
+      username: req.user?.username,
+      ip: getClientIp(req),
+      action: 'egress_policy_allowlist_added',
+      details: { policyId: id, hostname: hostname.trim().toLowerCase(), added: result.added },
+    });
+
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    const msg = err.message || 'Internal server error';
+    if (/not found|required|Invalid|soft-deleted/i.test(msg)) {
+      return res.status(400).json({ error: msg });
+    }
+    log.error('allow hostname', err);
+    res.status(500).json({ error: msg });
+  }
+});
+
 // GET /policies/:id/block-log — paginated deny log for this policy
 router.get('/policies/:id/block-log', requireAuth, requireRole('admin'), (req, res) => {
   try {

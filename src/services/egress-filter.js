@@ -306,6 +306,61 @@ function getBlockLog(policyId, { limit = 100, sinceId = 0 } = {}) {
   return rows;
 }
 
+// v6.9.1: Group deny events by hostname for "which hosts get blocked most?"
+// view. Returns hostname + count + last_seen + top reasons.
+function getBlockLogGrouped(policyId, { limit = 50, sinceHours = 168 } = {}) {
+  return getDb().prepare(`
+    SELECT
+      hostname,
+      COUNT(*) AS count,
+      MAX(blocked_at) AS last_seen,
+      MIN(blocked_at) AS first_seen,
+      GROUP_CONCAT(DISTINCT port) AS ports,
+      GROUP_CONCAT(DISTINCT reason) AS reasons
+    FROM egress_block_log
+    WHERE policy_id = ?
+      AND blocked_at >= datetime('now', '-' || ? || ' hours')
+    GROUP BY hostname
+    ORDER BY count DESC, last_seen DESC
+    LIMIT ?
+  `).all(policyId, Math.max(1, Math.min(8760, sinceHours)), Math.min(500, Math.max(1, limit)));
+}
+
+// v6.9.1: Quick-action — add a hostname to a policy's allowlist.
+// Common flow: user sees a legitimate deny in the log, clicks "Allow".
+// We switch the preset to 'custom' (because adding to a preset's list would
+// otherwise be overridden when the preset refreshes) and append the hostname.
+// Returns the updated policy.
+function allowHostnameOnPolicy(policyId, hostname) {
+  if (!hostname || typeof hostname !== 'string') throw new Error('hostname required');
+  const cleaned = hostname.trim().toLowerCase();
+  const err = validateAllowlistEntry(cleaned);
+  if (err) throw new Error(`Invalid hostname: ${err}`);
+
+  const policy = getPolicy(policyId);
+  if (!policy) throw new Error(`Policy ${policyId} not found`);
+  if (!policy.active) throw new Error('Policy is soft-deleted');
+
+  const already = new Set(policy.allowlist || []);
+  if (already.has(cleaned)) {
+    return { policy, added: false, reason: 'already-in-allowlist' };
+  }
+
+  // If the current preset isn't 'custom', switch to 'custom' so our addition
+  // persists. Otherwise the union from the preset would always re-resolve
+  // without this hostname on future edits.
+  const newAllowlist = dedupe([...policy.allowlist, cleaned]);
+  getDb().prepare(`
+    UPDATE egress_policies
+    SET preset = 'custom', allowlist = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(JSON.stringify(newAllowlist), policyId);
+
+  log.info('Hostname allowed via quick-action', { policyId, hostname: cleaned, previousPreset: policy.preset });
+  writePolicyFile();
+  return { policy: getPolicy(policyId), added: true };
+}
+
 // Called by the sidecar once enforcement lands (rc2). Exposed now as a no-op-safe
 // API hook so we can wire the contract early.
 function recordBlockedAttempt({ policyId, containerId, hostname, port, proto, reason }) {
@@ -409,6 +464,8 @@ module.exports = {
   canApplyFilter,
   // Block log
   getBlockLog,
+  getBlockLogGrouped,
+  allowHostnameOnPolicy,
   recordBlockedAttempt,
   pruneOldBlockLog,
   // Sidecar wiring (v6.7.0-alpha.2)

@@ -10,6 +10,18 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.9.1',
+      date: '2026-04-21',
+      title: 'Egress block log — quick-actions, grouped view, CSV export',
+      changes: [
+        { type: 'feature', text: 'One-click "Allow" button on blocked hostnames in the deny log. When your container legitimately needs a hostname that got blocked, click Allow → confirm → done (3 steps → 2 clicks). If the policy was on a preset like registry-only, it switches to custom so the addition persists. Audit-logged as egress_policy_allowlist_added.' },
+        { type: 'feature', text: 'Grouped-by-hostname view for the deny log. Default view now shows a table: one row per hostname, with count, last-seen timestamp, port list, and Allow button. Toggle Grouped / Recent in the log header. Default window 7 days, configurable.' },
+        { type: 'feature', text: 'CSV export — download last 1000 deny events with id/timestamp/hostname/port/proto/reason/container_id columns for offline analysis or compliance reports.' },
+        { type: 'feature', text: 'New API endpoints: GET /api/egress-filter/policies/:id/block-log/grouped and POST /api/egress-filter/policies/:id/allow-hostname. Backend validation rejects IPs, IMDS endpoints, malformed names — same rules as manual allowlist edits.' },
+        { type: 'improvement', text: 'Tests: 670 → 677 (+7). egress-filter.test.js covers grouped aggregation + 6 allow-hostname scenarios (add-to-custom, preset-switch, idempotent dup, reject IP/IMDS/malformed, 404 unknown policy).' },
+      ],
+    },
+    {
       version: '6.9.0',
       date: '2026-04-21',
       title: 'Remediation Wizard polish — scheduled, notified, configurable',

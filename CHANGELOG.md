@@ -2,6 +2,39 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.9.1] - 2026-04-21 — "Egress block log: quick-actions + grouped view + CSV"
+
+UX polish on the Outbound Filter deny log. The flow "I see my container being blocked on a hostname it legitimately needs → add it to the allowlist" dropped from 3 steps (open manage modal → paste hostname → save) to 2 clicks (**Allow** → confirm).
+
+### Added
+
+- **Grouped-by-hostname view** for the deny log. Instead of a raw stream of events, shows a table with one row per hostname: count, last seen, ports, and a per-row **Allow** button. Defaults to a 7-day window. Toggle between `Grouped` / `Recent` in the log viewer header.
+- **Quick-action: Allow a blocked hostname** — one click + confirm adds the hostname to the policy's allowlist. If the policy was on a preset (e.g. `registry-only`), it's switched to `custom` so the addition persists across subsequent edits. Audit-logged as `egress_policy_allowlist_added`.
+- **CSV export** — downloads the last 1000 deny events with full columns (id, blocked_at, hostname, port, proto, reason, container_id) for offline analysis / compliance reports.
+
+### Backend
+
+- **`src/services/egress-filter.js`**:
+  - `getBlockLogGrouped(policyId, {sinceHours, limit})` — SQL aggregates count/last_seen/first_seen per hostname, sorted by count DESC, configurable time window (1h → 1y).
+  - `allowHostnameOnPolicy(policyId, hostname)` — validates (reject IPs + IMDS + malformed), dedupes, persists via a `UPDATE ... SET preset='custom', allowlist=?` transaction, calls `writePolicyFile()`.
+- **`src/routes/egress-filter.js`**:
+  - `GET /api/egress-filter/policies/:id/block-log/grouped?sinceHours=168&limit=50`
+  - `POST /api/egress-filter/policies/:id/allow-hostname` — body `{hostname}`, returns `{ok, added, policy}` or `{added: false, reason: 'already-in-allowlist'}`.
+- **Frontend API methods**: `Api.egressFilterBlockLogGrouped`, `Api.egressFilterAllowHostname`.
+
+### Tests
+
+- **`egress-filter.test.js`** gains 7 tests:
+  - `getBlockLogGrouped` — aggregates count + ports + last_seen correctly, sorted DESC
+  - `allowHostnameOnPolicy` — adds to custom, switches preset from registry-only to custom, idempotent on duplicate, rejects IPs / IMDS / malformed, 404 on unknown policy, requires hostname.
+- **Total: 677 passing / 45 suites** (+7).
+
+### Operator notes
+
+No breaking changes. If you previously used the deny log, it now defaults to `Grouped` view — click `Recent` to switch back to the v6.7 stream format.
+
+---
+
 ## [6.9.0] - 2026-04-21 — "Remediation Wizard polish — scheduled, notified, configurable"
 
 Three polish features that round out the Remediation Wizard's story. Nothing revolutionary, but each closes a real gap called out in BACKLOG.

@@ -381,6 +381,15 @@ const Api = {
     if (opts.sinceId != null) q.push(`sinceId=${opts.sinceId}`);
     return this.get(`/egress-filter/policies/${id}/block-log${q.length ? '?' + q.join('&') : ''}`);
   },
+  egressFilterBlockLogGrouped(id, opts = {}) {
+    const q = [];
+    if (opts.sinceHours != null) q.push(`sinceHours=${opts.sinceHours}`);
+    if (opts.limit != null) q.push(`limit=${opts.limit}`);
+    return this.get(`/egress-filter/policies/${id}/block-log/grouped${q.length ? '?' + q.join('&') : ''}`);
+  },
+  egressFilterAllowHostname(id, hostname) {
+    return this.post(`/egress-filter/policies/${id}/allow-hostname`, { hostname });
+  },
 
   // ─── Secrets Wizard ───────────────────────────────────
   analyzeSecretsWizard(envContent) { return this.post('/system/secrets-wizard/analyze', { envContent }); },

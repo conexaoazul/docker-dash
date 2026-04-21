@@ -276,6 +276,23 @@ describe('block log', () => {
     expect(() => egressFilter.recordBlockedAttempt({ policyId })).toThrow(/missing required/);
   });
 
+  it('groups by hostname with count + last_seen (v6.9.1)', () => {
+    egressFilter.recordBlockedAttempt({ policyId, containerId: '', hostname: 'evil.com', port: 443, proto: 'tcp' });
+    egressFilter.recordBlockedAttempt({ policyId, containerId: '', hostname: 'evil.com', port: 80, proto: 'tcp' });
+    egressFilter.recordBlockedAttempt({ policyId, containerId: '', hostname: 'evil.com', port: 443, proto: 'tcp' });
+    egressFilter.recordBlockedAttempt({ policyId, containerId: '', hostname: 'bad.io', port: 443, proto: 'tcp' });
+
+    const groups = egressFilter.getBlockLogGrouped(policyId, { sinceHours: 24, limit: 50 });
+    expect(groups).toHaveLength(2);
+    // Sorted by count DESC
+    expect(groups[0].hostname).toBe('evil.com');
+    expect(groups[0].count).toBe(3);
+    expect(groups[0].ports).toMatch(/443/);
+    expect(groups[0].ports).toMatch(/80/);
+    expect(groups[1].hostname).toBe('bad.io');
+    expect(groups[1].count).toBe(1);
+  });
+
   it('prunes old entries', () => {
     egressFilter.recordBlockedAttempt({ policyId, containerId: 'a', hostname: 'x.com', port: 443, proto: 'tcp' });
     getDb().prepare(`UPDATE egress_block_log SET blocked_at = datetime('now', '-40 days') WHERE id = (SELECT MIN(id) FROM egress_block_log)`).run();
@@ -284,6 +301,64 @@ describe('block log', () => {
     const log = egressFilter.getBlockLog(policyId);
     expect(log).toHaveLength(1);
     expect(log[0].hostname).toBe('y.com');
+  });
+});
+
+// ─── Quick-action: allowHostnameOnPolicy (v6.9.1) ─────
+
+describe('allowHostnameOnPolicy', () => {
+  beforeEach(() => {
+    getDb().prepare('DELETE FROM egress_policies').run();
+  });
+
+  it('adds a hostname to a custom policy and persists', () => {
+    const { policyId } = egressFilter.createPolicy({
+      scopeType: 'stack', scopeKey: 's1', preset: 'custom',
+      customAllowlist: ['docker.io'],
+    });
+    const r = egressFilter.allowHostnameOnPolicy(policyId, 'registry.npmjs.org');
+    expect(r.added).toBe(true);
+    expect(r.policy.allowlist).toEqual(expect.arrayContaining(['docker.io', 'registry.npmjs.org']));
+  });
+
+  it('switches preset to "custom" when adding to a preset-based policy', () => {
+    const { policyId } = egressFilter.createPolicy({
+      scopeType: 'stack', scopeKey: 's1', preset: 'registry-only',
+    });
+    const r = egressFilter.allowHostnameOnPolicy(policyId, 'example.com');
+    expect(r.added).toBe(true);
+    expect(r.policy.preset).toBe('custom');
+    expect(r.policy.allowlist).toEqual(expect.arrayContaining(['docker.io', 'example.com']));
+  });
+
+  it('idempotent: adding an already-listed hostname is a no-op', () => {
+    const { policyId } = egressFilter.createPolicy({
+      scopeType: 'stack', scopeKey: 's1', preset: 'custom',
+      customAllowlist: ['docker.io'],
+    });
+    const r = egressFilter.allowHostnameOnPolicy(policyId, 'docker.io');
+    expect(r.added).toBe(false);
+    expect(r.reason).toBe('already-in-allowlist');
+  });
+
+  it('rejects invalid hostnames', () => {
+    const { policyId } = egressFilter.createPolicy({
+      scopeType: 'stack', scopeKey: 's1', preset: 'custom', customAllowlist: [],
+    });
+    expect(() => egressFilter.allowHostnameOnPolicy(policyId, '1.2.3.4')).toThrow(/IP addresses/);
+    expect(() => egressFilter.allowHostnameOnPolicy(policyId, '169.254.169.254')).toThrow(/always blocked|IP/);
+    expect(() => egressFilter.allowHostnameOnPolicy(policyId, 'not a host!')).toThrow(/Invalid hostname/);
+  });
+
+  it('rejects unknown policy id', () => {
+    expect(() => egressFilter.allowHostnameOnPolicy(999999, 'docker.io')).toThrow(/not found/);
+  });
+
+  it('requires hostname', () => {
+    const { policyId } = egressFilter.createPolicy({
+      scopeType: 'stack', scopeKey: 's1', preset: 'custom', customAllowlist: [],
+    });
+    expect(() => egressFilter.allowHostnameOnPolicy(policyId, '')).toThrow(/hostname required/);
   });
 });
 
