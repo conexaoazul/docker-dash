@@ -53,6 +53,10 @@ const App = {
         mustChangePassword: me.mustChangePassword,
         defaultAdminActive: me.defaultAdminActive,
       };
+      // v6.11.1: Load DB-backed i18n overrides (accepted translations) before
+      // rendering. Fire-and-forget: static translations are always available;
+      // overrides just supplement them.
+      await i18n.reloadAllOverrides().catch(() => {});
       this._showApp();
       // Show setup wizard only if password change is required
       if (me.mustChangePassword) {

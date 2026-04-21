@@ -5428,7 +5428,10 @@ DB_PASS=secret"></textarea>
           panel.innerHTML = `
             <div style="margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
               <span class="text-sm"><strong>${missing.length}</strong> missing keys · ${totalChars.toLocaleString()} chars total</span>
-              <button class="btn btn-sm btn-secondary" id="t-select-all" style="margin-left:auto">Select all</button>
+              <label style="margin-left:auto;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px" title="Skip the Review step — translations go live immediately. Turn off if you want to check each one before it ships.">
+                <input type="checkbox" id="t-auto-accept" checked><span>Auto-accept (apply live)</span>
+              </label>
+              <button class="btn btn-sm btn-secondary" id="t-select-all">Select all</button>
               <button class="btn btn-sm btn-secondary" id="t-select-none">None</button>
               <button class="btn btn-sm btn-primary" id="t-translate"><i class="fas fa-language" style="margin-right:4px"></i>Translate selected (max 50)</button>
             </div>
@@ -5463,12 +5466,19 @@ DB_PASS=secret"></textarea>
             if (selected.length === 0) { Toast.warning('Select at least one key'); return; }
             if (selected.length > 50) { Toast.warning('Maximum 50 keys per batch'); return; }
             const provider = el.querySelector('#t-provider').value;
+            const autoAccept = panel.querySelector('#t-auto-accept').checked;
             const btn = panel.querySelector('#t-translate');
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:4px"></i>Translating…';
             try {
-              const r = await Api.translationsBatch({ provider, language: lang, keys: selected });
-              Toast.success(`Translated ${r.translated.length} keys (${r.chars} chars via ${r.provider}). Review in the Review tab.`);
+              const r = await Api.translationsBatch({ provider, language: lang, keys: selected, autoAccept });
+              if (r.autoAccepted) {
+                // v6.11.1: hot-reload i18n so the new strings appear immediately in the UI
+                await i18n.loadOverrides(lang);
+                Toast.success(`Translated ${r.translated.length} keys (${r.chars} chars via ${r.provider}) — live now`);
+              } else {
+                Toast.success(`Translated ${r.translated.length} keys (${r.chars} chars via ${r.provider}). Review and accept in the Review tab.`);
+              }
               this._tTab = 'review';
               this._renderTranslations(document.getElementById('sys-content'));
             } catch (err) {
@@ -5509,9 +5519,9 @@ DB_PASS=secret"></textarea>
                 <option value="rejected" ${this._reviewStatus === 'rejected' ? 'selected' : ''}>Rejected</option>
                 <option value="applied" ${this._reviewStatus === 'applied' ? 'selected' : ''}>Applied</option>
               </select>
-              <div style="margin-left:auto;display:flex;gap:6px">
-                <a class="btn btn-sm btn-primary" href="${Api.translationsExportUrl(this._reviewLang)}" download><i class="fas fa-download" style="margin-right:4px"></i>Export ${this._reviewLang}.js</a>
-                <button class="btn btn-sm btn-secondary" id="r-mark-exported"><i class="fas fa-check" style="margin-right:4px"></i>Mark as applied</button>
+              <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+                <span style="font-size:11px;color:var(--text-dim)">Accepted translations are live now — exports are optional for git contribution:</span>
+                <a class="btn btn-sm btn-secondary" href="${Api.translationsExportUrl(this._reviewLang)}" download title="Download a merged ${this._reviewLang}.js file — useful if you want to commit to a forked source tree"><i class="fas fa-download" style="margin-right:4px"></i>Export ${this._reviewLang}.js</a>
               </div>
             </div>
           </div>
@@ -5558,8 +5568,14 @@ DB_PASS=secret"></textarea>
         const tr = b.closest('tr');
         const id = tr.dataset.id;
         const text = tr.querySelector('.r-edit').value;
-        try { await Api.translationsPatch(id, { status: 'accepted', translated_text: text }); reload(); }
-        catch (err) { Toast.error(err.message); }
+        try {
+          await Api.translationsPatch(id, { status: 'accepted', translated_text: text });
+          // v6.11.1: Hot-reload i18n so the newly-accepted string is live immediately,
+          // not on next page refresh. Keeps the "I clicked Accept; why isn't it changing?"
+          // confusion away.
+          await i18n.loadOverrides(this._reviewLang);
+          reload();
+        } catch (err) { Toast.error(err.message); }
       }));
       el.querySelectorAll('.r-reject').forEach(b => b.addEventListener('click', async () => {
         const id = b.closest('tr').dataset.id;

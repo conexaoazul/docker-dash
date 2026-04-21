@@ -36,6 +36,38 @@ const i18n = {
     document.documentElement.lang = this._lang;
   },
 
+  // v6.11.1: Load runtime overrides from DB (accepted + applied translations)
+  // and deep-merge on top of the statically-registered tree. Called once after
+  // auth succeeds (see app.js init). Accept in the Review panel also calls
+  // reloadAllOverrides() so edits go live without a page reload.
+  async loadOverrides(code) {
+    if (code === 'en') return;  // EN is the source — no overrides by design
+    if (!this._translations[code]) return;
+    try {
+      const res = await fetch(`/api/translations/overrides/${encodeURIComponent(code)}`, { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.overrides || typeof data.overrides !== 'object') return;
+      this._deepMerge(this._translations[code], data.overrides);
+    } catch { /* network error — silently keep static translations */ }
+  },
+
+  async reloadAllOverrides() {
+    const langs = Object.keys(this._translations).filter(c => c !== 'en');
+    await Promise.all(langs.map(c => this.loadOverrides(c)));
+  },
+
+  _deepMerge(target, source) {
+    for (const [k, v] of Object.entries(source || {})) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        if (!target[k] || typeof target[k] !== 'object') target[k] = {};
+        this._deepMerge(target[k], v);
+      } else {
+        target[k] = v;
+      }
+    }
+  },
+
   get lang() { return this._lang; },
 
   setLang(lang) {

@@ -396,6 +396,21 @@ function markExported(lang) {
   `).run(lang);
 }
 
+// v6.11.1: Runtime overrides for the frontend i18n loader.
+// Returns an UNFLATTENED tree of accepted+applied translations for the
+// language. The frontend deep-merges this into `i18n._translations[lang]`
+// after the static JS file is loaded — so accepted translations are live
+// on the next page render without a file write / commit / deploy.
+function getRuntimeOverrides(lang) {
+  const rows = getDb().prepare(`
+    SELECT key, translated_text FROM translations
+    WHERE language = ? AND status IN ('accepted', 'applied')
+  `).all(lang);
+  const flat = {};
+  for (const r of rows) flat[r.key] = r.translated_text;
+  return _unflatten(flat);
+}
+
 module.exports = {
   // Providers
   listProviders, getProvider, getProviderByName, upsertProvider, setProviderActive, deleteProvider,
@@ -409,7 +424,7 @@ module.exports = {
   // Review CRUD
   upsertTranslation, listTranslations, setTranslationStatus, editTranslation,
   // Export
-  exportLocale, markExported,
+  exportLocale, markExported, getRuntimeOverrides,
   // Internals for tests
   _internals: { _yearMonth, _flatten, _unflatten, _loadLocaleTree, _listLocales },
 };

@@ -2,6 +2,48 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.11.1] - 2026-04-21 — "Translations go live automatically (no more download-the-file nonsense)"
+
+Direct reaction to user feedback on v6.11.0: *"ce o sa fac eu cu fisierul descarcat?"* — fair point. The download-and-manually-commit flow made no sense for a self-hosted container tool. Translations are now applied at runtime from the DB. **No file editing. No git commit. No container rebuild.**
+
+### Changed — Runtime overrides from DB
+
+- **`GET /api/translations/overrides/:language`** (any authenticated user) — returns accepted + applied translations as an unflattened tree for the language.
+- **Frontend `i18n.js`** gains `loadOverrides(code)` and `reloadAllOverrides()`. Called once after login completes, then every time an admin accepts a translation or runs a batch with auto-accept. Deep-merges on top of the statically-registered tree, so the current page picks up new strings on next `i18n.t(...)` call (most tabs re-render on navigation, so the refresh is seamless).
+- **No file writes** from the admin UI. `public/js/i18n/*.js` remains source-of-truth for the EN baseline and any translations committed to git; DB overrides layer on top without touching source files.
+
+### Added — Auto-accept toggle
+
+- New **"Auto-accept (apply live)"** checkbox in the Translate panel, **checked by default**. When on, batch-translated strings skip the `pending` status and land directly in `accepted` — immediately visible in the UI after i18n hot-reload. Turn it off if you want to review each machine translation before it ships (unchanged v6.11.0 flow).
+- Toast after auto-accept batch: *"Translated N keys — **live now**"* so there's no ambiguity about what happened.
+
+### Changed — Export demoted to "optional"
+
+- The Review panel's Export button is no longer styled as primary. Copy reads: *"Accepted translations are live now — exports are optional for git contribution."*
+- Use case for Export kept: users who want to fork Docker Dash and upstream their translations to the source tree. Everyone else ignores it.
+
+### Migration path
+
+Upgrade drop-in. No DB migration. Any translations you already accepted in v6.11.0 are now live automatically on next login — no action needed.
+
+### Files touched
+
+- `src/services/translations.js` — new `getRuntimeOverrides(lang)` → unflattened tree.
+- `src/routes/translations.js` — new `GET /overrides/:language` endpoint.
+- `public/js/i18n.js` — `loadOverrides` + `reloadAllOverrides` + `_deepMerge`.
+- `public/js/app.js` — `await i18n.reloadAllOverrides()` after auth in `init()`.
+- `public/js/pages/system.js` — auto-accept toggle in Translate panel; hot-reload after Accept in Review panel; Export demoted.
+
+### Tests
+
+- 695 passing + 4 skipped / 47 suites — unchanged. No new tests (UI + endpoint wiring).
+
+### Why this matters
+
+Before v6.11.1 the flow was: "Translate → Review → Accept → Export → `cp` to source tree → `git commit` → rebuild image → redeploy." For a web-based admin tool that goes against everything the product stands for. Now it's: "Translate → done." The review step is opt-in for users who want it, and the export is available for upstream-contribution scenarios only.
+
+---
+
 ## [6.11.0] - 2026-04-21 — "Translations — Google Translate + DeepL integration with quota tracking"
 
 Closes the BACKLOG i18n gap without needing human translators. New System → **Translations** tab integrates Google Translate + DeepL free-tier APIs (500k chars / month each), tracks monthly usage per service to stay within limits, and provides a review workflow before any locale file ships to source control.

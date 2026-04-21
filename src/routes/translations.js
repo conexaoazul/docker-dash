@@ -121,7 +121,7 @@ router.get('/missing', requireAuth, requireRole('admin', 'operator'), (req, res)
 
 router.post('/batch', requireAuth, requireRole('admin'), writeable, async (req, res) => {
   try {
-    const { provider, language, keys } = req.body || {};
+    const { provider, language, keys, autoAccept } = req.body || {};
     if (!provider || !language || !Array.isArray(keys) || keys.length === 0) {
       return res.status(400).json({ error: 'provider, language, keys[] required' });
     }
@@ -136,7 +136,7 @@ router.post('/batch', requireAuth, requireRole('admin'), writeable, async (req, 
     const texts = toTranslate.map((t) => t.source_text);
     const result = await translations.translateBatch({ provider, texts, targetLang: language });
 
-    // Persist each translation as pending
+    // Persist each translation (pending by default, or accepted if autoAccept=true)
     for (let i = 0; i < toTranslate.length; i++) {
       translations.upsertTranslation({
         language,
@@ -146,12 +146,17 @@ router.post('/batch', requireAuth, requireRole('admin'), writeable, async (req, 
         provider,
         chars_used: (toTranslate[i].source_text || '').length,
       });
+      if (autoAccept) {
+        // Fetch the row we just upserted + flip to accepted so it's live immediately
+        const row = translations.listTranslations({ language }).find((r) => r.key === toTranslate[i].key);
+        if (row) translations.setTranslationStatus(row.id, 'accepted');
+      }
     }
 
     await auditService.log({
       userId: req.user?.id, username: req.user?.username, ip: getClientIp(req),
       action: 'translation_batch',
-      details: { provider, language, count: toTranslate.length, chars: result.chars },
+      details: { provider, language, count: toTranslate.length, chars: result.chars, autoAccept: Boolean(autoAccept) },
     });
 
     res.json({
@@ -159,6 +164,7 @@ router.post('/batch', requireAuth, requireRole('admin'), writeable, async (req, 
       translated: toTranslate.map((t, i) => ({ key: t.key, source_text: t.source_text, translated_text: result.translated[i] })),
       chars: result.chars,
       provider,
+      autoAccepted: Boolean(autoAccept),
     });
   } catch (err) {
     if (err.code === 'QUOTA_EXCEEDED') {
@@ -200,6 +206,25 @@ router.patch('/:id', requireAuth, requireRole('admin'), writeable, async (req, r
   } catch (err) {
     if (/Invalid|required/i.test(err.message)) return res.status(400).json({ error: err.message });
     log.error('patch translation', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Runtime overrides (v6.11.1) ───────────────────────
+//
+// Called by the frontend i18n loader after static locale files register
+// themselves. Returns an unflattened tree of accepted+applied translations
+// for the language — the loader deep-merges on top so admin Accept in the
+// Review panel is live on the next page render, no file write needed.
+//
+// Any authenticated user can read (these are UI strings displayed to them).
+router.get('/overrides/:language', requireAuth, (req, res) => {
+  try {
+    const lang = req.params.language;
+    if (!/^[a-z]{2,5}(-[A-Z]{2})?$/.test(lang)) return res.status(400).json({ error: 'Invalid language code' });
+    res.json({ language: lang, overrides: translations.getRuntimeOverrides(lang) });
+  } catch (err) {
+    log.error('runtime overrides', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -10,6 +10,18 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.11.1',
+      date: '2026-04-21',
+      title: 'Translations go live automatically — no more download-the-file nonsense',
+      changes: [
+        { type: 'feature', text: 'Direct reaction to v6.11.0 feedback: the download-and-commit flow made no sense for a self-hosted container tool. Translations are now applied at RUNTIME from the DB. No file editing, no git commit, no container rebuild.' },
+        { type: 'feature', text: 'New GET /api/translations/overrides/:language endpoint returns accepted translations as an unflattened tree. Frontend i18n.js gains loadOverrides() + reloadAllOverrides() + _deepMerge — called after login and every time an admin accepts a translation. Deep-merges on top of statically-registered EN baseline.' },
+        { type: 'feature', text: 'Auto-accept toggle in Translate panel, CHECKED BY DEFAULT. Batch-translated strings land directly in accepted status and are live after i18n hot-reload. Toast confirms: "Translated N keys — live now." Uncheck if you want per-row review before shipping (old v6.11.0 flow).' },
+        { type: 'improvement', text: 'Export button demoted from primary to optional. Copy now reads: "Accepted translations are live now — exports are optional for git contribution." Kept for users who want to fork + upstream their translations.' },
+        { type: 'improvement', text: 'Drop-in upgrade. Any translations accepted in v6.11.0 auto-activate on next login. No DB migration.' },
+      ],
+    },
+    {
       version: '6.11.0',
       date: '2026-04-21',
       title: 'Translations — Google Translate + DeepL with quota tracking',
