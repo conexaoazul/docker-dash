@@ -10,6 +10,18 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.12.2',
+      date: '2026-04-22',
+      title: 'Closing the detection-vs-docs gap: TrueNAS SCALE, QNAP, OpenMediaVault guides',
+      changes: [
+        { type: 'feature', text: 'Three new bilingual How-To guides (EN + RO) for the NAS platforms that got auto-detection in v6.12.0 but had no dedicated setup docs. Every platform Docker Dash detects now has its own guide.' },
+        { type: 'feature', text: 'TrueNAS SCALE guide — covers the Electric Eel (24.10+) Docker-based release. Calls out the K3s incompatibility for older SCALE versions, the critical "don\'t touch ix-* managed containers" caveat, and the ZFS-dataset mount convention for persistent storage.' },
+        { type: 'feature', text: 'QNAP Container Station guide — QTS 5.x and QuTS hero. Explicit commands to discover the Docker socket path (which varies between QTS versions — sometimes /var/run/docker.sock, sometimes buried under /share/ZFS*_DATA/.qpkg/container-station/). Shared-folder mount convention and coexistence with Container Station UI.' },
+        { type: 'feature', text: 'OpenMediaVault guide — OMV is Debian under the hood so Docker is installed via the omv-extras community plugin, not the core package. Explains the hostname-based detection heuristic so users know why the badge may say "Debian" and how to trigger the OMV badge.' },
+        { type: 'improvement', text: 'Platform coverage matrix now complete: Synology, Unraid, TrueNAS SCALE, QNAP, OMV, Generic VPS — all have detection + dedicated docs. Closes a gap called out in v6.12.0.' },
+      ],
+    },
+    {
       version: '6.12.1',
       date: '2026-04-22',
       title: 'Cloud vendor badges via DMI — AWS, Azure, GCE, Hetzner, DO, VMware + more',

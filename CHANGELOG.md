@@ -2,6 +2,47 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.12.2] - 2026-04-22 — "Close the detection-vs-docs gap: TrueNAS + QNAP + OMV guides"
+
+v6.12.0 added platform detection for 5 NAS systems but shipped How-To guides for only 2 (Synology + Unraid). A user connecting a QNAP saw the badge light up but had to go elsewhere for setup help — inconsistent with the promise of the release. This patch closes that gap.
+
+### Added — Three new bilingual How-To guides (EN + RO)
+
+Migration `059_howto_nas_guides_pt2.js` upserts into `howto_guides`:
+
+- **`truenas-scale`** — TrueNAS SCALE 24.10 "Electric Eel" or newer (the Docker-based release; pre-Eel K3s versions are called out as unsupported). Covers: enabling SSH, adding the admin to the docker group, wiring up the host, the *critical* caveat that TrueNAS-managed `ix-*` containers should be left to the SCALE UI (Docker Dash deploys go fine side-by-side), and the ZFS-dataset mount convention for persistent storage. Troubleshoots the "why does my badge show Debian instead of TrueNAS SCALE" kernel-marker issue.
+- **`qnap-qts`** — Container Station on QTS 5.x and QuTS hero. Calls out the QNAP quirk where the Docker socket path varies by QTS version (sometimes `/var/run/docker.sock`, sometimes `/share/ZFS*_DATA/.qpkg/container-station/...`) and gives the discovery commands. Covers shared-folder mount convention (`/share/<pool>/...`) and Container Station coexistence — both UIs read the same daemon.
+- **`openmediavault`** — OMV (Debian + NAS UI). Explicit about the omv-extras + Docker plugin installation path (OMV doesn't ship Docker in core). Explains the hostname-based detection heuristic so users know why the badge says "Debian" unless their hostname contains "openmediavault" (and how to fix that). Covers coexistence with OMV's own Compose plugin.
+
+### Design choices
+
+- **Difficulty levels** — TrueNAS SCALE and QNAP flagged `intermediate` (the K3s-vs-Docker distinction, ix-prefix managed containers, variable socket path are not beginner territory); OMV stays `beginner` because it's just Debian with a UI.
+- **One warning box per guide** — critical gotcha called out up top (K3s incompatibility, variable socket path, hostname detection). Keeps the rest of the guide flowing without blocking callouts everywhere.
+- **No new code** — pure content migration. Existing How-To rendering pipeline handles everything.
+
+### Platform coverage now complete
+
+Every platform Docker Dash auto-detects has a dedicated setup guide:
+
+| Platform         | Detection (v6.12.0) | Guide (v6.12.0/6.12.2) |
+|------------------|:-------------------:|:----------------------:|
+| Synology DSM     | ✅                  | ✅ v6.12.0             |
+| Unraid           | ✅                  | ✅ v6.12.0             |
+| TrueNAS SCALE    | ✅                  | ✅ v6.12.2             |
+| QNAP             | ✅                  | ✅ v6.12.2             |
+| OpenMediaVault   | ✅                  | ✅ v6.12.2             |
+| Generic VPS      | ✅ (distro-only)    | ✅ v6.12.0             |
+
+### Tests
+
+- 740 passing + 4 skipped / 50 suites (unchanged — content-only migration).
+
+### Files touched
+
+- `src/db/migrations/059_howto_nas_guides_pt2.js` (new) — 3 bilingual guides.
+
+---
+
 ## [6.12.1] - 2026-04-22 — "Cloud vendor badges via DMI — the follow-up v6.12.0 promised"
 
 Second platform pill on the Multi-Host card: which cloud (or hypervisor) is this Docker daemon actually running on? AWS EC2, Google Cloud, Azure VM, DigitalOcean, Hetzner, Linode, Vultr, Oracle Cloud, Scaleway, OVHcloud — plus on-prem hypervisors (VMware, VirtualBox, KVM/QEMU, Xen, Parallels) and bare-metal motherboard vendors.
