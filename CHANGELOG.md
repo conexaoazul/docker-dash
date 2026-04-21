@@ -2,6 +2,53 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.13.1] - 2026-04-22 — "SSH key How-To + GHA Node 24 future-proofing"
+
+Two unrelated-but-small cleanups in one release:
+1. The canonical **SSH key auth guide** that v6.12.0's NAS docs called out ("private key recommended") but never walked through.
+2. **GitHub Actions bumped** to their first Node 24 majors — clearing the June 2 2026 deprecation deadline with margin.
+
+### Added — Canonical SSH key auth guide
+
+Migration 060 adds a new built-in How-To (`ssh-key-auth`, EN + RO) that covers every platform we detect:
+
+- **Key generation** — `ssh-keygen -t ed25519` (or RSA 4096 for ancient servers). Passphrase support explained (Docker Dash accepts encrypted keys).
+- **Per-platform public key placement** — with the specific UI path or gotcha for each:
+  - 🟦 **Synology DSM 7.x** — User Home Service MUST be enabled first; `chmod 700/600` ritual; DSM 7.2 `PubkeyAuthentication` regression workaround
+  - 🟧 **Unraid** — UI-managed (Settings → User Utilities → User Profile → SSH Authorized Keys)
+  - 🟩 **TrueNAS SCALE** — UI-managed (Credentials → Local Users → SSH Public Key field)
+  - 🟥 **QNAP QTS / QuTS hero** — manual shell; warned that QTS firmware updates sometimes reset perms
+  - 🟫 **OpenMediaVault** — UI-managed (Users → Edit → Public keys tab)
+  - ⬛ **Generic VPS** — `ssh-copy-id` or one-liner curl/cat pipe
+- **Private key upload** — PowerShell + Linux/macOS commands to extract, copy the BEGIN/END markers correctly, paste into Docker Dash's host-add form
+- **Post-setup hardening** — how to disable `PasswordAuthentication` safely, Synology-specific `synoservice --restart sshd` instead of `systemctl`
+- **Troubleshooting matrix** — `ssh -vvv` debug output interpretation, the 6 most common failure modes (wrong perms, wrong file, partial paste, etc.)
+- **Key hygiene** — rotation cadence, backup, passphrase recommendation
+
+### Changed — GitHub Actions runtime bumped to Node 24
+
+All 4 workflows updated:
+- `actions/checkout@v4` → `@v5`
+- `actions/setup-node@v4` → `@v5` (kept `node-version: '20'` — that's the production Dockerfile base image, independent of the action's runtime)
+- `docker/setup-qemu-action@v3` → `@v4`
+- `docker/setup-buildx-action@v3` → `@v4`
+- `docker/login-action@v3` → `@v4`
+- `docker/metadata-action@v5` → `@v6`
+- `docker/build-push-action@v5` → `@v6`
+
+Clears the deprecation warning on every CI run and the June 2 2026 hard cutoff with 40+ days of margin.
+
+### Tests
+
+- **740 passing + 4 skipped / 50 suites** (unchanged — migration is content-only, workflow changes don't affect unit tests).
+
+### Files touched
+
+- `src/db/migrations/060_howto_ssh_key_auth.js` (new) — bilingual guide.
+- `.github/workflows/{ci,docker-build,caddy-image,egress-filter-image}.yml` — 7 action version bumps.
+
+---
+
 ## [6.13.0] - 2026-04-22 — "Drop the deprecated LDAP client (ldapjs → ldapts)"
 
 `ldapjs` 3.x was flagged decommissioned by upstream months ago — its 9 `@ldapjs/*` sub-packages all carry deprecation warnings. This release swaps in `ldapts@8.1.7`, the modern Promise-based successor, and cleans up the BACKLOG entries that had silently been completed in prior releases but never marked.

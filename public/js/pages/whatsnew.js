@@ -10,6 +10,17 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.13.1',
+      date: '2026-04-22',
+      title: 'SSH key How-To + GitHub Actions Node 24 future-proofing',
+      changes: [
+        { type: 'feature', text: 'New canonical SSH key auth guide (ssh-key-auth, bilingual EN+RO). Walks through ed25519 key generation, per-platform public-key placement (Synology DSM 7.x, Unraid, TrueNAS SCALE, QNAP, OMV, generic VPS — each has its own UI path or gotcha), private key upload to Docker Dash, optional PasswordAuthentication lockdown, and a 6-row troubleshooting matrix for the most common "my key is ignored" failure modes.' },
+        { type: 'feature', text: 'Synology DSM 7.x specifics called out: User Home Service must be enabled first or .ssh/authorized_keys has nowhere to live. DSM 7.2 also sometimes re-comments PubkeyAuthentication on firmware updates — workaround documented.' },
+        { type: 'improvement', text: 'Closes the doc gap in v6.12.0/v6.12.2 where each NAS guide said "Auth: private key recommended" without actually explaining how to set it up. Now platform guides can reference one canonical artifact.' },
+        { type: 'improvement', text: 'GitHub Actions bumped to first Node-24 majors: actions/checkout@v5, actions/setup-node@v5, docker/setup-qemu-action@v4, docker/setup-buildx-action@v4, docker/login-action@v4, docker/metadata-action@v6, docker/build-push-action@v6. Clears the deprecation warning on every CI run and the June 2 2026 hard cutoff with 40+ days margin. Kept node-version:20 for tests (matches production Dockerfile base image).' },
+      ],
+    },
+    {
       version: '6.13.0',
       date: '2026-04-22',
       title: 'Drop the deprecated LDAP client (ldapjs → ldapts)',

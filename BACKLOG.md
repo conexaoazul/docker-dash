@@ -104,13 +104,9 @@ Available major upgrades, deliberately not taken:
 
 ### GHA actions on deprecated Node.js 20
 
-**Why deferred:** Informational warning on every CI run. All docker-related actions (`actions/checkout@v4`, `docker/build-push-action@v5`, `docker/login-action@v3`, `docker/metadata-action@v5`, `docker/setup-buildx-action@v3`, `docker/setup-qemu-action@v3`) run on Node.js 20. GitHub forces them to Node.js 24 starting 2026-06-02 and removes Node.js 20 from runners on 2026-09-16.
+**Status (updated 2026-04-22):** ✅ Shipped in v6.13.1. All 4 workflows (`ci.yml`, `docker-build.yml`, `caddy-image.yml`, `egress-filter-image.yml`) bumped to the first Node-24 major of each action: `actions/checkout@v5`, `actions/setup-node@v5`, `docker/setup-qemu-action@v4`, `docker/setup-buildx-action@v4`, `docker/login-action@v4`, `docker/metadata-action@v6`, `docker/build-push-action@v6`. Kept `node-version: '20'` for tests (mirrors the production Dockerfile base image); only the actions' own runtime moved to Node 24.
 
-**Current impact:** none. Warnings only.
-
-**Fix:** bump each action to its newest major version (e.g. `actions/checkout@v5` if released). Done in one PR.
-
-**Estimated effort:** 30 min. **Deadline:** 2026-06-02 (hard — after that GitHub forces the bump; better to test ahead).
+**Pre-deadline:** was 2026-06-02 GitHub-forced. Done with 40+ days of margin.
 
 ### F20 — Retroactive `down()` for 44 existing migrations
 
