@@ -365,6 +365,26 @@ const Api = {
   // ─── Egress Audit ─────────────────────────────────────
   getEgressAudit() { return this.get('/system/egress-audit'); },
 
+  // ─── Translations (v6.11.0) ───────────────────────────
+  translationsProviders()                      { return this.get('/translations/providers'); },
+  translationsUpsertProvider(body)             { return this.post('/translations/providers', body); },
+  translationsTestProvider(id)                 { return this.post(`/translations/providers/${id}/test`); },
+  translationsPatchProvider(id, body)          { return this.patch(`/translations/providers/${id}`, body); },
+  translationsDeleteProvider(id)               { return this.delete(`/translations/providers/${id}`); },
+  translationsUsage(yearMonth)                 { return this.get(`/translations/usage${yearMonth ? `?yearMonth=${yearMonth}` : ''}`); },
+  translationsLanguages()                      { return this.get('/translations/languages'); },
+  translationsMissing(language)                { return this.get(`/translations/missing?language=${encodeURIComponent(language)}`); },
+  translationsBatch(body)                      { return this.post('/translations/batch', body); },
+  translationsList(opts = {})                  {
+    const q = [];
+    if (opts.language) q.push(`language=${encodeURIComponent(opts.language)}`);
+    if (opts.status) q.push(`status=${encodeURIComponent(opts.status)}`);
+    return this.get(`/translations${q.length ? '?' + q.join('&') : ''}`);
+  },
+  translationsPatch(id, body)                  { return this.patch(`/translations/${id}`, body); },
+  translationsExportUrl(language)              { return `/api/translations/export?language=${encodeURIComponent(language)}`; },
+  translationsMarkExported(language)           { return this.post('/translations/mark-exported', { language }); },
+
   // ─── Egress Filter (v6.7 alpha.1: config only, no enforcement yet) ──
   egressFilterPresets()                { return this.get('/egress-filter/presets'); },
   egressFilterListPolicies(hostId)     { return this.get(`/egress-filter/policies${hostId != null ? `?hostId=${hostId}` : ''}`); },

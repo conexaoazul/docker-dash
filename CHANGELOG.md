@@ -2,6 +2,64 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.11.0] - 2026-04-21 — "Translations — Google Translate + DeepL integration with quota tracking"
+
+Closes the BACKLOG i18n gap without needing human translators. New System → **Translations** tab integrates Google Translate + DeepL free-tier APIs (500k chars / month each), tracks monthly usage per service to stay within limits, and provides a review workflow before any locale file ships to source control.
+
+### Added — Translations tab (4 panels)
+
+- **Providers** — add/rotate/disable API keys for Google Translate + DeepL. Keys encrypted at rest (AES-GCM, same crypto util as ACME + notification channels). Test-connection button hits a cheap auth-only endpoint per provider (Google `/languages`, DeepL `/usage`) to validate the key without burning quota. "Get free API key ↗" links to each provider's signup page.
+- **Usage** — per-provider progress bars showing current month's `chars_used / monthly_limit`. Color-coded warnings at 80% (amber) and 100% (red). Month resets automatically on the 1st.
+- **Translate** — pick a target language from the list (auto-detected from `public/js/i18n/*.js`), see `N missing keys · X chars total`, select up to 50 keys per batch, pick provider, click **Translate selected**. Backend validates the quota BEFORE the API call — if the request would exceed the monthly limit, returns `429 QUOTA_EXCEEDED` without burning a char. Translation chars are recorded atomically in `translation_usage` on success.
+- **Review &amp; Export** — every translation lands in `status='pending'` for human review. Edit-in-place → Accept (✓) or Reject (✗). Download button exports a complete merged `<lang>.js` file with all accepted translations unflattened back to the nested-object shape — user commits to git manually. "Mark as applied" flips accepted → applied so the review list stays clean.
+
+### Architecture
+
+- **`src/db/migrations/057_translations.js`** — three new tables:
+  - `translation_providers` (one row per provider, encrypted API key, monthly_limit)
+  - `translation_usage` (one row per provider × year_month, atomic char counter)
+  - `translations` (one row per language × key, pending/accepted/rejected/applied status)
+- **`src/services/translations.js`** (~400 LOC): providers CRUD, Google v2 + DeepL Free HTTP adapters with 10s timeouts, quota pre-check + post-success atomic counter, locale-file parser (flatten nested `i18n.register(code, flag, name, tree)` shape via sandboxed `new Function`), missing-key diff against `en.js`, unflatten → export.
+- **`src/routes/translations.js`** — 11 admin-only endpoints (`/providers` CRUD + test, `/usage`, `/languages`, `/missing`, `/batch`, `/` list, `:id` patch for review, `/export`, `/mark-exported`).
+- **Audit log events**: `translation_provider_created/_updated/_deleted`, `translation_batch` (count + chars per run), `translation_reviewed`, `translation_exported`.
+
+### Explicit NOT-in-scope (design choices)
+
+- **No auto-edit of `public/js/i18n/*.js`** — export gives you the file; you `cp` + commit. Preserves git history as the source of truth; avoids silent source-file edits from a web UI.
+- **No runtime DB fallback** — i18n still loads from JS files at page load. Keeps this release focused on authoring; runtime lookup from DB would need frontend i18n refactor.
+- **Batch cap at 50 keys** — matches DeepL's practical per-call sweet spot; Google allows more but 50 is a safer ceiling.
+- **No translation memory / glossary** — future v6.12+ if demand exists. For now, same string to same language = same result (re-translating just bumps usage).
+- **No bulk-accept** — review is intentionally per-row. Auto-accepting machine translations wholesale is how "ge[i] niste" ends up shipping in production.
+
+### Free-tier details (operator guide)
+
+Both Google Translate + DeepL offer ~500k chars/month free:
+- **Google Cloud Translation API v2**: free after $300 trial credits; for permanent free, enroll in the "free tier" program. Auth: `?key=YOUR_KEY`.
+- **DeepL API Free**: no card required, 500k chars/month forever. Auth: `Authorization: DeepL-Auth-Key YOUR_KEY`.
+
+The Usage tab shows exactly how close you are to each limit. Translations are refused (not throttled) at the limit — users see a clear `QUOTA_EXCEEDED` error with `used / requested / limit` details so they can pick a smaller batch or switch provider.
+
+### Tests
+
+- **`src/__tests__/translations.test.js`** — 17 tests: providers CRUD (reject unknown/short key, upsert-as-rotate, toggle active, delete), usage tracking (starts zero, increments on translate, refuses at quota), Google + DeepL HTTP call shape verification (mocks `fetch`, inspects URL + body + auth headers), translations CRUD with status transitions, setTranslationStatus validation, `listLanguages` + `listMissingKeys` parse real locale files, flatten/unflatten round-trip.
+- **Total: 695 passing + 4 skipped / 47 suites** (was 678 / 46, +17).
+
+### Files touched
+
+- `src/db/migrations/057_translations.js` (new)
+- `src/services/translations.js` (new, ~400 LOC)
+- `src/routes/translations.js` (new, 11 endpoints)
+- `src/__tests__/translations.test.js` (new, 17 tests)
+- `src/server.js` — mount the route
+- `public/js/api.js` — 13 new `translations*` methods
+- `public/js/pages/system.js` — new Translations tab + 4 render panels
+
+### Upgrade path
+
+Drop-in. Migration 057 applies automatically on startup. No config change required; admin goes to System → Translations and pastes API keys when ready.
+
+---
+
 ## [6.10.0] - 2026-04-21 — "Per-container Security tab + diff major bump"
 
 Two changes. One adds a user-visible polish tab (so this bumps the minor). One closes a P2 dep-bump BACKLOG item.

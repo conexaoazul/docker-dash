@@ -129,6 +129,7 @@ app.use('/api/secrets', apiLimiter, require('./routes/secrets'));
 app.use('/api/secrets-rotations', apiLimiter, require('./routes/secretsRotations'));
 app.use('/api/system/acme', apiLimiter, require('./routes/acme'));
 app.use('/api/egress-filter', apiLimiter, require('./routes/egress-filter'));
+app.use('/api/translations', apiLimiter, require('./routes/translations'));
 app.use('/api/remediate', apiLimiter, require('./routes/remediate'));
 app.use('/api/log-forwarders', apiLimiter, require('./routes/log-forwarders'));
 app.use('/api/swarm', apiLimiter, require('./routes/swarm'));

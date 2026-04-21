@@ -63,15 +63,9 @@ All of the above = 3-5 days of infra work. Out of scope for a single-box product
 
 ### i18n: 25% of keys missing in non-EN locales
 
-**Why deferred:** 200+ keys × 10 languages = 2000+ translations. Cannot be done responsibly without human translators per language.
+**Status (updated 2026-04-21):** ✅ Tooling shipped in v6.11.0. New System → Translations tab integrates Google Translate + DeepL free-tier APIs (500k chars/month each, tracked per-provider/month with hard quota stop) plus a review/export workflow. Keys stay missing until an admin runs auto-translate → reviews → exports the locale file → commits. That's a 10-minute flow per language now instead of "wait for translators."
 
-**Current mitigations:**
-- New v6.5 (LE Wizard) and v6.6 (Remediation) UI use inline English strings (no i18n), so the gap doesn't grow from those features
-- Core UI (Dashboard, Containers, Images, etc.) is fully translated
-- Missing keys fall back to English at runtime (no broken UI)
-
-**Estimated effort:** Professional translation agency ~$2-3k for all 10 languages + QA. Community PR approach takes longer but is free.
-**Proposed approach:** accept the gap; prioritize 2-3 most-used non-EN languages (RO, DE, FR) for community translation in v6.7.
+**What still requires human oversight:** Reviewing machine translations before shipping them. The UI forces per-row Accept/Reject (no bulk accept) precisely so a bad auto-translation doesn't land in production.
 
 ---
 

@@ -10,6 +10,21 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.11.0',
+      date: '2026-04-21',
+      title: 'Translations — Google Translate + DeepL with quota tracking',
+      changes: [
+        { type: 'feature', text: 'New System → Translations tab. Integrates Google Translate + DeepL free-tier APIs (500k chars/month each). Closes the BACKLOG i18n gap without needing human translators — tooling handles the 25% gap in non-EN locales.' },
+        { type: 'feature', text: 'Providers panel: add/rotate/disable API keys (AES-GCM encrypted at rest, same crypto as ACME + notifications). Test-connection button validates the key cheaply (Google /languages, DeepL /usage) without burning quota. Links to each provider\'s free-key signup page.' },
+        { type: 'feature', text: 'Usage panel: per-provider progress bars showing current month\'s chars_used / monthly_limit. Color warnings at 80% (amber) and 100% (red). Month resets on the 1st automatically. Refuses (not throttles) at limit with a clear QUOTA_EXCEEDED response including used/requested/limit.' },
+        { type: 'feature', text: 'Translate panel: pick target language (auto-detected from i18n files), see N missing keys · X chars total, select up to 50 keys per batch, pick provider, click Translate. Backend validates quota BEFORE the API call — no chars burned on failed quota checks.' },
+        { type: 'feature', text: 'Review &amp; Export panel: machine translations land in pending status for human review. Edit-in-place + Accept/Reject per row (no bulk accept — forces oversight). Download button exports a complete merged <lang>.js file that you commit to git manually.' },
+        { type: 'feature', text: 'Migration 057: 3 new tables (translation_providers, translation_usage, translations). Audit log events for provider CRUD, batch runs (count + chars), reviews, exports.' },
+        { type: 'improvement', text: 'Explicit non-goals documented: no auto-edit of public/js/i18n/*.js (export gives you the file; git stays source of truth), no runtime DB fallback (i18n stays file-based), no bulk-accept (prevents garbage auto-translations from shipping).' },
+        { type: 'improvement', text: 'Tests: 678 → 695 (+17 translation service tests: providers CRUD, usage + quota enforcement, Google + DeepL HTTP call shape verification via fetch mocks, translations CRUD with status transitions, flatten/unflatten round-trip).' },
+      ],
+    },
+    {
       version: '6.10.0',
       date: '2026-04-21',
       title: 'Per-container Security tab + diff 5→9 dep bump',
