@@ -2,6 +2,45 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.9.2] - 2026-04-21 — "Hygiene: node-cron 4 + LE CI smoke test"
+
+Housekeeping. Two small but useful cleanups.
+
+### Dependency refresh
+
+- **`node-cron`** `^3.0.3` → `^4.2.1` (major). API-compat for our usage — both `cron.schedule(expr, fn)` and `cron.validate(expr)` still exported. Task object still has `.start()` / `.stop()`. Verified: 677 tests pass unchanged; runtime boot + stopAll() both behave identically on staging.
+
+### Added — Live Cloudflare smoke test
+
+- **`src/__tests__/acme-cloudflare-live.test.js`** — exercises the Let's Encrypt wizard's credential-validation path against the real Cloudflare `/user/tokens/verify` API. Three assertions:
+  1. A valid scoped token returns `ok: true` (catches upstream API changes / revoked tokens).
+  2. A 37-hex-char "Global API Key" is rejected by our client-side heuristic before we hit the network.
+  3. Empty credentials return a clear `api_token` error.
+- **Gated on `CLOUDFLARE_TEST_TOKEN` env**: the 3 live tests skip when the secret isn't present. An always-present marker test logs "token not set — live tests SKIPPED" so CI output stays honest.
+- **CI wiring**: `.github/workflows/ci.yml` exposes `CLOUDFLARE_TEST_TOKEN: ${{ secrets.CLOUDFLARE_TEST_TOKEN }}`. Nothing runs until you provision the secret in Repo Settings → Secrets → Actions. Recommended scope: `User:Read` only (no zone / DNS permissions needed — we only hit `/user/tokens/verify`).
+
+### Tests
+
+- **678 passing + 4 skipped (live tests)** / 46 suites. Was 677 passing / 45 suites.
+
+### What v6.9.2 does NOT do
+
+- End-to-end Let's Encrypt staging issuance (needs Caddy container + domain control + a DNS zone — too much for unit CI). That belongs in a separate soak environment.
+
+### Operator / maintainer notes
+
+To activate the CF smoke test after pulling v6.9.2:
+
+```
+Repo Settings → Secrets and variables → Actions → New repository secret
+  Name:  CLOUDFLARE_TEST_TOKEN
+  Value: <a scoped CF API token with "User:Read" permission only>
+```
+
+Once set, the next CI run will execute all 3 live tests. They add ~2s to the pipeline. Revoke + rotate the token independent of Docker Dash state.
+
+---
+
 ## [6.9.1] - 2026-04-21 — "Egress block log: quick-actions + grouped view + CSV"
 
 UX polish on the Outbound Filter deny log. The flow "I see my container being blocked on a hostname it legitimately needs → add it to the allowlist" dropped from 3 steps (open manage modal → paste hostname → save) to 2 clicks (**Allow** → confirm).

@@ -10,6 +10,15 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.9.2',
+      date: '2026-04-21',
+      title: 'Hygiene — node-cron 4 + Cloudflare CI smoke test',
+      changes: [
+        { type: 'improvement', text: 'node-cron ^3.0.3 → ^4.2.1 (major). API-compat for our usage — both cron.schedule(expr, fn) and cron.validate(expr) still exported; Task object still has start/stop. All 677 tests pass unchanged.' },
+        { type: 'improvement', text: 'Live Cloudflare credential-validation smoke test (src/__tests__/acme-cloudflare-live.test.js). Gated on CLOUDFLARE_TEST_TOKEN env — skipped unless the secret is set. Catches upstream CF API changes + token revocation on every CI run. Add to Repo Settings → Secrets → CLOUDFLARE_TEST_TOKEN with User:Read scope only.' },
+      ],
+    },
+    {
       version: '6.9.1',
       date: '2026-04-21',
       title: 'Egress block log — quick-actions, grouped view, CSV export',
