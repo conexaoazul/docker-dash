@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        APP_VERSION: "${APP_VERSION:-6.16.1}"
-    image: docker-dash:${APP_VERSION:-6.16.1}
+        APP_VERSION: "${APP_VERSION:-6.17.0}"
+    image: docker-dash:${APP_VERSION:-6.17.0}
     container_name: docker-dash
     restart: unless-stopped
     env_file:
@@ -54,7 +54,7 @@ services:
   dd-egress-filter:
     build:
       context: ./docker/egress-filter
-    image: docker-dash-egress-filter:${APP_VERSION:-6.16.1}
+    image: docker-dash-egress-filter:${APP_VERSION:-6.17.0}
     container_name: dd-egress-filter
     restart: unless-stopped
     # Uses the default bridge so target containers on the default bridge can
@@ -77,6 +77,36 @@ services:
       - no-new-privileges:true
     profiles:
       - egress
+
+  # Optional Redis for HA mode — enable with: docker compose --profile ha up -d
+  # Then on the `app` service (via .env):
+  #   DD_MODE=ha
+  #   REDIS_URL=redis://redis:6379
+  #
+  # v6.17.0 ships the foundation (Redis-backed rate limiter + cluster abstraction).
+  # DO NOT run multi-replica in HA mode yet — WS pub/sub + cron leader election
+  # land in v7.0.0-alpha.1 / v7.0.0-rc.1. Running v6.17.0 HA with 2+ replicas
+  # causes duplicate cron execution (duplicate backups, concurrent VACUUM).
+  #
+  # Single-instance HA (1 replica + Redis) is useful for warming up operational
+  # tooling (Prometheus scrape of Redis, sticky-session LB config drill, etc.)
+  # before rolling out true multi-replica in v7.0.0.
+  redis:
+    image: redis:7-alpine
+    container_name: docker-dash-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1000 --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - ha
 
   # Optional HTTPS reverse proxy — enable with: docker compose --profile tls up -d
   # Configure via Docker Dash UI: System → SSL/TLS → Enable HTTPS
@@ -111,3 +141,5 @@ volumes:
     name: docker-dash-egress-policy
   egress-logs:
     name: docker-dash-egress-logs
+  redis-data:
+    name: docker-dash-redis-data

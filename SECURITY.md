@@ -88,7 +88,7 @@ If you discover a security vulnerability in Docker Dash, please report it respon
 
 ## Testing
 
-- **843 tests** across 55 test suites (100% passing; 4 skipped are live-Cloudflare integration tests gated on a CI secret)
+- **866 tests** across 57 test suites (100% passing; 4 skipped are live-Cloudflare integration tests gated on a CI secret)
 - Unit tests: crypto round-trip, input validation, shell sanitization, git patterns
 - Integration tests: auth flow (login, session, logout, SSO), API endpoints (supertest), RBAC, security alerts
 - **CI pipeline** — GitHub Actions runs tests + syntax check + npm audit on every push

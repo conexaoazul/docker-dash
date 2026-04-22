@@ -8,8 +8,8 @@
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/releases/latest"><img src="https://img.shields.io/github/v/release/bogdanpricop/docker-dash?color=blue" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
-    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-843%20passing%20(100%25)-brightgreen" alt="Tests"></a>
-    <img src="https://img.shields.io/badge/version-6.16.1-blue" alt="Version">
+    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-866%20passing%20(100%25)-brightgreen" alt="Tests"></a>
+    <img src="https://img.shields.io/badge/version-6.17.0-blue" alt="Version">
     <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.7%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
     <img src="https://img.shields.io/badge/Docker-~80MB-blue" alt="Image Size">
@@ -26,7 +26,9 @@
   </p>
 </p>
 
-**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.16.1**
+**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.17.0**
+
+**New in v6.17.0:** Optional HA mode via `DD_MODE=ha` + Redis. Preview only — Redis-backed rate limiter + cluster abstraction shipped; WS pub/sub + cron leader election land in v7.0. See [docs/features/ha-mode.md](docs/features/ha-mode.md).
 
 ## Screenshots
 
@@ -212,7 +214,7 @@
 - **Self-Reporting Footprint** — Docker Dash memory, uptime, DB size at `/api/footprint`
 - **Let's Encrypt Wizard** — 3-step UI for issuing certs via DNS-01 (Cloudflare, Route53, DigitalOcean, Hetzner, Linode) or HTTP-01. Encrypted credential vault, auto-renewal via Caddy, hash-chained audit trail. Open source — no other Docker UI ships this
 - **Container Remediation Wizard** — 3-step UI that turns Secrets Audit + CIS Benchmark findings into actionable fixes. 20-entry catalog, 4 live-updatable (zero downtime), 16 with compose-recreate + auto-rollback. Git-PR mode for git-backed stacks. No other OSS Docker UI ships this
-- **843 Tests** — 55 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics, permissions RBAC, settings CRUD, security alert rule evaluation, event notifier dispatch (100% passing)
+- **866 Tests** — 57 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics, permissions RBAC, settings CRUD, security alert rule evaluation, event notifier dispatch, cluster abstraction (HA mode), rate-limiter memory + Redis paths (100% passing)
 
 ### Feature Reference
 
@@ -221,6 +223,7 @@ Dedicated reference docs for the deeper features, in [docs/features/](docs/featu
 - **[Prometheus Metrics](docs/features/prometheus-metrics.md)** — `/api/metrics` endpoint reference, metric names + types + labels, sample Grafana queries, cardinality notes
 - **[Platform Detection](docs/features/platform-detection.md)** — NAS + cloud + hypervisor detection logic; complete signature list; how to extend
 - **[Translations Tooling](docs/features/translations-tooling.md)** — Google Translate + DeepL integration, quota tracking, review workflow, runtime DB overrides
+- **[HA Mode](docs/features/ha-mode.md)** — optional Redis-backed redundancy (v6.17.0 preview, full in v7.0); architecture, trade-offs, when NOT to use it
 
 ## Where to start
 

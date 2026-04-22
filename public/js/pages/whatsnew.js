@@ -10,6 +10,21 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.17.0',
+      date: '2026-04-22',
+      title: 'HA mode preview — optional Redis-backed rate limiter + cluster foundation',
+      changes: [
+        { type: 'feature', text: 'Opt-in HA mode via DD_MODE=ha env var. Closes BACKLOG F30 partially. New src/services/cluster.js abstraction: every HA-eligible subsystem imports it; standalone mode (default) runs every method as a cheap no-op. Lazy-connects to Redis via REDIS_URL only when DD_MODE=ha.' },
+        { type: 'feature', text: 'Redis-backed rate limiter. Standalone keeps sliding-window in-memory (src/services/rate-limiter-memory.js, extracted from old middleware); HA uses Redis INCR + PEXPIRE fixed-window (2× looser at bucket boundaries, documented). X-RateLimit-Remaining header added on all responses.' },
+        { type: 'feature', text: 'New docker-compose --profile ha with redis:7-alpine. 128MB memory cap + LRU eviction + snapshot persistence. No exposed ports. Security posture matches existing services (no-new-privileges).' },
+        { type: 'improvement', text: 'ioredis added as optionalDependencies (NOT dependencies). Standalone users: npm install skips it entirely, zero runtime overhead, zero new env vars required. Rollback = single-commit revert, ioredis becomes an unused optional dep.' },
+        { type: 'improvement', text: 'Tests: 843/55 → 866/57. 23 new tests via ioredis-mock (no real Redis needed to run the suite). 8 standalone-path tests confirming every method is a no-op; 6 HA-path tests confirming Redis INCR / key isolation / retryAfter math.' },
+        { type: 'improvement', text: 'New docs/features/ha-mode.md — operator reference. When NOT to use HA mode (homelab, single-node, geographic distribution — stay standalone). Architecture. Failure modes. Redis key schema.' },
+        { type: 'fix', text: '⚠️ v6.17.0 preview limitations — DO NOT run multi-replica in HA mode yet. Every replica runs every cron job = duplicate backups, concurrent VACUUM risk. Fixed in v7.0.0-rc.1 via leader election. Single-replica HA today is only useful for operational drill (sticky-session LB config, Prometheus scrape of Redis) before v7.0.' },
+        { type: 'improvement', text: 'Roadmap: v7.0.0-alpha.1 = WS pub/sub via Redis. v7.0.0-rc.1 = cron + SSH tunnel + Docker event stream leader election. v7.0.0 stable = failover runbook + staging multi-replica soak.' },
+      ],
+    },
+    {
       version: '6.16.1',
       date: '2026-04-22',
       title: 'Testing 8.5 → 9.5, Documentation 9 → 9.5 (production readiness 9.5 → 9.7)',

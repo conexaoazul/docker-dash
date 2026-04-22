@@ -1,6 +1,6 @@
 {
   "name": "docker-dash",
-  "version": "6.16.1",
+  "version": "6.17.0",
   "description": "Full-featured Docker management dashboard",
   "main": "src/server.js",
   "scripts": {
@@ -43,9 +43,13 @@
     "canvas": "^3.2.3",
     "eslint": "^10.2.1",
     "gif-encoder-2": "^1.0.5",
+    "ioredis-mock": "^8.13.1",
     "jest": "^30.3.0",
     "puppeteer": "^24.41.0",
     "sharp": "^0.34.5",
     "supertest": "^7.2.2"
+  },
+  "optionalDependencies": {
+    "ioredis": "^5.10.1"
   }
 }

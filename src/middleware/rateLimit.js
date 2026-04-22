@@ -1,54 +1,47 @@
 'use strict';
 
+// Rate-limit middleware — delegates to src/services/cluster.js which routes
+// to src/services/rate-limiter-memory.js (standalone) or Redis INCR (HA mode,
+// v6.17.0+). See plans/deep-spec-ha-mode.md §4 for the split rationale.
+//
+// Fail-open on Redis errors: a rate-limiter failure in HA mode allows the
+// request through with a log warning, prioritizing user-facing availability
+// over strict quota enforcement. Standalone path cannot fail this way.
+
 const { getClientIp } = require('../utils/helpers');
+const cluster = require('../services/cluster');
+const log = require('../utils/logger')('ratelimit');
 
-class RateLimiter {
-  constructor() {
-    this.windows = new Map();
-    // Clean up every 5 minutes
-    setInterval(() => this._cleanup(), 300000);
-  }
-
-  middleware(maxRequests, windowMs) {
-    return (req, res, next) => {
-      const key = getClientIp(req);
-      const windowKey = `${req.route?.path || req.path}:${key}`;
-      const now = Date.now();
-
-      if (!this.windows.has(windowKey)) {
-        this.windows.set(windowKey, []);
-      }
-
-      const requests = this.windows.get(windowKey).filter(t => t > now - windowMs);
-      this.windows.set(windowKey, requests);
-
-      if (requests.length >= maxRequests) {
-        const retryAfter = Math.ceil((requests[0] + windowMs - now) / 1000);
-        res.set('Retry-After', String(retryAfter));
-        return res.status(429).json({
-          error: 'Too many requests',
-          retryAfter,
-        });
-      }
-
-      requests.push(now);
-      next();
-    };
-  }
-
-  _cleanup() {
-    const now = Date.now();
-    for (const [key, times] of this.windows) {
-      const filtered = times.filter(t => t > now - 3600000); // Keep max 1h
-      if (filtered.length === 0) this.windows.delete(key);
-      else this.windows.set(key, filtered);
+function middleware(maxRequests, windowMs) {
+  return async (req, res, next) => {
+    const ip = getClientIp(req);
+    const key = `${req.route?.path || req.path}:${ip}`;
+    let result;
+    try {
+      result = await cluster.rateLimitTick(key, maxRequests, windowMs);
+    } catch (err) {
+      log.warn('Rate limiter failure, allowing request', { message: err.message });
+      return next();
     }
-  }
+    if (!result.allowed) {
+      res.set('Retry-After', String(result.retryAfterSec));
+      res.set('X-RateLimit-Remaining', '0');
+      return res.status(429).json({
+        error: 'Too many requests',
+        retryAfter: result.retryAfterSec,
+      });
+    }
+    res.set('X-RateLimit-Remaining', String(result.remaining));
+    next();
+  };
 }
 
-const limiter = new RateLimiter();
+// Back-compat export — keep the old `rateLimiter.middleware(…)` + `rateLimit(…)` API
+// callers use. Passing `rateLimiter` itself as the object that exposes `middleware`.
+const rateLimiter = { middleware };
 
 module.exports = {
-  rateLimiter: limiter,
-  rateLimit: (max, windowMs) => limiter.middleware(max, windowMs),
+  rateLimiter,
+  rateLimit: middleware,
+  middleware,
 };

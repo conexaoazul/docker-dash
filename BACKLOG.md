@@ -25,19 +25,24 @@ This is the single source of truth for deferred work. Each item lists WHY it's d
 
 **Enterprise LDAP users:** test on staging before updating production. Confidence is medium (code correct per docs, but unverified against a live server).
 
-### F30 — Distributed rate limiter (Redis-backed)
+### F30 — Distributed rate limiter (Redis-backed) — opt-in HA mode
 
-**Why deferred:** Current rate limiter is in-memory per-process. Works perfectly for single-instance deploys (the default). Horizontal-scale (multi-pod) breaks: each pod has its own counter, so a `10 req/min` limit becomes `10 × N pods` effectively.
+**Status (updated 2026-04-22):** 🟡 Partial — foundation shipped in v6.17.0 (preview).
 
-**Why not fix now:** Docker Dash's product positioning is single-instance deploy. Horizontal scale requires:
-- Redis container in compose
-- Shared session store (currently SQLite-backed sessions, same issue)
-- Sticky routing OR full session-sharing via Redis
+**v6.17.0 (shipped):**
+- `src/services/cluster.js` — HA abstraction with `DD_MODE=ha` opt-in. Zero overhead for standalone users.
+- Redis-backed rate limiter via `INCR + PEXPIRE` fixed-window (2× looser than standalone sliding-window at bucket boundaries — documented trade-off).
+- `docker-compose --profile ha` with `redis:7-alpine` service (optional, off by default).
+- `ioredis` as `optionalDependencies` (not `dependencies`). Standalone installs don't pull it.
+- 23 new tests via `ioredis-mock` (no real Redis needed to run the suite).
+- `docs/features/ha-mode.md` — operator-facing reference.
 
-All of the above = 3-5 days of infra work. Out of scope for a single-box product.
+**Still deferred for v7.0.0 (per [`plans/deep-spec-ha-mode.md`](plans/deep-spec-ha-mode.md)):**
+- v7.0.0-alpha.1 — WebSocket pub/sub via Redis (fix "user on replica A misses events from replica B")
+- v7.0.0-rc.1 — Leader election via `SET NX PX` for the 13 cron jobs, Docker event stream, SSH tunnels, git polling
+- v7.0.0 stable — failover runbook, sticky-session LB docs, staging soak
 
-**Estimated effort:** 4-5 days.
-**Proposed approach:** release as v7.0 "HA mode" with opt-in `DD_MODE=ha` env var; default stays single-instance.
+**Known v6.17.0 limitations (loudly documented):** **don't run multi-replica in HA mode yet.** Every replica runs every cron job → duplicate backups, concurrent `VACUUM` risk. Single-replica HA mode is only useful for operational drill (Prometheus scrape, LB config) before v7.0 rolls out true multi-replica.
 
 ---
 

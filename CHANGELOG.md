@@ -2,6 +2,102 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.17.0] - 2026-04-22 — "HA mode preview — Redis-backed rate limiter + cluster foundation"
+
+**Opt-in HA** — closes BACKLOG F30 partially. `DD_MODE=ha` + Redis unlocks cross-replica rate limiting; the rest of the HA story (WS pub/sub, cron leader election) lands in v7.0.0. Standalone users: **zero impact** — default unchanged, `ioredis` is in `optionalDependencies` (not `dependencies`), no new env vars required.
+
+Full background and architecture: [`plans/research-ha-mode-optional.md`](plans/research-ha-mode-optional.md) + [`plans/deep-spec-ha-mode.md`](plans/deep-spec-ha-mode.md) (local/gitignored).
+
+### Added — `src/services/cluster.js` HA abstraction
+
+New service module ([`src/services/cluster.js`](src/services/cluster.js)) that every HA-eligible subsystem imports. Standalone mode: every method is a cheap no-op or falls through to in-process state (zero runtime overhead). HA mode: lazy-connects to Redis via `REDIS_URL`.
+
+Public API:
+- `cluster.isHa()` / `cluster.nodeId()` — mode introspection
+- `cluster.redis()` — ioredis client in HA, null in standalone
+- `cluster.rateLimitTick(key, maxReqs, windowMs)` — returns `{ allowed, remaining, retryAfterSec }`
+- `cluster.publish(ch, payload)` / `cluster.subscribe(ch, handler)` — stubbed in v6.17.0, wired in v7.0.0-alpha.1
+- `cluster.isLeader()` — returns `true` in v6.17.0 (stub), real election in v7.0.0-rc.1
+
+### Added — Redis-backed rate limiter
+
+Extracted the existing in-memory `Map`-based limiter into `src/services/rate-limiter-memory.js` (sliding window, same semantics as before). New HA path in `cluster.rateLimitTick` uses Redis `INCR` + `PEXPIRE` (fixed window — 2× looser at bucket boundaries, documented trade-off in `docs/features/ha-mode.md` §"Rate-limiter semantics").
+
+`src/middleware/rateLimit.js` rewritten to delegate. **Fail-open on Redis errors** — a mid-request Redis outage lets the request through with a `warn` log, prioritizing availability over strict quota.
+
+### Added — `docker-compose --profile ha` + `redis:7-alpine` service
+
+Opt-in HA profile in [`docker-compose.yml`](docker-compose.yml):
+```bash
+docker compose --profile ha up -d
+# Then .env: DD_MODE=ha, REDIS_URL=redis://redis:6379
+```
+
+Redis configured with:
+- `--save 60 1000` — snapshot persistence on ≥1000 writes / 60s
+- `--maxmemory 128mb --maxmemory-policy allkeys-lru` — hard cap
+- `no-new-privileges:true` — matches the rest of the compose security posture
+- No exposed ports — only reachable via the Docker network
+
+### Added — Tests (23 new, all pass via `ioredis-mock` — no real Redis needed)
+
+- [`src/__tests__/rate-limiter-memory.test.js`](src/__tests__/rate-limiter-memory.test.js) — 9 tests covering sliding-window semantics, key isolation, expiration, cleanup
+- [`src/__tests__/cluster.test.js`](src/__tests__/cluster.test.js) — 14 tests: 8 standalone (all methods no-op correctly) + 6 HA (Redis path via `jest.doMock('ioredis')` → `ioredis-mock`)
+
+**Test suite: 843/55 → 866/57.**
+
+### Added — `docs/features/ha-mode.md`
+
+Operator reference. Covers: what HA changes, enabling, architecture, Redis keys, rate-limiter semantics, failure modes, monitoring, when NOT to use HA mode, rollback procedure.
+
+### Changed — Dependencies
+
+- `ioredis ^5.10.1` added as **`optionalDependencies`** (not `dependencies`). Standalone installs don't pull it.
+- `ioredis-mock ^8.13.1` added as `devDependencies` for unit tests.
+- `npm audit` clean (0 vulnerabilities).
+
+### ⚠️ v6.17.0 Preview Limitations (loudly documented)
+
+**Don't run multi-replica in HA mode yet.** Every replica runs every cron job → duplicate daily backups, concurrent `VACUUM` (DB corruption risk), N× certificate scans, N× secret rotation checks. This is fixed in v7.0.0-rc.1 via leader election.
+
+**WS broadcasts still per-replica.** User connected to replica A misses events emitted by replica B. Fixed in v7.0.0-alpha.1 via Redis pub/sub.
+
+Single-replica HA mode today is only useful for operational drill — wiring sticky-session load balancers, Prometheus scrape of Redis, Grafana dashboards — before rolling out true multi-replica in v7.0.
+
+### BACKLOG F30 — partial close
+
+Shipped: cluster abstraction + Redis rate limiter + `--profile ha` + docs.
+Remaining for v7.0: WS pub/sub (v7.0.0-alpha.1), cron leader election (v7.0.0-rc.1), failover runbook (v7.0.0 stable).
+
+### Rollback
+
+Single-commit revert. `ioredis` becomes an unused `optionalDependencies` entry (harmless). `--profile ha` becomes a no-op profile.
+
+### Production readiness
+
+Unchanged at 9.7/10 this release. v6.17.0 is about enabling a new deployment mode for enterprise users, not about closing residual standalone gaps. Scorecard moves only when v7.0 stable lands with real multi-replica support + failover tests.
+
+### Files touched
+
+- `src/services/cluster.js` (new, ~110 LOC)
+- `src/services/rate-limiter-memory.js` (new, ~50 LOC — extracted from middleware)
+- `src/middleware/rateLimit.js` — rewritten to delegate via cluster (~45 LOC, was ~55)
+- `src/__tests__/cluster.test.js` (new, 14 tests)
+- `src/__tests__/rate-limiter-memory.test.js` (new, 9 tests)
+- `docker-compose.yml` — `redis:7-alpine` service behind `--profile ha`
+- `docs/features/ha-mode.md` (new)
+- `package.json` — `ioredis` → `optionalDependencies`, `ioredis-mock` → `devDependencies`
+- `BACKLOG.md` — F30 updated with partial-close status
+- `README.md` / `SECURITY.md` / `CONTRIBUTING.md` — test counts + new Feature Reference link
+
+### Tests
+
+- **866 passing + 4 skipped / 57 suites**
+- Lint: 0 warnings / 0 errors
+- `npm audit`: 0 vulnerabilities
+
+---
+
 ## [6.16.1] - 2026-04-22 — "Testing 8.5 → 9.5, Documentation 9 → 9.5 (production readiness 9.5 → 9.7)"
 
 Pure test + docs release. No runtime code changes. Closes two of the three remaining gaps to 10/10 production readiness.
