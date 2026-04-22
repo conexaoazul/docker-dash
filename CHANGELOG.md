@@ -2,6 +2,71 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.17.2] - 2026-04-22 — "HA Phase 4 — Leader election (multi-replica now safe)"
+
+Cron jobs, Docker event stream, and git polling now run **on the leader replica only** in HA mode. Multi-replica HA deploy finally becomes safe: no more duplicate daily backups, no more concurrent `VACUUM` (DB corruption risk), no more N× GitHub API rate-limit hits from git polling.
+
+### How it works
+
+Redis `SET NX PX` with TTL 30s + heartbeat 10s:
+
+- **Startup**: first call to `cluster.isLeader()` in HA mode lazily starts the election loop. Attempt `SET NX` to claim the `leader` key. Success → become leader. Failure → become reader. Standalone mode: always leader (return `true` without Redis traffic).
+- **Leader heartbeat**: every 10s, extend the lock with `SET XX PX` (refreshes TTL only if we still own it). If extension fails (TTL expired, someone else grabbed it), transition to reader and fire `onBecomeReader` callbacks.
+- **Reader poll**: every 10s, try `SET NX` — on leader death (or graceful `shutdown()`), a reader wins and transitions to leader.
+- **Graceful shutdown**: leader releases the lock proactively via a Lua script that only DELs if we still own it. Another replica picks it up within milliseconds instead of waiting out the 30s TTL.
+- **Internal-reset recovery**: if `_leaderState` is lost (e.g. module reset in tests) while Redis still holds our NODE_ID, `_electOnce` detects this via GET + comparison and re-claims leader without spurious role transition.
+
+### Wiring — what runs on the leader only
+
+**Cron jobs via `_m(name, fn)`** — now leader-aware. Any reader replica calling a `_m`-wrapped job returns immediately (silent skip, no metric increment). Opt-out via `_m(name, fn, { everywhere: true })` for idempotent jobs; none qualify today but the escape hatch exists.
+
+All 13 cron jobs now leader-only:
+`stats-aggregate-1m` · `stats-aggregate-1h` · `alert-evaluate` · `session-mfa-cleanup` · `security-alert-windowed` · `purge-old-data` · `vacuum-db` · `certificate-scan` · `secret-rotation-scan` · `daily-backup` · `schedule-executor` · `s3-backup` · `sandbox-ttl-sweep`
+
+**Docker event stream** — gated via `cluster.onBecomeLeader` / `onBecomeReader` in `src/ws/index.js`. On leader transition: `_startAllEventStreams()` subscribes to Docker for every active host. On reader transition: `_stopAllEventStreams()` destroys all streams. Readers still deliver events to their local clients via Redis pub/sub (shipped in v6.17.1).
+
+**Git polling** — gated via the same callbacks in `src/jobs/index.js`. `gitPolling.startAll()` / `stopAll()` fire on role transition. Previously running per-replica would have N×-multiplied the GitHub API rate-limit hit.
+
+### What still runs on every replica
+
+- **SSH tunnels** (`src/services/ssh-tunnel.js`) — readers need them to serve HTTP reads (container list, stats, inspect). Not gated. Remote hosts see N SSH connections; acceptable for v6.17.2. Future v7.x may proxy read-path SSH through the leader.
+- **Stats service** (`statsService.start()`) — per-replica stats collection feeds local metrics endpoint. Aggregation (which writes to DB) is leader-only via the cron gate.
+
+### Safety checks
+
+- **Standalone completely unaffected.** `cluster.isLeader()` short-circuits to `true` without touching Redis. `onBecomeLeader(fn)` fires `fn` synchronously at registration — cron jobs start immediately.
+- **Rollback safe.** If you unset `DD_MODE` and restart, standalone path takes over. The `leader` key in Redis is orphaned (harmless) and expires via TTL.
+- **Throwing role-transition callbacks don't block siblings.** Each callback runs in its own try/catch.
+
+### Tests — 8 new leader-election tests (879 total)
+
+- `isLeader()` acquires the lock on first call (fresh Redis → become leader)
+- A second "replica" cannot acquire while held (NX returns null)
+- `onBecomeLeader` fires callbacks on role transition
+- `_forceRole` test helper — verifies callback sequence across multiple transitions
+- Idempotent transitions don't fire callbacks twice
+- A throwing callback doesn't prevent siblings from firing
+- Standalone mode: `onBecomeLeader` fires synchronously at registration
+- Standalone mode: `onBecomeReader` never fires
+
+### Tests / Lint
+
+- **879 passing + 4 skipped / 57 suites** (was 871 / 57; +8 Phase 4 tests)
+- Lint: 0 warnings / 0 errors
+
+### Files touched
+
+- `src/services/cluster.js` — +80 LOC: leader election loop, heartbeat, role transitions, callback registration, graceful lock release via Lua DEL-if-owned
+- `src/jobs/index.js` — `_m(name, fn, opts)` leader-aware, gitPolling start/stop wired to role callbacks
+- `src/ws/index.js` — Docker event stream start/stop on role transition
+- `src/__tests__/cluster.test.js` — +8 Phase 4 tests + standalone callback tests
+
+### HA mode v6.17.x complete
+
+v6.17.0 foundation + v6.17.1 pub/sub + v6.17.2 leader election = **multi-replica HA is safe**. v7.0.0 will bring the failover runbook, sticky-session LB docs, and a real multi-replica staging soak before promoting to "production-grade HA".
+
+---
+
 ## [6.17.1] - 2026-04-22 — "HA Phase 3 — WebSocket pub/sub via Redis"
 
 Cross-replica WebSocket events now work. User connected to replica A **now receives** events emitted by replica B (alerts, container state changes, log lines) through Redis pub/sub. Before this, multi-replica HA deploys had silent event delivery gaps.

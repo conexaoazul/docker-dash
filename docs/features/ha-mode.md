@@ -1,8 +1,9 @@
 # HA Mode — Optional Redis-backed High Availability
 
 **Introduced:** v6.17.0 (foundation — rate limiter + cluster abstraction)
-**Full HA:** v7.0.0 (planned — adds WS pub/sub + cron leader election)
-**Status:** v6.17.0 ships the **preview foundation**. Multi-replica production deployment requires v7.0.0.
+**Feature-complete:** v6.17.2 (pub/sub + leader election)
+**Production-grade:** v7.0.0 stable (planned — failover runbook + staging multi-replica soak)
+**Status:** v6.17.2 ships **multi-replica safe HA**. Safe to run 2-3 replicas behind a sticky-session load balancer. Full production-grade promotion (with automated failover docs + soak test results) comes in v7.0.0.
 
 ---
 
@@ -24,17 +25,18 @@ For those environments, v6.17.0 introduces **opt-in HA mode**: a designated "wri
 
 ## What HA mode changes
 
-| Subsystem | Standalone | HA mode (v6.17.0) | Full HA (v7.0.0) |
-|-----------|:----------:|:-----------------:|:----------------:|
-| Rate limiter | In-memory Map | **Redis INCR** ✅ | Redis INCR |
-| WebSocket broadcasts | In-process | In-process (each replica independent) | **Redis pub/sub** 🔜 |
-| Cron jobs | Run on the single process | **All replicas run them** ⚠️ | **Leader-only** 🔜 |
-| Docker event stream | Per-process | Per-replica (duplicate) | Leader-only 🔜 |
-| SSH tunnels | Per-process | Per-replica (duplicate) | Leader-only 🔜 |
-| Sessions | DB-backed, works across replicas | DB-backed, works across replicas | DB-backed |
-| DB | Local SQLite | Shared SQLite (single-writer recommended) | Shared SQLite (writer-enforced) |
+| Subsystem | Standalone | HA mode (v6.17.2) |
+|-----------|:----------:|:-----------------:|
+| Rate limiter | In-memory sliding window | **Redis INCR fixed window** |
+| WebSocket broadcasts | In-process | **Redis pub/sub on `ddash:pubsub` channel** (loop-safe via nodeId filter) |
+| Cron jobs | Single process runs them | **Leader-only** (Redis SET NX PX, 30s TTL + 10s heartbeat) |
+| Docker event stream | Per-process | **Leader-only** (start on become-leader, stop on become-reader) |
+| Git polling | Single process | **Leader-only** |
+| SSH tunnels | Per-process | **Per-replica** (readers need them to serve HTTP reads; documented acceptable cost) |
+| Sessions | DB-backed | DB-backed (works across replicas) |
+| DB | Local SQLite | Shared SQLite (single-writer — leader holds writes; readers proxy via internal API in v7.0) |
 
-**v6.17.0 ships only the Redis rate limiter + the cluster abstraction.** Running 2+ replicas with `DD_MODE=ha` today causes duplicate cron execution. **Don't.** Single-replica HA mode is useful for operational drill (sticky-session LB config, Prometheus scrape of Redis, Grafana dashboard wiring) before rolling out true multi-replica in v7.0.0.
+**v6.17.2 is multi-replica-safe.** Deploy 2-3 replicas behind a sticky-session LB. One replica holds the leader lock and runs all cron + Docker event stream + git polling. Readers serve HTTP, have WS events delivered via pub/sub. On leader death, a reader acquires the lock within ~30s (TTL). Graceful shutdown releases the lock immediately (Lua DEL-if-owned).
 
 ---
 

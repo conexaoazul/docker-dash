@@ -156,10 +156,28 @@ class WsServer {
       }
     });
 
-    // Start Docker events listeners for all active hosts
-    this._startAllEventStreams();
+    // v6.17.2 Phase 4 — Docker event streams are leader-only. Each replica
+    // subscribing to Docker independently would deliver events N× to users
+    // (because Phase 3 cross-replica broadcast now propagates them). Gate
+    // start/stop on role transition.
+    cluster.onBecomeLeader(() => {
+      log.info('Became leader — starting Docker event streams');
+      this._startAllEventStreams();
+    });
+    cluster.onBecomeReader(() => {
+      log.info('Became reader — stopping Docker event streams');
+      this._stopAllEventStreams();
+    });
 
     log.info('WebSocket server attached', { mode: cluster.isHa() ? 'ha' : 'standalone', nodeId: cluster.nodeId() });
+  }
+
+  /** Stop all Docker event streams. Used on leader→reader transition. */
+  _stopAllEventStreams() {
+    for (const [hostId, stream] of this._eventStreams) {
+      try { stream.destroy(); } catch { /* ignore */ }
+      this._eventStreams.delete(hostId);
+    }
   }
 
   async _handleMessage(ws, raw) {

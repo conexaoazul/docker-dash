@@ -14,16 +14,32 @@ const metricsService = require('../services/metrics');
 
 const jobs = [];
 
+const cluster = require('../services/cluster');
+
 /**
- * Wrap a cron callback so runs + errors are counted for Prometheus
- * (`docker_dash_background_job_runs_total{job}`, `_errors_total{job}`).
- * Replaces the ad-hoc try/catch boilerplate around most jobs. Inner
- * try/catch blocks (e.g. per-record SQL error handling inside the
- * certificate scan) stay as-is — only the outer scheduler-level
- * catch is owned by this helper.
+ * Wrap a cron callback with:
+ *   1. Prometheus metrics (docker_dash_background_job_runs_total{job},
+ *      _errors_total{job}).
+ *   2. **Leader-only gating (v6.17.2)** — in HA mode, the job only runs on
+ *      the replica that currently holds the Redis `leader` lock. Standalone
+ *      always runs (isLeader() returns true). Non-leader replicas skip the
+ *      tick silently (no metric increment — runs metric only tracks actual
+ *      executions, not skips).
+ *   3. Outer try/catch — inner try/catch blocks (per-record SQL handling
+ *      inside certificate scan, etc.) stay intact.
+ *
+ * Opt-out: pass `{ everywhere: true }` for idempotent jobs that are safe
+ *          (and possibly desirable) to run on every replica. None of our
+ *          current 13 jobs qualify — all either write to SQLite or hit
+ *          external services. Kept as escape hatch for future jobs.
  */
-function _m(name, fn) {
+function _m(name, fn, opts = {}) {
   return async () => {
+    // Leader gate (skipped in standalone via cluster.isLeader() === true)
+    if (!opts.everywhere) {
+      const leader = await cluster.isLeader();
+      if (!leader) return;  // silent skip on readers
+    }
     try {
       await fn();
       metricsService.recordJobRun(name);
@@ -416,11 +432,19 @@ function startAll() {
     log.info('S3 backup scheduled', { cron: s3Schedule });
   }
 
-  // Git deployment history cleanup
-  try {
-    const gitPolling = require('../services/gitPolling');
-    gitPolling.startAll();
-  } catch (e) { log.error('Git polling startup failed', e.message); }
+  // Git polling — v6.17.2 leader-only. Each poll makes a git fetch against
+  // the remote; running it on every replica would N× the GitHub/GitLab rate
+  // limit hit for no benefit (the results are DB-written, readers see them).
+  // Standalone fires onBecomeLeader synchronously, so startAll() happens now.
+  const gitPolling = require('../services/gitPolling');
+  cluster.onBecomeLeader(() => {
+    try { gitPolling.startAll(); }
+    catch (e) { log.error('Git polling startup failed', e.message); }
+  });
+  cluster.onBecomeReader(() => {
+    try { gitPolling.stopAll(); }
+    catch (e) { log.error('Git polling stop failed', e.message); }
+  });
 
   // Run initial purge on startup (in case the app was down for a while)
   setTimeout(purgeAllOldData, 30000);

@@ -8,8 +8,8 @@
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/releases/latest"><img src="https://img.shields.io/github/v/release/bogdanpricop/docker-dash?color=blue" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
-    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-871%20passing%20(100%25)-brightgreen" alt="Tests"></a>
-    <img src="https://img.shields.io/badge/version-6.17.1-blue" alt="Version">
+    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-879%20passing%20(100%25)-brightgreen" alt="Tests"></a>
+    <img src="https://img.shields.io/badge/version-6.17.2-blue" alt="Version">
     <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.7%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
     <img src="https://img.shields.io/badge/Docker-~80MB-blue" alt="Image Size">
@@ -26,9 +26,14 @@
   </p>
 </p>
 
-**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.17.1**
+**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.17.2**
 
-**New in v6.17.x:** Optional HA mode via `DD_MODE=ha` + Redis. v6.17.0 shipped cluster abstraction + Redis rate limiter. **v6.17.1 adds cross-replica WS broadcasts via Redis pub/sub.** Cron leader election lands in v6.17.2 (real multi-replica safe). See [docs/features/ha-mode.md](docs/features/ha-mode.md).
+**HA mode feature-complete in v6.17.x** (standalone default unchanged):
+- **v6.17.0** — cluster abstraction + Redis-backed rate limiter
+- **v6.17.1** — cross-replica WS broadcasts via Redis pub/sub
+- **v6.17.2** — **cron + Docker event stream + git polling leader election** via Redis `SET NX PX`. Multi-replica HA is now safe: one replica holds the leader lock (30s TTL, 10s heartbeat); readers serve HTTP, ignore cron, have Docker events delivered via pub/sub.
+
+v7.0.0 stable adds the failover runbook + staging multi-replica soak + sticky-session LB docs. See [docs/features/ha-mode.md](docs/features/ha-mode.md).
 
 ## Screenshots
 

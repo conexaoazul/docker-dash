@@ -152,20 +152,125 @@ function subscribe(appChannel, handler) {
   _ensureSubscriber().catch((e) => log.error('subscriber connect failed', { message: e.message }));
 }
 
-// ─── Phase 4 stubs (wired in v7.0.0-rc.1) ────────────────────────
+// ─── Phase 4 — Leader election (v6.17.2) ─────────────────────────
+//
+// Redis SET NX PX pattern:
+//   - Key: `leader` (namespace prefix omitted — Redis instance is
+//     ours, no need for app prefix on the hot path)
+//   - Value: NODE_ID (UUID)
+//   - TTL: LEADER_TTL_MS (30s — tolerates a stalled heartbeat round)
+//   - Heartbeat: every LEADER_HEARTBEAT_MS (10s) the leader extends
+//     the TTL with SET XX PX (only if still owned)
+//   - Reader poll: every LEADER_HEARTBEAT_MS readers try to acquire
+//     (in case leader died)
+//
+// Role transitions fire `onBecomeLeader` / `onBecomeReader` callbacks
+// registered before loop start. Used by jobs/index.js to start/stop
+// cron, ws/index.js to start/stop the Docker event stream, and
+// gitPolling.js to start/stop per-stack polling.
 
+const LEADER_KEY = 'leader';
+const LEADER_TTL_MS = 30000;
+const LEADER_HEARTBEAT_MS = 10000;
+
+let _leaderState = 'unknown';       // 'leader' | 'reader' | 'unknown'
+let _leaderTimer = null;
+const _onLeaderCbs = [];
+const _onReaderCbs = [];
+
+/** Return cached role. In standalone mode, always leader. */
 async function isLeader() {
-  // In standalone, this process IS the leader of its cluster of 1.
-  // In HA v6.17.0, every node claims to be leader (cron jobs still
-  // duplicate — users MUST NOT run multi-replica in HA mode yet; this
-  // is documented loudly as a preview limitation).
-  return true;
+  if (!isHa()) return true;  // standalone IS its own cluster-of-1 leader
+  // Start the election loop lazily on first `isLeader()` call so we don't
+  // incur Redis traffic if the app isn't in HA mode yet.
+  if (!_leaderTimer && _leaderState === 'unknown') {
+    await _electOnce();
+    _leaderTimer = setInterval(() => _electOnce().catch(() => {}), LEADER_HEARTBEAT_MS);
+    if (typeof _leaderTimer.unref === 'function') _leaderTimer.unref();
+  }
+  return _leaderState === 'leader';
 }
 
-function onBecomeLeader(_fn) { /* TODO v7.0.0-rc.1 */ }
-function onBecomeReader(_fn) { /* TODO v7.0.0-rc.1 */ }
+async function _electOnce() {
+  if (!isHa()) return;
+  let r;
+  try { r = await redis(); }
+  catch { _transitionTo('reader'); return; }
+
+  const wasLeader = (_leaderState === 'leader');
+
+  if (wasLeader) {
+    // Extend our existing lock (XX = only if key exists; silently fails if
+    // the lock has expired and was grabbed by someone else).
+    const ok = await r.set(LEADER_KEY, NODE_ID, 'XX', 'PX', LEADER_TTL_MS).catch(() => null);
+    if (ok === 'OK') return;  // still leader
+    // Lock lost — check who has it
+    const holder = await r.get(LEADER_KEY).catch(() => null);
+    if (holder === NODE_ID) return;  // race: we got it back somehow, still OK
+    _transitionTo('reader');
+    return;
+  }
+
+  // Reader path — try to acquire
+  const ok = await r.set(LEADER_KEY, NODE_ID, 'NX', 'PX', LEADER_TTL_MS).catch(() => null);
+  if (ok === 'OK') {
+    _transitionTo('leader');
+    return;
+  }
+  // NX failed — check whether we already hold it (e.g. after an internal
+  // state reset in tests, or a brief event-loop hiccup across heartbeats).
+  // If the holder is our NODE_ID, re-claim the role without SET and refresh
+  // the TTL to our intended value.
+  const holder = await r.get(LEADER_KEY).catch(() => null);
+  if (holder === NODE_ID) {
+    await r.pexpire(LEADER_KEY, LEADER_TTL_MS).catch(() => null);
+    _transitionTo('leader');
+  } else {
+    _transitionTo('reader');
+  }
+}
+
+function _transitionTo(role) {
+  if (_leaderState === role) return;
+  const prev = _leaderState;
+  _leaderState = role;
+  log.info('Cluster role changed', { from: prev, to: role, nodeId: NODE_ID });
+  const cbs = role === 'leader' ? _onLeaderCbs : _onReaderCbs;
+  for (const cb of cbs) {
+    try { cb(); }
+    catch (e) { log.warn('role-transition callback threw', { message: e.message, role }); }
+  }
+}
+
+/** Register a callback to run when this node becomes leader.
+ *  In standalone mode: fires immediately (we're always leader). */
+function onBecomeLeader(fn) {
+  _onLeaderCbs.push(fn);
+  if (!isHa()) {
+    // Fire synchronously in standalone so callers don't need to await.
+    try { fn(); }
+    catch (e) { log.warn('standalone leader callback threw', { message: e.message }); }
+  }
+}
+
+/** Register a callback for when this node becomes a reader. */
+function onBecomeReader(fn) {
+  _onReaderCbs.push(fn);
+  // No standalone fire — standalone never becomes reader.
+}
 
 async function shutdown() {
+  if (_leaderTimer) { clearInterval(_leaderTimer); _leaderTimer = null; }
+  // Release the leader lock proactively on graceful shutdown so another
+  // replica can pick it up within milliseconds instead of waiting for TTL.
+  if (_leaderState === 'leader' && _redis) {
+    try {
+      // Delete only if we still own it (Lua to avoid clobbering a new leader
+      // that acquired right before our DEL lands).
+      const script = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end`;
+      await _redis.eval(script, 1, LEADER_KEY, NODE_ID);
+    } catch { /* ignore */ }
+  }
   if (_subClient) {
     try { await _subClient.quit(); } catch { /* ignore */ }
     _subClient = null;
@@ -187,10 +292,18 @@ module.exports = {
   shutdown,
   // test-only: reset internal state
   _reset() {
+    if (_leaderTimer) { clearInterval(_leaderTimer); _leaderTimer = null; }
     _redis = null;
     _redisPromise = null;
     _subClient = null;
     _subClientPromise = null;
+    _leaderState = 'unknown';
     _subscribers.clear();
+    _onLeaderCbs.length = 0;
+    _onReaderCbs.length = 0;
+  },
+  // test-only: force a role transition (for unit tests of gating logic)
+  _forceRole(role) {
+    _transitionTo(role);
   },
 };

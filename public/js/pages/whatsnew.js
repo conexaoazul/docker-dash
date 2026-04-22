@@ -10,6 +10,20 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.17.2',
+      date: '2026-04-22',
+      title: 'HA Phase 4 — Leader election (multi-replica HA is now safe)',
+      changes: [
+        { type: 'feature', text: 'Cron jobs, Docker event stream, and git polling now run on the leader replica only via Redis SET NX PX (30s TTL + 10s heartbeat). All 13 cron jobs (daily-backup, vacuum-db, certificate-scan, secret-rotation-scan, stats aggregation, sandbox-ttl-sweep, s3-backup, schedule-executor, etc.) are leader-gated. No more duplicate backups, no more concurrent VACUUM on SQLite (DB corruption risk), no more N× GitHub API rate-limit hits.' },
+        { type: 'feature', text: 'Docker event stream per-replica was the gotcha of v6.17.1: multiple replicas subscribing to Docker + pub/sub broadcasting = N× event delivery to users. Now leader-only: on role transition leader starts event streams, reader stops them. Readers still get events via Redis pub/sub (shipped v6.17.1) and deliver to their local WS clients.' },
+        { type: 'feature', text: 'Graceful leader handover via Lua DEL-if-owned script on shutdown. Another replica picks up the lock within milliseconds instead of waiting 30s TTL. Internal-reset recovery: if state is lost but Redis still holds our NODE_ID, GET-and-compare re-claims without spurious transition.' },
+        { type: 'improvement', text: 'Standalone mode completely unaffected. isLeader() short-circuits to true without touching Redis. onBecomeLeader(fn) fires synchronously at registration. Existing cron jobs start immediately like before. Zero runtime overhead. Zero new env vars.' },
+        { type: 'improvement', text: 'SSH tunnels intentionally NOT leader-gated — readers need them to serve HTTP reads (container list, stats, inspect). Remote hosts see N SSH connections in multi-replica HA; acceptable for v6.17.2. Future v7.x may proxy read-path SSH through the leader.' },
+        { type: 'improvement', text: 'Tests: 871 → 879 (+8 leader-election tests via ioredis-mock). Covers lock acquire/contention, role transition callbacks, idempotent transitions, throwing-callback isolation, standalone synchronous onBecomeLeader. Lint 0/0.' },
+        { type: 'improvement', text: 'HA v6.17.x complete. Multi-replica HA deploy is SAFE from this release. v7.0.0 stable next — failover runbook, sticky-session LB docs, real staging multi-replica soak before production-grade HA promotion.' },
+      ],
+    },
+    {
       version: '6.17.1',
       date: '2026-04-22',
       title: 'HA Phase 3 — WebSocket pub/sub via Redis',

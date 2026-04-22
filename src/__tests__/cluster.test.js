@@ -215,4 +215,89 @@ describe('cluster — HA mode (DD_MODE=ha, ioredis-mock)', () => {
     await new Promise(r => setTimeout(r, 50));
     expect(received).toBeNull();
   });
+
+  // ─── Phase 4: Leader election (v6.17.2) ──────────────────────────
+
+  it('isLeader() acquires the lock on first call (single-node cluster → becomes leader)', async () => {
+    cluster._reset();
+    const first = await cluster.isLeader();
+    expect(first).toBe(true);  // we grabbed it
+  });
+
+  it('a second "replica" cannot acquire the lock while held', async () => {
+    cluster._reset();
+    // We hold it (first call)
+    await cluster.isLeader();
+    // Simulate a second replica trying to acquire by manipulating the SET NX path
+    // directly through the same Redis client (ioredis-mock uses a shared state).
+    const r = await cluster.redis();
+    const attempt = await r.set('leader', 'other-node-id', 'NX', 'PX', 30000);
+    expect(attempt).toBeNull();  // NX fails because key exists
+  });
+
+  it('onBecomeLeader fires callbacks on role transition', async () => {
+    cluster._reset();
+    const calls = [];
+    cluster.onBecomeLeader(() => calls.push('leader'));
+    cluster.onBecomeReader(() => calls.push('reader'));
+    await cluster.isLeader();  // triggers _electOnce → transitions unknown → leader
+    expect(calls).toContain('leader');
+    expect(calls).not.toContain('reader');
+  });
+
+  it('_forceRole transitions call reader callbacks', () => {
+    cluster._reset();
+    const calls = [];
+    cluster.onBecomeReader(() => calls.push('reader'));
+    cluster.onBecomeLeader(() => calls.push('leader'));
+    cluster._forceRole('leader');
+    cluster._forceRole('reader');
+    cluster._forceRole('leader');  // back to leader again
+    expect(calls).toEqual(['leader', 'reader', 'leader']);
+  });
+
+  it('callbacks do not fire twice on the same role (idempotent transition)', () => {
+    cluster._reset();
+    const calls = [];
+    cluster.onBecomeLeader(() => calls.push('leader'));
+    cluster._forceRole('leader');
+    cluster._forceRole('leader');  // same role — no-op
+    cluster._forceRole('leader');
+    expect(calls).toEqual(['leader']);
+  });
+
+  it('a throwing callback does not prevent other callbacks from firing', () => {
+    cluster._reset();
+    const fired = [];
+    cluster.onBecomeLeader(() => { throw new Error('boom'); });
+    cluster.onBecomeLeader(() => { fired.push('second'); });
+    cluster._forceRole('leader');
+    expect(fired).toEqual(['second']);
+  });
+});
+
+// ─── Standalone onBecomeLeader fires synchronously ─────────────────
+
+describe('cluster — standalone leader callbacks', () => {
+  beforeAll(() => {
+    delete process.env.DD_MODE;
+    jest.resetModules();
+    jest.dontMock('ioredis');
+  });
+
+  it('onBecomeLeader fires immediately in standalone mode', () => {
+    const cluster = require('../services/cluster');
+    cluster._reset();
+    let fired = false;
+    cluster.onBecomeLeader(() => { fired = true; });
+    expect(fired).toBe(true);
+  });
+
+  it('onBecomeReader does NOT fire in standalone mode', () => {
+    const cluster = require('../services/cluster');
+    cluster._reset();
+    let fired = false;
+    cluster.onBecomeReader(() => { fired = true; });
+    expect(fired).toBe(false);
+  });
 });

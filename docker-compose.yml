@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        APP_VERSION: "${APP_VERSION:-6.17.1}"
-    image: docker-dash:${APP_VERSION:-6.17.1}
+        APP_VERSION: "${APP_VERSION:-6.17.2}"
+    image: docker-dash:${APP_VERSION:-6.17.2}
     container_name: docker-dash
     restart: unless-stopped
     env_file:
@@ -54,7 +54,7 @@ services:
   dd-egress-filter:
     build:
       context: ./docker/egress-filter
-    image: docker-dash-egress-filter:${APP_VERSION:-6.17.1}
+    image: docker-dash-egress-filter:${APP_VERSION:-6.17.2}
     container_name: dd-egress-filter
     restart: unless-stopped
     # Uses the default bridge so target containers on the default bridge can
@@ -83,9 +83,9 @@ services:
   #   DD_MODE=ha
   #   REDIS_URL=redis://redis:6379
   #
-  # v6.17.1 ships the foundation (Redis-backed rate limiter + cluster abstraction).
+  # v6.17.2 ships the foundation (Redis-backed rate limiter + cluster abstraction).
   # DO NOT run multi-replica in HA mode yet — WS pub/sub + cron leader election
-  # land in v7.0.0-alpha.1 / v7.0.0-rc.1. Running v6.17.1 HA with 2+ replicas
+  # land in v7.0.0-alpha.1 / v7.0.0-rc.1. Running v6.17.2 HA with 2+ replicas
   # causes duplicate cron execution (duplicate backups, concurrent VACUUM).
   #
   # Single-instance HA (1 replica + Redis) is useful for warming up operational
