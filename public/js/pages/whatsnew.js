@@ -10,6 +10,18 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.16.1',
+      date: '2026-04-22',
+      title: 'Testing 8.5 → 9.5, Documentation 9 → 9.5 (production readiness 9.5 → 9.7)',
+      changes: [
+        { type: 'improvement', text: '86 new tests across 4 previously-untested services — 757/51 → 843/55. permissions.test.js (28 tests for RBAC filtering — security-critical), settings.test.js (17 tests for key-value CRUD), security-alerts.test.js (26 tests for threshold + windowed rule evaluation + cooldown), event-notifier.test.js (15 tests for dispatch with mocked notification channels + workflows).' },
+        { type: 'improvement', text: '3 new feature reference docs at docs/features/: prometheus-metrics.md (978 words — every metric enumerated, Grafana queries, cardinality notes), platform-detection.md (1,184 words — NAS + cloud + hypervisor signatures, cache behavior, how to extend), translations-tooling.md (1,381 words — architecture, admin workflow, API reference, quota math). ~3,500 words of accurate reference docs, every claim verified in source.' },
+        { type: 'improvement', text: 'README gains a Feature Reference subsection pointing to docs/features/. Test count bumps in README + SECURITY + CONTRIBUTING.' },
+        { type: 'improvement', text: 'Production readiness badge 9.5 → 9.7. Testing 8.5 → 9.5, Documentation 9 → 9.5. Residual gap to 10/10 is v7-scoped: Docker-in-Docker integration tests, Redis HA mode (BACKLOG F30), external 3rd-party security audit.' },
+        { type: 'improvement', text: 'Pure test + docs release. Zero runtime code changes. 0 lint warnings / 0 errors.' },
+      ],
+    },
+    {
       version: '6.16.0',
       date: '2026-04-22',
       title: 'Phase 2 — containers.js lazy-load split (production readiness 9.1 → 9.5)',

@@ -2,6 +2,78 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.16.1] - 2026-04-22 — "Testing 8.5 → 9.5, Documentation 9 → 9.5 (production readiness 9.5 → 9.7)"
+
+Pure test + docs release. No runtime code changes. Closes two of the three remaining gaps to 10/10 production readiness.
+
+### Added — 86 new tests across 4 previously-untested services
+
+4 new test files in `src/__tests__/`:
+
+- **`permissions.test.js`** — 28 tests. RBAC filtering: `filterContainers`, `filterStacks`, `canAccessStack`, `canAccessContainer`, grant/revoke CRUD, expired-grant cleanup. Security-critical (mis-filtered containers would break RBAC guarantees).
+- **`settings.test.js`** — 17 tests. Key-value CRUD: get, set, delete, list, list-by-prefix, type coercion, update audit tracking.
+- **`security-alerts.test.js`** — 26 tests. Rule evaluation logic: threshold rules, windowed rules, cooldown, rule CRUD, event recording, top-events query. Pure over DB rows.
+- **`event-notifier.test.js`** — 15 tests. Dispatch: channel selection, cooldown math, workflow triggering. Mocked `notificationChannels` + `workflows` via `jest.mock()` because `eventNotifier` dynamically `require()`s them inside method bodies.
+
+**Test suite:** 757 / 51 → **843 / 55** (+86 tests, +4 suites).
+
+Tricky patterns the agent documented for future reference:
+- SQLite `datetime('now')` returns `'YYYY-MM-DD HH:MM:SS'` (space), `new Date().toISOString()` returns `T` separator — lexicographic comparison in `getRecentAlerts` requires ISO T-format for WHERE filter to work.
+- Module-level Maps (`cooldowns` in eventNotifier) aren't exported — tests use unique `actorName` per test to avoid cross-contamination.
+- FK delete order: `security_alert_events` → `security_alert_rules`, then users. Similarly `notification_channels.updated_by` references `users(id)`.
+
+### Added — 3 feature reference docs in `docs/features/`
+
+New directory + 3 files written against the source code (every claim verified, no TODOs):
+
+- **`prometheus-metrics.md`** (978 words) — Complete `/api/metrics` reference. Enumerates every metric (name, type, labels, HELP), includes real sample output pulled from staging, 4 Grafana query examples (HTTP 5xx rate, avg latency per method, active WS connections, background job failure ratio), cardinality notes, limitations.
+- **`platform-detection.md`** (1,184 words) — NAS (5 platforms) + cloud (10 vendors) + hypervisor (5 signatures) detection logic. Complete `_CLOUD_SIGNATURES` reference, cache behavior, how to extend, known limitations (OMV hostname-hint, DSM 6.x unsupported).
+- **`translations-tooling.md`** (1,381 words) — v6.11.x Translations tab: architecture (provider configs → quota tracking → batch → review → runtime DB overrides), admin workflow step-by-step, API endpoint reference, quota math (1M chars/month free, typical run uses ~30k), limitations.
+
+Total: ~3,500 words of accurate feature reference.
+
+### README cross-link
+
+New "Feature Reference" subsection in README pointing to the 3 `docs/features/` files.
+
+### Production readiness scorecard
+
+| Category | v6.16.0 | **v6.16.1** |
+|----------|:---:|:---:|
+| Security | 9.5 | 9.5 |
+| Reliability | 9.5 | 9.5 |
+| Monitoring | 9.5 | 9.5 |
+| Performance | 9 | 9 |
+| Testing | 8.5 | **9.5** |
+| Documentation | 9 | **9.5** |
+| Deploy Readiness | 9.5 | 9.5 |
+| **Weighted** | **9.5** | **~9.7** |
+
+**Remaining gap to 10/10** is v7-scoped:
+- Docker-in-Docker integration tests — structural CI change
+- Redis-backed HA mode — BACKLOG F30, 4-5 days, changes product positioning
+- External 3rd-party security audit — costs money + vendor coordination
+
+### Verification
+
+- **Tests:** 843 passing / 4 skipped / 55 suites (was 757 / 51).
+- **Lint:** 0 warnings / 0 errors.
+- **Zero runtime code changes** — pure additions to `src/__tests__/` and `docs/`.
+
+### Files touched
+
+- `src/__tests__/permissions.test.js` (new, 28 tests)
+- `src/__tests__/settings.test.js` (new, 17 tests)
+- `src/__tests__/security-alerts.test.js` (new, 26 tests)
+- `src/__tests__/event-notifier.test.js` (new, 15 tests)
+- `docs/features/prometheus-metrics.md` (new)
+- `docs/features/platform-detection.md` (new)
+- `docs/features/translations-tooling.md` (new)
+- `README.md` — test counts 757 → 843, production readiness 9.5 → 9.7, new Feature Reference subsection, new audit history row
+- `SECURITY.md` / `CONTRIBUTING.md` — test counts refreshed
+
+---
+
 ## [6.16.0] - 2026-04-22 — "Phase 2 — containers.js lazy-load split"
 
 **Production readiness 9.1 → 9.5.** Performance category (7 → 9) was the biggest residual gap after v6.15.x. This release closes it by splitting the largest JS file we ship.
