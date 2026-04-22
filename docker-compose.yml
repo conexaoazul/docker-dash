@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        APP_VERSION: "${APP_VERSION:-7.0.0}"
-    image: docker-dash:${APP_VERSION:-7.0.0}
+        APP_VERSION: "${APP_VERSION:-7.1.0}"
+    image: docker-dash:${APP_VERSION:-7.1.0}
     container_name: docker-dash
     restart: unless-stopped
     env_file:
@@ -54,7 +54,7 @@ services:
   dd-egress-filter:
     build:
       context: ./docker/egress-filter
-    image: docker-dash-egress-filter:${APP_VERSION:-7.0.0}
+    image: docker-dash-egress-filter:${APP_VERSION:-7.1.0}
     container_name: dd-egress-filter
     restart: unless-stopped
     # Uses the default bridge so target containers on the default bridge can
@@ -83,14 +83,14 @@ services:
   #   DD_MODE=ha
   #   REDIS_URL=redis://redis:6379
   #
-  # v7.0.0 ships the foundation (Redis-backed rate limiter + cluster abstraction).
+  # v7.1.0 ships the foundation (Redis-backed rate limiter + cluster abstraction).
   # DO NOT run multi-replica in HA mode yet — WS pub/sub + cron leader election
-  # land in v7.0.0-alpha.1 / v7.0.0-rc.1. Running v7.0.0 HA with 2+ replicas
+  # land in v7.1.0-alpha.1 / v7.1.0-rc.1. Running v7.1.0 HA with 2+ replicas
   # causes duplicate cron execution (duplicate backups, concurrent VACUUM).
   #
   # Single-instance HA (1 replica + Redis) is useful for warming up operational
   # tooling (Prometheus scrape of Redis, sticky-session LB config drill, etc.)
-  # before rolling out true multi-replica in v7.0.0.
+  # before rolling out true multi-replica in v7.1.0.
   redis:
     image: redis:7-alpine
     container_name: docker-dash-redis
@@ -107,6 +107,68 @@ services:
       - no-new-privileges:true
     profiles:
       - ha
+
+  # Optional observability stack (v7.1.0) — enable with:
+  #   docker compose --profile observability up -d
+  #
+  # Ships Prometheus (scrape /api/metrics every 15s) + Grafana (auto-provisioned
+  # datasource + "Docker Dash — Overview" dashboard). Works in BOTH standalone
+  # and HA mode — the dashboard panels gate HA-only metrics (cluster role,
+  # Redis connected) via value mappings.
+  #
+  # Grafana default: admin / admin (forced change on first login).
+  # Grafana exposed on :${GRAFANA_PORT:-3001}; Prometheus NOT exposed externally.
+  # See docs/features/observability.md for hardening + integration with
+  # existing Prometheus / Grafana installs.
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: docker-dash-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    volumes:
+      - ./docker/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    # Not exposed to host by default — Grafana reaches it on the internal
+    # network. Uncomment to expose for external scraping.
+    # ports:
+    #   - "${PROMETHEUS_PORT:-9091}:9090"
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - observability
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: docker-dash-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - ./docker/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      # Default admin / admin — Grafana FORCES change on first login.
+      # For automated provisioning, set GF_SECURITY_ADMIN_PASSWORD in .env
+      # so the first-login password change is pre-applied.
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Disable anonymous access — operators must log in. Flip to true +
+      # set Viewer role if you want the dashboard publicly visible.
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      # Disable user sign-up / email invites on this self-hosted install.
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_USERS_ALLOW_ORG_CREATE=false
+    depends_on:
+      - prometheus
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - observability
 
   # Optional HTTPS reverse proxy — enable with: docker compose --profile tls up -d
   # Configure via Docker Dash UI: System → SSL/TLS → Enable HTTPS
@@ -143,3 +205,7 @@ volumes:
     name: docker-dash-egress-logs
   redis-data:
     name: docker-dash-redis-data
+  prometheus-data:
+    name: docker-dash-prometheus-data
+  grafana-data:
+    name: docker-dash-grafana-data

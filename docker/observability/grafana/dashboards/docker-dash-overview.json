@@ -1,0 +1,324 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Docker Dash overview — works in both standalone and HA mode. Cluster role + HTTP traffic + WebSocket + background jobs + container totals + Redis health (HA only). Ships with v7.1.0 observability profile.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+      "description": "Cluster role per node. 0 = standalone, 1 = leader, 2 = reader, -1 = unknown.",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "standalone", "color": "blue" } } },
+            { "type": "value", "options": { "1": { "text": "leader", "color": "green" } } },
+            { "type": "value", "options": { "2": { "text": "reader", "color": "yellow" } } },
+            { "type": "value", "options": { "-1": { "text": "unknown", "color": "red" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "text": { "titleSize": 12, "valueSize": 24 },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+          "expr": "docker_dash_cluster_role",
+          "legendFormat": "{{mode}} / {{nodeId}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cluster role",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+      "description": "Redis connection health. 0 in standalone (not applicable), 1 when HA mode is connected to Redis, 0 when HA Redis is down.",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "down / N/A", "color": "red" } } },
+            { "type": "value", "options": { "1": { "text": "connected", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "text": { "titleSize": 12, "valueSize": 24 },
+        "textMode": "value"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+          "expr": "docker_dash_cluster_redis_connected",
+          "refId": "A"
+        }
+      ],
+      "title": "Redis (HA only)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+      "description": "Currently open WebSocket connections across all replicas (summed).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+          "expr": "sum(docker_dash_ws_connections_active)",
+          "refId": "A"
+        }
+      ],
+      "title": "Active WebSocket connections",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+      "description": "Container totals from Docker Dash stats aggregator. Sum across all managed hosts.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+          "expr": "docker_dash_containers_total",
+          "legendFormat": "containers",
+          "refId": "A"
+        }
+      ],
+      "title": "Containers managed",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+      "description": "HTTP request rate per method + status class (2xx/3xx/4xx/5xx). 5xx spikes = investigate errors_total by exact status below.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green" }] },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+          "expr": "sum by(method, status) (rate(docker_dash_http_requests_total[5m]))",
+          "legendFormat": "{{method}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP request rate (by method + status class)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+      "description": "Average HTTP request latency = sum(duration) / count, per method + status class. Divide-by-zero periods appear as gaps.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 500 },
+              { "color": "red", "value": 2000 }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+          "expr": "sum by(method, status) (rate(docker_dash_http_request_duration_ms[5m])) / sum by(method, status) (rate(docker_dash_http_requests_total[5m]))",
+          "legendFormat": "{{method}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Avg HTTP latency (ms, by method + status class)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+      "description": "Background cron job execution rate, by job name. Flat line = job stopped running (indicates leader election issue in HA mode, or cron misconfig in standalone).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisPlacement": "auto",
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green" }] },
+          "unit": "ops"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 7,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+          "expr": "sum by(job) (rate(docker_dash_background_job_runs_total[15m]))",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Background job runs (rate per job)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+      "description": "HTTP error responses by exact status code. 429 = rate-limit triggered. 500/503 = server-side issues. 404 spikes = route mismatch or discovery attempts.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "showPoints": "never",
+            "stacking": { "group": "A", "mode": "normal" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red" }] },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 8,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "docker-dash-prom" },
+          "expr": "sum by(status) (rate(docker_dash_http_errors_total[5m]))",
+          "legendFormat": "HTTP {{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP errors (by exact status code)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["docker-dash", "v7.1.0"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Docker Dash — Overview",
+  "uid": "docker-dash-overview",
+  "version": 1,
+  "weekStart": ""
+}

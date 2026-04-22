@@ -2,6 +2,115 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.1.0] - 2026-04-22 — "Observability stack — Prometheus + Grafana opt-in profile"
+
+Opt-in observability: `docker compose --profile observability up -d` adds Prometheus (scraping `/api/metrics` every 15s) + Grafana (pre-provisioned data source + 8-panel overview dashboard) alongside the app. Zero UI config — the dashboard populates within 30s of first scrape.
+
+**Standalone users: zero impact.** Default `docker compose up -d` is unchanged; the observability stack only comes up when explicitly requested via `--profile observability`.
+
+### Added — `docker/observability/` directory
+
+Four files that drive the entire stack:
+
+- **[`docker/observability/prometheus.yml`](docker/observability/prometheus.yml)** — scrape config: `app:8101/api/metrics` every 15s, 10s timeout. Includes Prometheus self-scrape.
+- **[`docker/observability/grafana/provisioning/datasources/prometheus.yml`](docker/observability/grafana/provisioning/datasources/prometheus.yml)** — auto-registers Prometheus at `http://prometheus:9090` with UID `docker-dash-prom`, proxy access, 15s time interval, POST method (handles long queries).
+- **[`docker/observability/grafana/provisioning/dashboards/docker-dash.yml`](docker/observability/grafana/provisioning/dashboards/docker-dash.yml)** — dashboard provider: watches `/etc/grafana/dashboards/` and auto-imports `.json` files every 30s. Puts them in a "Docker Dash" folder.
+- **[`docker/observability/grafana/dashboards/docker-dash-overview.json`](docker/observability/grafana/dashboards/docker-dash-overview.json)** — the overview dashboard (below).
+
+### Added — Overview dashboard (8 panels)
+
+Works in both standalone and HA mode. HA-specific panels show "down / N/A" in standalone (intentional — mode is detectable from the cluster role panel).
+
+| # | Panel | Type | Query |
+|:-:|-------|------|-------|
+| 1 | Cluster role | Stat (value mapping) | `docker_dash_cluster_role` — maps 0/1/2/-1 → standalone/leader/reader/unknown |
+| 2 | Redis (HA only) | Stat (value mapping) | `docker_dash_cluster_redis_connected` — red/green |
+| 3 | Active WS connections | Stat (area sparkline) | `sum(docker_dash_ws_connections_active)` |
+| 4 | Containers managed | Stat (area) | `docker_dash_containers_total` |
+| 5 | HTTP request rate | Timeseries (line, legend table) | `sum by(method,status) (rate(docker_dash_http_requests_total[5m]))` |
+| 6 | Avg HTTP latency | Timeseries (thresholded 500/2000ms) | `sum(rate(...duration_ms)) / sum(rate(...requests_total))` per method × status class |
+| 7 | Background job runs | Timeseries (bars) | `sum by(job) (rate(docker_dash_background_job_runs_total[15m]))` |
+| 8 | HTTP errors by status | Timeseries (stacked area) | `sum by(status) (rate(docker_dash_http_errors_total[5m]))` — shows 429/5xx spikes |
+
+Default refresh 30s, time range `now-1h`. Grafana version target: 11.x (schema 39).
+
+### Added — `docker-compose.yml` `--profile observability`
+
+Two new services behind the `observability` profile:
+
+```yaml
+prometheus:
+  image: prom/prometheus:v3.0.1
+  command: --storage.tsdb.retention.time=7d  # ...
+  # Not exposed to host by default — Grafana reaches it internally.
+
+grafana:
+  image: grafana/grafana:11.3.0
+  ports: ["${GRAFANA_PORT:-3001}:3000"]
+  environment:
+    GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}   # override for automation
+    GF_AUTH_ANONYMOUS_ENABLED: false
+    GF_USERS_ALLOW_SIGN_UP: false
+```
+
+Both with `no-new-privileges:true`, named volumes for data persistence (`docker-dash-prometheus-data`, `docker-dash-grafana-data`). Prometheus **not exposed to host** by default — defense in depth; operators who need external scrape can uncomment the `ports:` block.
+
+### Added — [`docs/features/observability.md`](docs/features/observability.md) (3,200 words)
+
+Operator reference covering:
+
+1. What's in the stack (service table, resource expectations)
+2. Enabling (quick + with custom credentials + with custom port)
+3. Dashboard panels reference (what each shows, why it matters)
+4. Recommended alerts (6 PromQL-ready alert expressions)
+5. **Integrating with existing Prometheus/Grafana** (two paths: scrape config append + dashboard JSON import via UI or API)
+6. Security hardening checklist (7 items — change default password, don't expose Prometheus, HTTPS, disable anonymous access, SSO integration, data-source proxy mode)
+7. **Common-sense deployment recommendations** — persistent storage, resource limits, retention vs disk trade-off, scaling considerations (single-instance Prometheus caveat, HA replica scrape via static targets OR Docker SD)
+8. Teardown (keep vs drop data volumes)
+9. Known limitations (no histograms — counters + gauges only; no per-container rollup; per-replica scrape cardinality bound)
+10. See also (source files + related docs)
+
+### Staging soak
+
+Deployed on staging, verified end-to-end:
+
+1. ✓ `docker compose --profile observability up -d` starts both services cleanly
+2. ✓ Prometheus scrapes `app:8101/api/metrics` with `up=1`
+3. ✓ Grafana health check returns `{"database":"ok","version":"11.3.0"}`
+4. ✓ Data source auto-registered: `Prometheus (prometheus) url=http://prometheus:9090 uid=docker-dash-prom`
+5. ✓ Dashboard auto-imported: `Docker Dash — Overview uid=docker-dash-overview folder=Docker Dash`
+6. ✓ All 8 panels present by title and type
+7. ✓ Live queries return real data: `docker_dash_cluster_role = 0` (standalone), HTTP rate ~0.025 req/s GET/2xx with GET/3xx + GET/4xx active
+
+### Changed — README
+
+- Feature Reference section adds "Observability Stack" link
+- Version badge 7.0.0 → 7.1.0
+
+### No dependency changes
+
+Prometheus + Grafana are Docker images pulled by the compose profile. `package.json` unchanged. `npm audit` remains clean.
+
+### Tests
+
+- **879 passing + 4 skipped / 57 suites** (unchanged — observability is Docker-side, no JS code added to the main app)
+- Lint: 0 warnings / 0 errors
+
+### Files touched
+
+- `docker/observability/` — 4 files (new)
+- `docker/observability/grafana/dashboards/docker-dash-overview.json` — 8-panel dashboard JSON
+- `docker-compose.yml` — `prometheus` + `grafana` services behind `observability` profile, 2 new named volumes
+- `docs/features/observability.md` — 3,200-word operator guide (new)
+- `README.md` — feature reference + version
+- `package.json`, `src/version.js` — 7.1.0
+
+### v7.2.0 roadmap (next)
+
+In-app wizard: detect existing Prometheus / Grafana in the Docker environment → offer three paths (integrate existing · deploy ours · point to external). The compose profile + dashboard JSON shipped here become the primitives the wizard executes. See `plans/deep-spec-observability-wizard.md` (to be written when scoped).
+
+---
+
 ## [7.0.0] - 2026-04-22 — "HA mode production-ready — observability + runbook + LB configs"
 
 **Major release.** HA mode (shipped incrementally across v6.17.0 → v6.17.2) is now **production-ready**. v7.0.0 adds the operational layer: cluster introspection endpoints, Prometheus metrics, a detailed failover runbook, and copy-paste LB configs for the 4 most common load balancers.

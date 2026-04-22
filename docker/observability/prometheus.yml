@@ -1,0 +1,30 @@
+# Prometheus scrape config for Docker Dash's /api/metrics endpoint.
+# Minimal — only scrapes the app and optionally Prometheus itself.
+# For production-grade scrapes, add relabel_configs, recording rules,
+# and alerting rules as needed.
+#
+# v7.1.0. Shipped as part of `docker compose --profile observability up -d`.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    deployment: docker-dash
+
+scrape_configs:
+  # Docker Dash app metrics. Works in both standalone and HA mode.
+  # In HA mode, each replica exposes its own /api/metrics; if you scale
+  # to N replicas and want Prometheus to scrape all of them, replace
+  # `app:8101` below with a list of replica DNS names (or use DNS SD).
+  - job_name: docker-dash
+    metrics_path: /api/metrics
+    static_configs:
+      - targets: ['app:8101']
+        labels:
+          service: docker-dash
+
+  # Prometheus self-monitoring — useful for observability of observability.
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

@@ -10,7 +10,7 @@
     <a href="https://github.com/bogdanpricop/docker-dash/releases/latest"><img src="https://img.shields.io/github/v/release/bogdanpricop/docker-dash?color=blue" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-879%20passing%20(100%25)-brightgreen" alt="Tests"></a>
-    <img src="https://img.shields.io/badge/version-7.0.0-blue" alt="Version">
+    <img src="https://img.shields.io/badge/version-7.1.0-blue" alt="Version">
     <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.8%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
     <img src="https://img.shields.io/badge/Docker-~80MB-blue" alt="Image Size">
@@ -269,6 +269,7 @@ Dedicated reference docs for the deeper features, in [docs/features/](docs/featu
 - **[HA Mode](docs/features/ha-mode.md)** — optional Redis-backed redundancy (production-ready in v7.0.0); architecture, trade-offs, when NOT to use it
 - **[HA Failover Runbook](docs/features/ha-failover-runbook.md)** — operator procedures: leader death, rolling restart, Redis failure, split-brain detection, recovery checklist
 - **[HA Load Balancer Configs](docs/features/ha-lb-configs.md)** — copy-paste examples for Caddy + Traefik + HAProxy + nginx with sticky-session + WS upgrade + health checks
+- **[Observability Stack (v7.1.0)](docs/features/observability.md)** — opt-in Prometheus + Grafana via `docker compose --profile observability up -d`, 8-panel dashboard auto-provisioned, recommended alerts, integration with existing Prometheus/Grafana
 
 ## Where to start
 

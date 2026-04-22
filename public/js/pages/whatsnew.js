@@ -10,6 +10,20 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '7.1.0',
+      date: '2026-04-22',
+      title: 'Observability stack — Prometheus + Grafana opt-in profile',
+      changes: [
+        { type: 'feature', text: 'New docker compose --profile observability adds Prometheus (scrape /api/metrics every 15s, 7-day retention) + Grafana 11.3 (pre-provisioned datasource + 8-panel overview dashboard). Zero UI config — dashboard populates within 30s of first scrape. Default Grafana port :3001 (configurable via GRAFANA_PORT).' },
+        { type: 'feature', text: 'Dashboard works in BOTH standalone and HA mode. HA-specific panels (cluster role, Redis connected) show meaningful values in HA, "down / N/A" in standalone. 8 panels: cluster role, Redis health, active WS connections, containers managed, HTTP request rate, avg HTTP latency, background job runs, HTTP errors by status.' },
+        { type: 'feature', text: 'Pre-provisioned via Grafana file-based provisioning (/etc/grafana/provisioning/): datasource + dashboard provider auto-loaded at boot. Standard Grafana pattern — operators can drop additional JSON dashboards in docker/observability/grafana/dashboards/ and they appear within 30s.' },
+        { type: 'feature', text: 'New docs/features/observability.md (~3,200 words): enablement, panel reference, 6 recommended PromQL alerts, integration path for operators who already run Prometheus/Grafana (scrape config snippet + dashboard import), 7-item security hardening checklist, deployment recommendations (persistent storage, resource limits, retention trade-off, HA scrape via static targets or Docker SD).' },
+        { type: 'improvement', text: 'Standalone users: zero impact. Default docker compose up -d unchanged. observability profile is opt-in.' },
+        { type: 'improvement', text: 'Staging verified end-to-end: Prometheus scrape up=1, Grafana health ok, datasource auto-registered, dashboard auto-imported in "Docker Dash" folder, live queries return real metrics (docker_dash_cluster_role=0, HTTP rate 0.025 req/s GET/2xx).' },
+        { type: 'improvement', text: 'v7.2.0 roadmap: in-app wizard to detect existing Prometheus/Grafana → offer 3 paths (integrate existing / deploy ours / point to external). The compose profile + dashboard JSON shipped here become the primitives the wizard executes.' },
+      ],
+    },
+    {
       version: '7.0.0',
       date: '2026-04-22',
       title: 'HA mode production-ready — observability + failover runbook + LB configs',
