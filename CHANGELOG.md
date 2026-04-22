@@ -2,6 +2,61 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.16.0] - 2026-04-22 — "Phase 2 — containers.js lazy-load split"
+
+**Production readiness 9.1 → 9.5.** Performance category (7 → 9) was the biggest residual gap after v6.15.x. This release closes it by splitting the largest JS file we ship.
+
+### Changed — `containers.js` split into list (eager) + detail (lazy-loaded)
+
+Before: `public/js/pages/containers.js` was **5,774 lines / ~230KB unminified**, eagerly loaded on every SPA page visit (dashboard, hosts, images, etc.) whether or not the user ever opened `/containers/:id`.
+
+After:
+- `public/js/pages/containers.js` — **3,226 lines** (list view + Container Groups + stack-level modals + `_sandboxDialog` which `images.js` also calls). Stays eager.
+- `public/js/pages/container-detail.js` (new) — **2,595 lines** (detail view, Security/Pipeline/Info/Logs/Terminal/Stats/Env/Labels/Mounts/Network/Inspect tabs, Health Logs viewer, Files/Changes tabs, Rollback dialog). **Lazy-loaded via dynamic `<script>` injection on first navigation to `/containers/:id`.** Cached afterwards.
+
+Initial JS payload reduction: **~45% off `containers.js`**. Users landing on the dashboard, Multi-Host, Images, System, or any other page download ~130KB instead of ~230KB worth of `containers.js`. The detail code arrives in ~100-200ms on the first deliberate detail-page click, cached thereafter.
+
+### Implementation notes
+
+- `ContainersPageDetail` object declared as a global in `container-detail.js`. `containers.js` `Object.assign(ContainersPage, ContainersPageDetail)` mixes it into the main page object on load, so existing call sites using `this._renderDetail(…)` / `this._renderSecurityTab(…)` etc. continue working unchanged.
+- Cache-bust version for the dynamic load is extracted from the currently-loaded `containers.js` `<script>` tag's `src=…?v=X` query — same version ships for both files.
+- Error path: if the dynamic load fails (network error, 404), the render method shows an inline error with a Reload button instead of a blank page. Subsequent navigation retries automatically.
+- **`_sandboxDialog` stays in eager `containers.js`** because `images.js:87, 106` calls it directly from the Images page — it's not exclusively a detail-view method.
+- Methodology: a one-shot Node script (`C:/tmp/split-containers.js`, not committed) extracted the 3 contiguous detail-method blocks (1341-3527, 3893-3950, 4132-4466) based on the preflight grep of method boundaries.
+
+### No user-visible behavior change
+
+The split is mechanical. Same methods, same arguments, same return shapes. A user clicking into a container detail page gets exactly the same UI with a one-time ~100-200ms load delay (cached for the rest of the session). Staging smoke verified every detail tab renders correctly.
+
+### Production readiness update
+
+| Category | v6.15.1 | v6.16.0 |
+|----------|:---:|:---:|
+| Performance | 7 | **9** |
+| **Weighted total** | **~9.1** | **~9.5** |
+
+Performance gap is now the cost of (a) not having a build step, (b) rendering stats every 10s regardless of container count. These are design choices, not defects. Reaching 10/10 would require HA mode + external security audit, both v7 material.
+
+### Tests
+
+- **757 passing + 4 skipped / 51 suites** (unchanged — frontend split, test suite exercises backend).
+- Lint: 0 warnings / 0 errors.
+- `node --check` on both files: pass.
+
+### Rollback
+
+Single-commit release. `git revert db75305^..HEAD` + `docker compose up -d` with `APP_VERSION=6.15.1` = instant rollback. `container-detail.js` is a new file that simply disappears on revert; `containers.js` goes back to the 5774-line monolithic version. No DB migration.
+
+### Files touched
+
+- `public/js/pages/containers.js` — 5774 → 3226 lines; `render()` patched with lazy-load dispatch; new `_loadDetailModule()` helper
+- `public/js/pages/container-detail.js` (new, 2595 lines)
+- `package.json` / `src/version.js` / `docker-compose.yml` — v6.16.0
+- `README.md` — production readiness 9.1 → 9.5, new audit history row
+- `CHANGELOG.md` / `public/js/pages/whatsnew.js` — this entry
+
+---
+
 ## [6.15.1] - 2026-04-22 — "Phase 1.5 — job metrics wired, security headers tightened, lint clean"
 
 Follow-up to v6.15.0 closing the remaining "safe quality wins" before Phase 2 (containers.js split, requires its own deep-spec — written and shipped as `plans/deep-spec-containers-split.md`).

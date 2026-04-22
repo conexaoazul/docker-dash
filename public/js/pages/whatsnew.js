@@ -10,6 +10,18 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.16.0',
+      date: '2026-04-22',
+      title: 'Phase 2 — containers.js lazy-load split (production readiness 9.1 → 9.5)',
+      changes: [
+        { type: 'improvement', text: 'containers.js was 5,774 lines / ~230KB unminified, the largest JS file we ship, loaded eagerly on every SPA page visit. Split into containers.js (3,226 lines — list + groups + stack modals, eager) and container-detail.js (2,595 lines — detail view, all 11 tabs, dialogs, lazy-loaded on first /containers/:id navigation via dynamic script injection).' },
+        { type: 'improvement', text: 'Initial JS payload reduction: ~45% off containers.js for users who never open a container detail page. Performance category in production readiness scorecard: 7 → 9. Weighted total: 9.1 → 9.5.' },
+        { type: 'improvement', text: 'Zero user-visible behavior change. ContainersPageDetail declared as global in container-detail.js; Object.assign merges it into ContainersPage at load time so existing this._renderDetail(…) / this._renderSecurityTab(…) call sites work unchanged. Error path shows an inline Reload button if the dynamic load fails.' },
+        { type: 'improvement', text: '_sandboxDialog stays in eager containers.js because images.js calls it directly from the Images page — preflight grep caught this dependency. Method-boundary split was mechanical (one-shot Node script + 3 contiguous line ranges from plans/deep-spec-containers-split.md). 757 tests unchanged, 0 lint warnings.' },
+        { type: 'improvement', text: 'Residual 0.5-point gap to 10/10: HA mode + external 3rd-party security audit, both v7 material. Docker-in-Docker integration tests also deferred to v7 (structural CI change).' },
+      ],
+    },
+    {
       version: '6.15.1',
       date: '2026-04-22',
       title: 'Phase 1.5 — job metrics wired, security headers tightened, lint clean',
