@@ -10,6 +10,17 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.14.1',
+      date: '2026-04-22',
+      title: 'asyncHandler refactor + accidental info-leak fix',
+      changes: [
+        { type: 'security', text: 'Non-obvious security fix discovered during the refactor: Docker Dash\'s central error middleware at src/server.js:168 already sanitizes 5xx responses (scrubs /home/ and /data/ paths, redacts credentials in URLs, replaces raw err.message with "Internal server error"). The 21 route files with try/catch wrappers were BYPASSING this sanitization by calling res.status(500).json({ error: err.message }) directly — leaking raw exception text to clients. All generic 500 handlers now go through the sanitizer.' },
+        { type: 'improvement', text: 'Post-Express-5 cleanup: new src/utils/asyncHandler.js (4 lines) wraps async handlers so rejected promises auto-forward to the error middleware. 175 handler invocations migrated across 21 route files. Net diff: -521 LOC of boilerplate gone.' },
+        { type: 'improvement', text: 'Handlers with dynamic status codes, non-generic catch shapes (extra fields), 4xx-mapping logic, SSE streaming, or business-logic in the catch block were LEFT ALONE intentionally — those aren\'t boilerplate, they\'re intentional error handling. 10 legitimate res.status(500) call sites remain.' },
+        { type: 'improvement', text: 'Tests: 740 passing / 4 skipped (unchanged). Lint: zero warnings on src/routes/.' },
+      ],
+    },
+    {
       version: '6.14.0',
       date: '2026-04-22',
       title: 'Express 4 → Express 5',

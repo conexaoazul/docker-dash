@@ -4,6 +4,7 @@ const { Router } = require('express');
 const { getDb } = require('../db');
 const { requireAuth, requireRole, writeable } = require('../middleware/auth');
 const { now, tryParseJson } = require('../utils/helpers');
+const asyncHandler = require('../utils/asyncHandler');
 
 const router = Router();
 
@@ -16,62 +17,52 @@ router.get('/', requireAuth, requireRole('admin'), (req, res) => {
   })));
 });
 
-router.post('/', requireAuth, requireRole('admin'), writeable, (req, res) => {
-  try {
-    const { name, cron_expression, target_type, target_names, actions, block_on_critical, notify_channels } = req.body;
-    if (!name || !cron_expression) return res.status(400).json({ error: 'name and cron_expression required' });
+router.post('/', requireAuth, requireRole('admin'), writeable, asyncHandler((req, res) => {
+  const { name, cron_expression, target_type, target_names, actions, block_on_critical, notify_channels } = req.body;
+  if (!name || !cron_expression) return res.status(400).json({ error: 'name and cron_expression required' });
 
-    const db = getDb();
-    const r = db.prepare(`
-      INSERT INTO maintenance_windows (name, cron_expression, target_type, target_names, actions,
-        block_on_critical, notify_channels, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      name, cron_expression, target_type || 'all',
-      JSON.stringify(target_names || []),
-      JSON.stringify(actions || ['pull', 'scan', 'update']),
-      block_on_critical !== false ? 1 : 0,
-      JSON.stringify(notify_channels || []),
-      req.user.id
-    );
-    res.status(201).json({ id: Number(r.lastInsertRowid) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  const db = getDb();
+  const r = db.prepare(`
+    INSERT INTO maintenance_windows (name, cron_expression, target_type, target_names, actions,
+      block_on_critical, notify_channels, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    name, cron_expression, target_type || 'all',
+    JSON.stringify(target_names || []),
+    JSON.stringify(actions || ['pull', 'scan', 'update']),
+    block_on_critical !== false ? 1 : 0,
+    JSON.stringify(notify_channels || []),
+    req.user.id
+  );
+  res.status(201).json({ id: Number(r.lastInsertRowid) });
+}));
 
-router.put('/:id', requireAuth, requireRole('admin'), writeable, (req, res) => {
-  try {
-    const db = getDb();
-    const sets = [];
-    const params = [];
-    const allowed = ['name', 'cron_expression', 'target_type', 'is_active', 'block_on_critical'];
-    for (const key of allowed) {
-      if (req.body[key] !== undefined) {
-        sets.push(`${key} = ?`);
-        params.push(['is_active', 'block_on_critical'].includes(key) ? (req.body[key] ? 1 : 0) : req.body[key]);
-      }
+router.put('/:id', requireAuth, requireRole('admin'), writeable, asyncHandler((req, res) => {
+  const db = getDb();
+  const sets = [];
+  const params = [];
+  const allowed = ['name', 'cron_expression', 'target_type', 'is_active', 'block_on_critical'];
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) {
+      sets.push(`${key} = ?`);
+      params.push(['is_active', 'block_on_critical'].includes(key) ? (req.body[key] ? 1 : 0) : req.body[key]);
     }
-    if (req.body.target_names !== undefined) { sets.push('target_names = ?'); params.push(JSON.stringify(req.body.target_names)); }
-    if (req.body.actions !== undefined) { sets.push('actions = ?'); params.push(JSON.stringify(req.body.actions)); }
-    if (req.body.notify_channels !== undefined) { sets.push('notify_channels = ?'); params.push(JSON.stringify(req.body.notify_channels)); }
-
-    if (sets.length === 0) return res.json({ ok: true });
-    sets.push('updated_at = ?');
-    params.push(now());
-    params.push(parseInt(req.params.id));
-    db.prepare(`UPDATE maintenance_windows SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
-});
+  if (req.body.target_names !== undefined) { sets.push('target_names = ?'); params.push(JSON.stringify(req.body.target_names)); }
+  if (req.body.actions !== undefined) { sets.push('actions = ?'); params.push(JSON.stringify(req.body.actions)); }
+  if (req.body.notify_channels !== undefined) { sets.push('notify_channels = ?'); params.push(JSON.stringify(req.body.notify_channels)); }
 
-router.delete('/:id', requireAuth, requireRole('admin'), writeable, (req, res) => {
-  try {
-    getDb().prepare('DELETE FROM maintenance_windows WHERE id = ?').run(parseInt(req.params.id));
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  if (sets.length === 0) return res.json({ ok: true });
+  sets.push('updated_at = ?');
+  params.push(now());
+  params.push(parseInt(req.params.id));
+  db.prepare(`UPDATE maintenance_windows SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  res.json({ ok: true });
+}));
+
+router.delete('/:id', requireAuth, requireRole('admin'), writeable, asyncHandler((req, res) => {
+  getDb().prepare('DELETE FROM maintenance_windows WHERE id = ?').run(parseInt(req.params.id));
+  res.json({ ok: true });
+}));
 
 module.exports = router;

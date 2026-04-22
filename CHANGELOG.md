@@ -2,6 +2,75 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.14.1] - 2026-04-22 — "asyncHandler refactor (+ accidental info-leak fix)"
+
+Post-v6.14.0 cleanup promised in the previous release notes: consolidate the try/catch + `res.status(500).json({ error: err.message })` boilerplate into a single `asyncHandler(fn)` wrapper. 175 handlers migrated across 21 route files. **Net diff: −521 LOC.**
+
+### What this actually fixes (the non-obvious win)
+
+Docker Dash's central error middleware at [src/server.js:168-190](src/server.js#L168-L190) already **sanitizes** 5xx responses — scrubs home/data paths, redacts URL credentials, and replaces the raw `err.message` with `'Internal server error'`. Until now, the try/catch wrappers in 21 route files **bypassed** that sanitization by calling `res.status(500).json({ error: err.message })` directly. So any backend error surfacing through those handlers was leaking the raw exception string to the client.
+
+After this release, all generic 500 responses go through the central middleware → **no more accidental path or credential exposure in error messages.**
+
+This wasn't the stated goal of the refactor (the goal was LOC reduction), but it's the more important outcome. Worth calling out for anyone reading the CHANGELOG looking for security-relevant deltas.
+
+### Added — `src/utils/asyncHandler.js`
+
+Four lines of utility:
+```js
+function asyncHandler(fn) {
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+```
+
+Rejected promises now auto-forward to the Express 5 error middleware chain (where the existing sanitizer at line 168 takes over).
+
+### Changed — 21 route files refactored (175 handler invocations)
+
+Sample before/after from [src/routes/containers.js](src/routes/containers.js):
+
+```js
+// Before
+router.get('/:id/inspect', requireAuth, async (req, res) => {
+  try {
+    const data = await dockerService.inspectContainer(req.params.id, req.hostId);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// After
+router.get('/:id/inspect', requireAuth, asyncHandler(async (req, res) => {
+  const data = await dockerService.inspectContainer(req.params.id, req.hostId);
+  res.json(data);
+}));
+```
+
+### What was deliberately NOT unwrapped
+
+Per the refactor brief, handlers with any of the following keep their try/catch blocks:
+- Dynamic status codes (e.g. `err.statusCode === 404 ? 404 : 500`)
+- Non-generic catch responses (extra fields like `{ error, steps: err.steps || [] }`)
+- 4xx-mapping catches (`err.message.includes('forbidden') ? 403 : 500`)
+- Callback-based async inside a handler (SSE streaming, `docker.loadImage`)
+- Catches that do additional business logic (`log.error(…)` then respond)
+
+10 legitimate `res.status(500)` call sites remain — all inspected and confirmed non-generic.
+
+### Verification
+
+- **Tests:** 740 passing / 4 skipped (identical to v6.14.0 baseline).
+- **Lint:** `eslint src/routes/ --max-warnings 0` clean.
+- Behavior-preserving: clients keep receiving `{ error: "<sanitized message>" }` with 5xx status — the sanitization itself is the only behavior change, and that's an upgrade (not a downgrade) from the previous accidental leak.
+
+### Files touched
+
+- `src/utils/asyncHandler.js` (new)
+- 21 files in `src/routes/` — net −521 LOC
+
+---
+
 ## [6.14.0] - 2026-04-22 — "Express 4 → Express 5"
 
 BACKLOG P2 item closed. Deep-spec ([plans/deep-spec-express5-migration.md](plans/deep-spec-express5-migration.md)) predicted 3-5h based on evidence that the codebase was already v5-idiomatic. Actual execution cost ~2h with one mid-flight snag (see below).

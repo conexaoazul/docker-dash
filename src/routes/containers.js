@@ -14,46 +14,38 @@ const { getClientIp, sanitizeShellArg, formatBytes } = require('../utils/helpers
 const { getDb } = require('../db');
 
 const { extractHostId } = require('../middleware/hostId');
+const asyncHandler = require('../utils/asyncHandler');
 
 const router = Router();
 router.use(extractHostId);
 
 // List containers (filtered by per-stack permissions)
-router.get('/', requireAuth, async (req, res) => {
-  try {
-    let containers = await dockerService.listContainers(req.hostId);
-    // Apply per-stack permission filtering
-    containers = permService.filterContainers(containers, req.user.id, req.user.role);
-    res.json(containers);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.get('/', requireAuth, asyncHandler(async (req, res) => {
+  let containers = await dockerService.listContainers(req.hostId);
+  // Apply per-stack permission filtering
+  containers = permService.filterContainers(containers, req.user.id, req.user.role);
+  res.json(containers);
+}));
 
 // ─── Container Metadata ───────────────────────────
 // Bulk: get all container metadata (for list view enrichment)
-router.get('/_meta', requireAuth, (req, res) => {
-  try {
-    const db = getDb();
-    const rows = db.prepare('SELECT * FROM container_meta').all();
-    const map = {};
-    rows.forEach(r => {
-      try { r.custom_fields = JSON.parse(r.custom_fields || '{}'); } catch { r.custom_fields = {}; }
-      map[r.container_name] = r;
-    });
-    res.json(map);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.get('/_meta', requireAuth, asyncHandler((req, res) => {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM container_meta').all();
+  const map = {};
+  rows.forEach(r => {
+    try { r.custom_fields = JSON.parse(r.custom_fields || '{}'); } catch { r.custom_fields = {}; }
+    map[r.container_name] = r;
+  });
+  res.json(map);
+}));
 
 // ─── Multi-Container Log Aggregation ──────────────────
 
 // GET /logs/multi — aggregate logs from multiple containers
 // NOTE: Must be registered BEFORE any /:id routes to avoid route conflicts
-router.get('/logs/multi', requireAuth, async (req, res) => {
-  try {
-    const { containers: containerIds, tail = 100, since, search, level } = req.query;
+router.get('/logs/multi', requireAuth, asyncHandler(async (req, res) => {
+  const { containers: containerIds, tail = 100, since, search, level } = req.query;
     const docker = dockerService.getDocker(req.hostId);
 
     // If no containers specified, get all running
@@ -108,17 +100,13 @@ router.get('/logs/multi', requireAuth, async (req, res) => {
     // Limit output
     allLogs = allLogs.slice(-500);
 
-    res.json({ logs: allLogs, count: allLogs.length });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ logs: allLogs, count: allLogs.length });
+}));
 
 // ─── Dependency Graph (all containers) ───────────────
 
-router.get('/dependency-graph', requireAuth, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+router.get('/dependency-graph', requireAuth, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
     const allContainers = await docker.listContainers({ all: true });
     const nodes = [];
     const edges = [];
@@ -201,16 +189,12 @@ router.get('/dependency-graph', requireAuth, async (req, res) => {
       }
     }
 
-    res.json({ nodes, edges, clusters: Object.values(clusters) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ nodes, edges, clusters: Object.values(clusters) });
+}));
 
 // Get metadata for a single container by name
-router.get('/:name/meta', requireAuth, (req, res) => {
-  try {
-    const db = getDb();
+router.get('/:name/meta', requireAuth, asyncHandler((req, res) => {
+  const db = getDb();
     const row = db.prepare('SELECT * FROM container_meta WHERE container_name = ?').get(req.params.name);
     if (!row) {
       return res.json({
@@ -220,17 +204,13 @@ router.get('/:name/meta', requireAuth, (req, res) => {
         notes: '', custom_fields: {},
       });
     }
-    try { row.custom_fields = JSON.parse(row.custom_fields || '{}'); } catch { row.custom_fields = {}; }
-    res.json(row);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  try { row.custom_fields = JSON.parse(row.custom_fields || '{}'); } catch { row.custom_fields = {}; }
+  res.json(row);
+}));
 
 // Update (upsert) metadata for a container
-router.put('/:name/meta', requireAuth, requireRole('admin', 'operator'), writeable, (req, res) => {
-  try {
-    const db = getDb();
+router.put('/:name/meta', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler((req, res) => {
+  const db = getDb();
     const { app_name, description, lan_link, web_link, docs_url,
             category, owner, icon, color, notes, custom_fields } = req.body;
     const customJson = typeof custom_fields === 'string' ? custom_fields : JSON.stringify(custom_fields || {});
@@ -255,11 +235,8 @@ router.put('/:name/meta', requireAuth, requireRole('admin', 'operator'), writeab
       ip: getClientIp(req),
     });
 
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ ok: true });
+}));
 
 // Inspect container
 router.get('/:id/inspect', requireAuth, async (req, res) => {
@@ -272,9 +249,8 @@ router.get('/:id/inspect', requireAuth, async (req, res) => {
 });
 
 // Container logs (enhanced with regex, level filter, stats)
-router.get('/:id/logs', requireAuth, async (req, res) => {
-  try {
-    const { tail, since, until, search, regex, level, download } = req.query;
+router.get('/:id/logs', requireAuth, asyncHandler(async (req, res) => {
+  const { tail, since, until, search, regex, level, download } = req.query;
     let lines = await dockerService.getContainerLogs(req.params.id, {
       tail: parseInt(tail) || 100,
       since, until,
@@ -330,21 +306,14 @@ router.get('/:id/logs', requireAuth, async (req, res) => {
       return res.send(lines.join('\n'));
     }
 
-    res.json({ lines, stats });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ lines, stats });
+}));
 
 // Container stats (one-shot)
-router.get('/:id/stats', requireAuth, async (req, res) => {
-  try {
-    const stats = await dockerService.getContainerStats(req.params.id, req.hostId);
-    res.json(stats);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.get('/:id/stats', requireAuth, asyncHandler(async (req, res) => {
+  const stats = await dockerService.getContainerStats(req.params.id, req.hostId);
+  res.json(stats);
+}));
 
 // Container actions (start/stop/restart/pause/unpause/kill)
 router.post('/:id/:action', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
@@ -403,36 +372,28 @@ router.delete('/:id', requireAuth, requireRole('admin'), writeable, requireFeatu
 });
 
 // Rename container
-router.put('/:id/rename', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
-  try {
-    const { name } = req.body;
-    if (!name) return res.status(400).json({ error: 'Name required' });
-    await dockerService.renameContainer(req.params.id, name, req.hostId);
-    auditService.log({
-      userId: req.user.id, username: req.user.username,
-      action: 'container_rename', targetType: 'container', targetId: req.params.id,
-      details: { newName: name }, ip: getClientIp(req),
-    });
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.put('/:id/rename', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'Name required' });
+  await dockerService.renameContainer(req.params.id, name, req.hostId);
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'container_rename', targetType: 'container', targetId: req.params.id,
+    details: { newName: name }, ip: getClientIp(req),
+  });
+  res.json({ ok: true });
+}));
 
 // Create container
-router.post('/', requireAuth, requireRole('admin'), writeable, requireFeature('create'), async (req, res) => {
-  try {
-    const result = await dockerService.createContainer(req.body, req.hostId);
-    auditService.log({
-      userId: req.user.id, username: req.user.username,
-      action: 'container_create', targetType: 'container', targetId: result.id,
-      details: { image: req.body.Image, name: req.body.name }, ip: getClientIp(req),
-    });
-    res.status(201).json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.post('/', requireAuth, requireRole('admin'), writeable, requireFeature('create'), asyncHandler(async (req, res) => {
+  const result = await dockerService.createContainer(req.body, req.hostId);
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'container_create', targetType: 'container', targetId: result.id,
+    details: { image: req.body.Image, name: req.body.name }, ip: getClientIp(req),
+  });
+  res.status(201).json(result);
+}));
 
 // ─── Sandbox Containers ─────────────────────────────────
 
@@ -562,9 +523,8 @@ async function _ensureSandboxNetwork(docker) {
 }
 
 // POST /sandbox — create & start a sandbox container
-router.post('/sandbox', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
-  try {
-    const {
+router.post('/sandbox', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
+  const {
       mode = 'ephemeral', ttl = 3600, memLimit = 536870912, cpuLimit = 0.5, name, openTerminal: _openTerminal,
       // Project source params
       projectSource = 'none',
@@ -733,17 +693,13 @@ router.post('/sandbox', requireAuth, requireRole('admin', 'operator'), writeable
       stack: detectedStack?.stack || null,
       port: resolvedPort || null,
       startCommand: resolvedStartCmd || null,
-      installLog: installLog || null,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    installLog: installLog || null,
+  });
+}));
 
 // GET /sandbox/active — list active sandbox containers
-router.get('/sandbox/active', requireAuth, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+router.get('/sandbox/active', requireAuth, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
     const containers = await docker.listContainers({ all: true, filters: { label: ['docker-dash.sandbox=true'] } });
     const result = containers.map(c => ({
       id: c.Id.substring(0, 12),
@@ -755,16 +711,12 @@ router.get('/sandbox/active', requireAuth, async (req, res) => {
       user: c.Labels?.['docker-dash.sandbox.user'] || '',
       created: c.Created,
     }));
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json(result);
+}));
 
 // DELETE /sandbox/:id — stop & remove a sandbox container
-router.delete('/sandbox/:id', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+router.delete('/sandbox/:id', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
     const container = docker.getContainer(req.params.id);
     const inspect = await container.inspect();
     const name = inspect.Name.replace(/^\//, '');
@@ -786,21 +738,17 @@ router.delete('/sandbox/:id', requireAuth, requireRole('admin', 'operator'), wri
       details: { name }, ip: getClientIp(req),
     });
 
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ ok: true });
+}));
 
 // POST /sandbox/:id/extend — extend TTL by 1 hour
-router.post('/sandbox/:id/extend', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
-    const container = docker.getContainer(req.params.id);
-    const inspect = await container.inspect();
-    const name = inspect.Name.replace(/^\//, '');
+router.post('/sandbox/:id/extend', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
+  const container = docker.getContainer(req.params.id);
+  const inspect = await container.inspect();
+  const name = inspect.Name.replace(/^\//, '');
 
-    if (inspect.Config?.Labels?.['docker-dash.sandbox'] !== 'true') {
+  if (inspect.Config?.Labels?.['docker-dash.sandbox'] !== 'true') {
       return res.status(400).json({ error: 'Container is not a sandbox' });
     }
 
@@ -823,16 +771,12 @@ router.post('/sandbox/:id/extend', requireAuth, requireRole('admin', 'operator')
       details: { name, newExpires }, ip: getClientIp(req),
     });
 
-    res.json({ ok: true, expiresAt: newExpires });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ ok: true, expiresAt: newExpires });
+}));
 
 // Clone/duplicate container
-router.post('/:id/clone', requireAuth, requireRole('admin'), writeable, requireFeature('create'), async (req, res) => {
-  try {
-    const { name } = req.body;
+router.post('/:id/clone', requireAuth, requireRole('admin'), writeable, requireFeature('create'), asyncHandler(async (req, res) => {
+  const { name } = req.body;
     if (!name) return res.status(400).json({ error: 'name required' });
 
     const docker = dockerService.getDocker(req.hostId);
@@ -879,11 +823,8 @@ router.post('/:id/clone', requireAuth, requireRole('admin'), writeable, requireF
       ip: getClientIp(req),
     });
 
-    res.status(201).json({ ok: true, id: newContainer.id, name });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.status(201).json({ ok: true, id: newContainer.id, name });
+}));
 
 // Bulk actions
 router.post('/bulk', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
@@ -914,10 +855,9 @@ router.post('/bulk', requireAuth, requireRole('admin', 'operator'), writeable, a
 });
 
 // Update container (pull latest + recreate)
-router.post('/:id/update', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
+router.post('/:id/update', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
   const { id } = req.params;
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+  const docker = dockerService.getDocker(req.hostId);
     const container = docker.getContainer(id);
     const inspect = await container.inspect();
     const image = inspect.Config.Image;
@@ -1010,16 +950,12 @@ router.post('/:id/update', requireAuth, requireRole('admin', 'operator'), writea
       ip: getClientIp(req),
     });
 
-    res.json({ ok: true, method: 'recreate', newId: newContainer.id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ ok: true, method: 'recreate', newId: newContainer.id });
+}));
 
 // Export container config
-router.get('/:id/export', requireAuth, async (req, res) => {
-  try {
-    const data = await dockerService.inspectContainer(req.params.id, req.hostId);
+router.get('/:id/export', requireAuth, asyncHandler(async (req, res) => {
+  const data = await dockerService.inspectContainer(req.params.id, req.hostId);
     const { format } = req.query;
 
     if (format === 'compose') {
@@ -1028,13 +964,10 @@ router.get('/:id/export', requireAuth, async (req, res) => {
     } else if (format === 'run') {
       const cmd = generateRunCommand(data);
       res.type('text/plain').send(cmd);
-    } else {
-      res.json(data);
-    }
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } else {
+    res.json(data);
   }
-});
+}));
 
 function generateCompose(data) {
   const lines = ['services:', `  ${data.name}:`, `    image: ${data.image}`];
@@ -1115,10 +1048,9 @@ function generateRunCommand(data) {
 
 // ─── Smart Restart with Backoff ───────────────────────
 
-router.post('/:id/smart-restart', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
+router.post('/:id/smart-restart', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
   const { id } = req.params;
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+  const docker = dockerService.getDocker(req.hostId);
     const container = docker.getContainer(id);
     const inspect = await container.inspect();
     const name = inspect.Name.replace(/^\//, '');
@@ -1170,23 +1102,19 @@ router.post('/:id/smart-restart', requireAuth, requireRole('admin', 'operator'),
       ip: getClientIp(req),
     });
 
-    res.json({
-      ok: true,
-      action: 'restarted',
-      backoffApplied: backoffSeconds > 0 && recentRestarts > 2,
-      backoffSeconds,
-      recentRestarts,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({
+    ok: true,
+    action: 'restarted',
+    backoffApplied: backoffSeconds > 0 && recentRestarts > 2,
+    backoffSeconds,
+    recentRestarts,
+  });
+}));
 
 // ─── Deploy Preview ───────────────────────────────────
 
-router.get('/:id/deploy-preview', requireAuth, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+router.get('/:id/deploy-preview', requireAuth, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
     const container = docker.getContainer(req.params.id);
     const inspect = await container.inspect();
     const imageName = inspect.Config.Image;
@@ -1233,20 +1161,16 @@ router.get('/:id/deploy-preview', requireAuth, async (req, res) => {
         memoryLimit: inspect.HostConfig?.Memory || 0,
         cpuShares: inspect.HostConfig?.CpuShares || 0,
       },
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  });
+}));
 
 // ─── Safe-Pull Update ─────────────────────────────────
 
-router.post('/:id/safe-update', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
+router.post('/:id/safe-update', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
   const { id } = req.params;
-  try {
-    const docker = dockerService.getDocker(req.hostId);
-    const container = docker.getContainer(id);
-    const inspect = await container.inspect();
+  const docker = dockerService.getDocker(req.hostId);
+  const container = docker.getContainer(id);
+  const inspect = await container.inspect();
     const image = inspect.Config.Image;
     const name = inspect.Name.replace(/^\//, '');
 
@@ -1345,17 +1269,13 @@ router.post('/:id/safe-update', requireAuth, requireRole('admin', 'operator'), w
       ip: getClientIp(req),
     });
 
-    res.json({ ok: true, method: 'safe-pull', scan: scanSummary, newId: newContainer.id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ ok: true, method: 'safe-pull', scan: scanSummary, newId: newContainer.id });
+}));
 
 // ─── Troubleshooting Wizard ───────────────────────────
 
-router.get('/:id/diagnose', requireAuth, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+router.get('/:id/diagnose', requireAuth, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
     const container = docker.getContainer(req.params.id);
     const inspect = await container.inspect();
     const name = inspect.Name.replace(/^\//, '');
@@ -1464,17 +1384,13 @@ router.get('/:id/diagnose', requireAuth, async (req, res) => {
     const warnings = steps.filter(s => s.status === 'warning').length;
     const overall = errors > 0 ? 'critical' : warnings > 0 ? 'warning' : 'healthy';
 
-    res.json({ container: name, image: inspect.Config.Image, overall, steps, errors, warnings });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ container: name, image: inspect.Config.Image, overall, steps, errors, warnings });
+}));
 
 // ─── Container Doctor ────────────────────────────────
 
-router.get('/:id/doctor', requireAuth, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+router.get('/:id/doctor', requireAuth, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
     const container = docker.getContainer(req.params.id);
     const inspect = await container.inspect();
     const name = inspect.Name.replace(/^\//, '');
@@ -1586,18 +1502,14 @@ router.get('/:id/doctor', requireAuth, async (req, res) => {
       warnings,
       logAnalysis,
       logText: logText.split('\n').slice(-30).join('\n'),
-      aiPrompt,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    aiPrompt,
+  });
+}));
 
 // ─── Dependency Analysis ──────────────────────────────
 
-router.get('/:id/dependencies', requireAuth, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+router.get('/:id/dependencies', requireAuth, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
     const container = docker.getContainer(req.params.id);
     const inspect = await container.inspect();
     const name = inspect.Name.replace(/^\//, '');
@@ -1691,18 +1603,14 @@ router.get('/:id/dependencies', requireAuth, async (req, res) => {
       dependencies,
       stackMembers: stackContainers,
       networks: Object.keys(inspect.NetworkSettings?.Networks || {}),
-      hasDependencies: dependencies.length > 0 || stackContainers.length > 0,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    hasDependencies: dependencies.length > 0 || stackContainers.length > 0,
+  });
+}));
 
 // ─── Deploy with Dependencies ─────────────────────────
 
-router.post('/:id/deploy-with-deps', requireAuth, requireRole('admin'), writeable, async (req, res) => {
-  try {
-    const { destHostId } = req.body;
+router.post('/:id/deploy-with-deps', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+  const { destHostId } = req.body;
     if (destHostId === undefined) return res.status(400).json({ error: 'destHostId required' });
 
     const docker = dockerService.getDocker(req.hostId);
@@ -1782,12 +1690,9 @@ router.post('/:id/deploy-with-deps', requireAuth, requireRole('admin'), writeabl
       total: results.length,
       succeeded: results.filter(r => r.ok).length,
       failed: results.filter(r => !r.ok).length,
-      results,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    results,
+  });
+}));
 
 // ─── Container File Browser ─────────────────────────
 
@@ -1799,9 +1704,8 @@ function validateFilePath(p) {
   return true;
 }
 
-router.get('/:id/files', requireAuth, async (req, res) => {
-  try {
-    const filePath = req.query.path || '/';
+router.get('/:id/files', requireAuth, asyncHandler(async (req, res) => {
+  const filePath = req.query.path || '/';
     if (!validateFilePath(filePath)) return res.status(400).json({ error: 'Invalid path' });
 
     const output = await dockerService.execCommand(
@@ -1826,15 +1730,11 @@ router.get('/:id/files', requireAuth, async (req, res) => {
                    permissions.startsWith('l') ? 'symlink' : 'file';
       entries.push({ name, type, size, modified, permissions, owner, group });
     }
-    res.json({ path: filePath, entries });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ path: filePath, entries });
+}));
 
-router.get('/:id/files/content', requireAuth, async (req, res) => {
-  try {
-    const filePath = req.query.path;
+router.get('/:id/files/content', requireAuth, asyncHandler(async (req, res) => {
+  const filePath = req.query.path;
     if (!validateFilePath(filePath)) return res.status(400).json({ error: 'Invalid path' });
 
     const output = await dockerService.execCommand(
@@ -1849,16 +1749,12 @@ router.get('/:id/files/content', requireAuth, async (req, res) => {
       path: filePath,
       content: truncated ? output.substring(0, maxSize) : output,
       truncated,
-      size: output.length,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    size: output.length,
+  });
+}));
 
-router.get('/:id/files/download', requireAuth, async (req, res) => {
-  try {
-    const filePath = req.query.path;
+router.get('/:id/files/download', requireAuth, asyncHandler(async (req, res) => {
+  const filePath = req.query.path;
     if (!validateFilePath(filePath)) return res.status(400).json({ error: 'Invalid path' });
 
     const docker = dockerService.getDocker(req.hostId);
@@ -1868,18 +1764,14 @@ router.get('/:id/files/download', requireAuth, async (req, res) => {
 
     res.setHeader('Content-Type', 'application/x-tar');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}.tar"`);
-    archive.pipe(res);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  archive.pipe(res);
+}));
 
 // ─── Container File Upload ─────────────────────────────
 const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50MB
 
-router.post('/:id/files/upload', express.json({ limit: '75mb' }), requireAuth, requireRole('operator'), async (req, res) => {
-  try {
-    const { path: destPath, content, filename } = req.body || {};
+router.post('/:id/files/upload', express.json({ limit: '75mb' }), requireAuth, requireRole('operator'), asyncHandler(async (req, res) => {
+  const { path: destPath, content, filename } = req.body || {};
 
     if (!destPath || typeof destPath !== 'string') {
       return res.status(400).json({ error: 'Destination path is required' });
@@ -1960,34 +1852,26 @@ router.post('/:id/files/upload', express.json({ limit: '75mb' }), requireAuth, r
       ip: getClientIp(req),
     });
 
-    res.json({ ok: true, path: destPath, filename: fileName, size: fileSize });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ ok: true, path: destPath, filename: fileName, size: fileSize });
+}));
 
 // ─── Container Diff ─────────────────────────────────
 
-router.get('/:id/diff', requireAuth, async (req, res) => {
-  try {
-    const changes = await dockerService.containerDiff(req.params.id, req.hostId);
+router.get('/:id/diff', requireAuth, asyncHandler(async (req, res) => {
+  const changes = await dockerService.containerDiff(req.params.id, req.hostId);
     const summary = {
       modified: changes.filter(c => c.kind === 0).length,
       added: changes.filter(c => c.kind === 1).length,
       deleted: changes.filter(c => c.kind === 2).length,
       total: changes.length,
     };
-    res.json({ changes, summary });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ changes, summary });
+}));
 
 // ─── Container Image History & Rollback ──────────────
 
-router.get('/:id/history', requireAuth, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+router.get('/:id/history', requireAuth, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
     const container = docker.getContainer(req.params.id);
     const inspect = await container.inspect();
     const name = inspect.Name.replace(/^\//, '');
@@ -2016,20 +1900,16 @@ router.get('/:id/history', requireAuth, async (req, res) => {
       container: name,
       currentImage: inspect.Config.Image,
       currentImageId: inspect.Image,
-      entries,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    entries,
+  });
+}));
 
-router.post('/:id/rollback', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
+router.post('/:id/rollback', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { historyId } = req.body;
   if (!historyId) return res.status(400).json({ error: 'historyId required' });
 
-  try {
-    const db = getDb();
+  const db = getDb();
     const entry = db.prepare('SELECT * FROM container_image_history WHERE id = ?').get(historyId);
     if (!entry) return res.status(404).json({ error: 'History entry not found' });
 
@@ -2116,17 +1996,13 @@ router.post('/:id/rollback', requireAuth, requireRole('admin', 'operator'), writ
       ip: getClientIp(req),
     });
 
-    res.json({ ok: true, newId: newContainer.id, rolledBackTo: entry.image_name });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ ok: true, newId: newContainer.id, rolledBackTo: entry.image_name });
+}));
 
 // ─── Deployment Pipeline ─────────────────────────────
 
-router.post('/:id/pipeline/start', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
-  try {
-    const pipelineService = require('../services/pipeline');
+router.post('/:id/pipeline/start', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
+  const pipelineService = require('../services/pipeline');
     const { skipScan, skipVerify } = req.body;
     const result = await pipelineService.start({
       containerId: req.params.id,
@@ -2136,35 +2012,24 @@ router.post('/:id/pipeline/start', requireAuth, requireRole('admin', 'operator')
       skipVerify: !!skipVerify,
       clientIp: getClientIp(req),
     });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json(result);
+}));
 
-router.get('/:id/pipeline/status/:executionId', requireAuth, (req, res) => {
-  try {
-    const pipelineService = require('../services/pipeline');
-    const result = pipelineService.getStatus(parseInt(req.params.executionId));
-    if (!result) return res.status(404).json({ error: 'Pipeline not found' });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.get('/:id/pipeline/status/:executionId', requireAuth, asyncHandler((req, res) => {
+  const pipelineService = require('../services/pipeline');
+  const result = pipelineService.getStatus(parseInt(req.params.executionId));
+  if (!result) return res.status(404).json({ error: 'Pipeline not found' });
+  res.json(result);
+}));
 
-router.get('/:id/pipeline/history', requireAuth, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+router.get('/:id/pipeline/history', requireAuth, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
     const container = docker.getContainer(req.params.id);
     const inspect = await container.inspect();
     const name = inspect.Name.replace(/^\//, '');
     const pipelineService = require('../services/pipeline');
     const history = pipelineService.getHistory(name, req.hostId || 0);
-    res.json({ container: name, pipelines: history });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ container: name, pipelines: history });
+}));
 
 module.exports = router;

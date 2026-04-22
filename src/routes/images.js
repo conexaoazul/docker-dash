@@ -9,35 +9,31 @@ const { getClientIp } = require('../utils/helpers');
 const { getDb } = require('../db');
 
 const { extractHostId } = require('../middleware/hostId');
+const asyncHandler = require('../utils/asyncHandler');
 
 const router = Router();
 router.use(extractHostId);
 
-router.get('/', requireAuth, async (req, res) => {
-  try { res.json(await dockerService.listImages(req.hostId)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
+router.get('/', requireAuth, asyncHandler(async (req, res) => {
+  res.json(await dockerService.listImages(req.hostId));
+}));
 
-router.get('/:id/inspect', requireAuth, async (req, res) => {
-  try { res.json(await dockerService.inspectImage(req.params.id, req.hostId)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
+router.get('/:id/inspect', requireAuth, asyncHandler(async (req, res) => {
+  res.json(await dockerService.inspectImage(req.params.id, req.hostId));
+}));
 
-router.get('/:id/history', requireAuth, async (req, res) => {
-  try { res.json(await dockerService.imageHistory(req.params.id, req.hostId)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
+router.get('/:id/history', requireAuth, asyncHandler(async (req, res) => {
+  res.json(await dockerService.imageHistory(req.params.id, req.hostId));
+}));
 
-router.post('/pull', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
-  try {
-    const { image } = req.body;
-    if (!image) return res.status(400).json({ error: 'Image name required' });
-    const output = await dockerService.pullImage(image, req.hostId);
-    auditService.log({ userId: req.user.id, username: req.user.username,
-      action: 'image_pull', targetType: 'image', targetId: image, ip: getClientIp(req) });
-    res.json({ ok: true, output });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+router.post('/pull', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
+  const { image } = req.body;
+  if (!image) return res.status(400).json({ error: 'Image name required' });
+  const output = await dockerService.pullImage(image, req.hostId);
+  auditService.log({ userId: req.user.id, username: req.user.username,
+    action: 'image_pull', targetType: 'image', targetId: image, ip: getClientIp(req) });
+  res.json({ ok: true, output });
+}));
 
 // ─── Image Pull with SSE Streaming ─────────────────────────
 router.post('/pull-stream', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
@@ -92,33 +88,27 @@ router.post('/pull-stream', requireAuth, requireRole('admin', 'operator'), write
   }
 });
 
-router.delete('/:id', requireAuth, requireRole('admin'), writeable, async (req, res) => {
-  try {
-    await dockerService.removeImage(req.params.id, { force: req.query.force === 'true' }, req.hostId);
-    auditService.log({ userId: req.user.id, username: req.user.username,
-      action: 'image_remove', targetType: 'image', targetId: req.params.id, ip: getClientIp(req) });
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+router.delete('/:id', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+  await dockerService.removeImage(req.params.id, { force: req.query.force === 'true' }, req.hostId);
+  auditService.log({ userId: req.user.id, username: req.user.username,
+    action: 'image_remove', targetType: 'image', targetId: req.params.id, ip: getClientIp(req) });
+  res.json({ ok: true });
+}));
 
 // ─── Image Config (for creation wizard) ─────────────
-router.get('/:id/config', requireAuth, async (req, res) => {
-  try {
-    const data = await dockerService.inspectImage(req.params.id, req.hostId);
-    const config = data.Config || data.ContainerConfig || {};
-    res.json({
-      exposedPorts: Object.keys(config.ExposedPorts || {}),
-      env: config.Env || [],
-      cmd: config.Cmd || [],
-      workingDir: config.WorkingDir || '',
-      volumes: Object.keys(config.Volumes || {}),
-      entrypoint: config.Entrypoint || [],
-      labels: config.Labels || {},
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.get('/:id/config', requireAuth, asyncHandler(async (req, res) => {
+  const data = await dockerService.inspectImage(req.params.id, req.hostId);
+  const config = data.Config || data.ContainerConfig || {};
+  res.json({
+    exposedPorts: Object.keys(config.ExposedPorts || {}),
+    env: config.Env || [],
+    cmd: config.Cmd || [],
+    workingDir: config.WorkingDir || '',
+    volumes: Object.keys(config.Volumes || {}),
+    entrypoint: config.Entrypoint || [],
+    labels: config.Labels || {},
+  });
+}));
 
 // ─── Vulnerability Scanning ─────────────────────────
 const { execFileSync } = require('child_process');
@@ -494,9 +484,8 @@ router.get('/scanners', requireAuth, (req, res) => {
   res.json({ scanners: available });
 });
 
-router.get('/:id/scan', requireAuth, async (req, res) => {
-  try {
-    const imageData = await dockerService.inspectImage(req.params.id, req.hostId);
+router.get('/:id/scan', requireAuth, asyncHandler(async (req, res) => {
+  const imageData = await dockerService.inspectImage(req.params.id, req.hostId);
     const imageName = imageData.RepoTags?.[0] || req.params.id;
     const preferredScanner = (req.query.scanner || 'auto').toLowerCase();
 
@@ -571,103 +560,80 @@ router.get('/:id/scan', requireAuth, async (req, res) => {
       } catch (e) { scanLog.warn('Failed to save scan result', e.message); }
     }
 
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json(result);
+}));
 
 // Scan history
-router.get('/scan-history', requireAuth, (req, res) => {
-  try {
-    const db = getDb();
-    const { image, limit: lim } = req.query;
-    const hostId = req.hostId || 0;
-    const maxRows = Math.min(parseInt(lim) || 100, 500);
-    const cols = 'id, image_id, image_name, scanner, summary_critical, summary_high, summary_medium, summary_low, summary_total, fixable_count, scanned_at, host_id';
+router.get('/scan-history', requireAuth, asyncHandler((req, res) => {
+  const db = getDb();
+  const { image, limit: lim } = req.query;
+  const hostId = req.hostId || 0;
+  const maxRows = Math.min(parseInt(lim) || 100, 500);
+  const cols = 'id, image_id, image_name, scanner, summary_critical, summary_high, summary_medium, summary_low, summary_total, fixable_count, scanned_at, host_id';
 
-    let rows;
-    if (image) {
-      rows = db.prepare(`SELECT ${cols} FROM scan_results WHERE image_name = ? AND host_id = ? ORDER BY scanned_at DESC LIMIT ?`).all(image, hostId, maxRows);
-    } else {
-      rows = db.prepare(`SELECT ${cols} FROM scan_results WHERE host_id = ? ORDER BY scanned_at DESC LIMIT ?`).all(hostId, maxRows);
-    }
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  let rows;
+  if (image) {
+    rows = db.prepare(`SELECT ${cols} FROM scan_results WHERE image_name = ? AND host_id = ? ORDER BY scanned_at DESC LIMIT ?`).all(image, hostId, maxRows);
+  } else {
+    rows = db.prepare(`SELECT ${cols} FROM scan_results WHERE host_id = ? ORDER BY scanned_at DESC LIMIT ?`).all(hostId, maxRows);
   }
-});
+  res.json(rows);
+}));
 
 // Get full scan result by ID
-router.get('/scan-history/:id', requireAuth, (req, res) => {
-  try {
-    const db = getDb();
-    const row = db.prepare('SELECT * FROM scan_results WHERE id = ?').get(parseInt(req.params.id));
-    if (!row) return res.status(404).json({ error: 'Scan result not found' });
-    row.vulnerabilities = JSON.parse(row.results_json || '[]');
-    row.recommendations = JSON.parse(row.recommendations_json || '[]');
-    delete row.results_json;
-    delete row.recommendations_json;
-    res.json(row);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.get('/scan-history/:id', requireAuth, asyncHandler((req, res) => {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM scan_results WHERE id = ?').get(parseInt(req.params.id));
+  if (!row) return res.status(404).json({ error: 'Scan result not found' });
+  row.vulnerabilities = JSON.parse(row.results_json || '[]');
+  row.recommendations = JSON.parse(row.recommendations_json || '[]');
+  delete row.results_json;
+  delete row.recommendations_json;
+  res.json(row);
+}));
 
 // Delete scan results by IDs (POST to avoid /:id route conflict)
-router.post('/scan-history/delete', requireAuth, requireRole('admin'), writeable, (req, res) => {
-  try {
-    const { ids } = req.body;
-    if (!ids?.length) return res.status(400).json({ error: 'ids array required' });
-    const db = getDb();
-    const placeholders = ids.map(() => '?').join(',');
-    const result = db.prepare(`DELETE FROM scan_results WHERE id IN (${placeholders})`).run(...ids.map(Number));
-    auditService.log({
-      userId: req.user.id, username: req.user.username,
-      action: 'scan_history_delete', details: { count: result.changes },
-      ip: getClientIp(req),
-    });
-    res.json({ ok: true, deleted: result.changes });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.post('/scan-history/delete', requireAuth, requireRole('admin'), writeable, asyncHandler((req, res) => {
+  const { ids } = req.body;
+  if (!ids?.length) return res.status(400).json({ error: 'ids array required' });
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  const result = db.prepare(`DELETE FROM scan_results WHERE id IN (${placeholders})`).run(...ids.map(Number));
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'scan_history_delete', details: { count: result.changes },
+    ip: getClientIp(req),
+  });
+  res.json({ ok: true, deleted: result.changes });
+}));
 
 // Tag image
-router.post('/:id/tag', requireAuth, requireRole('admin', 'operator'), writeable, async (req, res) => {
-  try {
-    const { repo, tag } = req.body;
-    if (!repo) return res.status(400).json({ error: 'repo required' });
-    const docker = dockerService.getDocker(req.hostId);
-    const image = docker.getImage(req.params.id);
-    await image.tag({ repo, tag: tag || 'latest' });
-    auditService.log({
-      userId: req.user.id, username: req.user.username,
-      action: 'image_tag', targetType: 'image', targetId: req.params.id,
-      details: { repo, tag: tag || 'latest' }, ip: getClientIp(req),
-    });
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.post('/:id/tag', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
+  const { repo, tag } = req.body;
+  if (!repo) return res.status(400).json({ error: 'repo required' });
+  const docker = dockerService.getDocker(req.hostId);
+  const image = docker.getImage(req.params.id);
+  await image.tag({ repo, tag: tag || 'latest' });
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'image_tag', targetType: 'image', targetId: req.params.id,
+    details: { repo, tag: tag || 'latest' }, ip: getClientIp(req),
+  });
+  res.json({ ok: true });
+}));
 
 // Export image as tar
-router.get('/:id/export', requireAuth, async (req, res) => {
-  try {
-    const docker = dockerService.getDocker(req.hostId);
-    const image = docker.getImage(req.params.id);
-    const info = await image.inspect();
-    const name = (info.RepoTags?.[0] || req.params.id.substring(0, 12)).replace(/[/:]/g, '_');
+router.get('/:id/export', requireAuth, asyncHandler(async (req, res) => {
+  const docker = dockerService.getDocker(req.hostId);
+  const image = docker.getImage(req.params.id);
+  const info = await image.inspect();
+  const name = (info.RepoTags?.[0] || req.params.id.substring(0, 12)).replace(/[/:]/g, '_');
 
-    const stream = await image.get();
-    res.setHeader('Content-Type', 'application/x-tar');
-    res.setHeader('Content-Disposition', `attachment; filename="${name}.tar"`);
-    stream.pipe(res);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  const stream = await image.get();
+  res.setHeader('Content-Type', 'application/x-tar');
+  res.setHeader('Content-Disposition', `attachment; filename="${name}.tar"`);
+  stream.pipe(res);
+}));
 
 // Import image from tar
 router.post('/import', requireAuth, requireRole('admin'), writeable, (req, res) => {
@@ -692,12 +658,11 @@ router.post('/import', requireAuth, requireRole('admin'), writeable, (req, res) 
 });
 
 // ─── Image Build ────────────────────────────────────
-router.post('/build', requireAuth, requireRole('admin'), writeable, async (req, res) => {
+router.post('/build', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
   const { dockerfile, tag, buildArgs = {}, noCache = false, target = '' } = req.body;
   if (!dockerfile || !tag) return res.status(400).json({ error: 'dockerfile and tag required' });
 
-  try {
-    const docker = dockerService.getDocker(req.hostId);
+  const docker = dockerService.getDocker(req.hostId);
     // Create a tar archive containing the Dockerfile
     const tarHeader = Buffer.alloc(512);
     const content = Buffer.from(dockerfile, 'utf8');
@@ -765,20 +730,16 @@ router.post('/build', requireAuth, requireRole('admin'), writeable, async (req, 
       });
     });
 
-    stream.on('error', (err) => {
-      res.write(`data: ${JSON.stringify({ type: 'error', text: err.message })}\n\n`);
-      res.end();
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  stream.on('error', (err) => {
+    res.write(`data: ${JSON.stringify({ type: 'error', text: err.message })}\n\n`);
+    res.end();
+  });
+}));
 
 // ─── Image Freshness Dashboard ────────────────────────
 
-router.get('/freshness', requireAuth, async (req, res) => {
-  try {
-    const hostId = req.hostId || 0;
+router.get('/freshness', requireAuth, asyncHandler(async (req, res) => {
+  const hostId = req.hostId || 0;
     const images = await dockerService.listImages(hostId);
     const db = getDb();
 
@@ -827,11 +788,8 @@ router.get('/freshness', requireAuth, async (req, res) => {
       };
     });
 
-    results.sort((a, b) => a.freshness - b.freshness); // Stalest first
-    res.json(results);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  results.sort((a, b) => a.freshness - b.freshness); // Stalest first
+  res.json(results);
+}));
 
 module.exports = router;

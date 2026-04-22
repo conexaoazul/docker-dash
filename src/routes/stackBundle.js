@@ -6,6 +6,7 @@ const auditService = require('../services/audit');
 const { requireAuth, requireRole, writeable } = require('../middleware/auth');
 const { getClientIp } = require('../utils/helpers');
 const { extractHostId } = require('../middleware/hostId');
+const asyncHandler = require('../utils/asyncHandler');
 
 const router = Router();
 router.use(extractHostId);
@@ -13,89 +14,73 @@ router.use(extractHostId);
 // ─── Export ─────────────────────────────────────────
 
 // Export a stack as a downloadable JSON bundle
-router.get('/export/stack/:name', requireAuth, async (req, res) => {
-  try {
-    const bundle = await bundleService.exportStack(req.params.name, req.hostId);
+router.get('/export/stack/:name', requireAuth, asyncHandler(async (req, res) => {
+  const bundle = await bundleService.exportStack(req.params.name, req.hostId);
 
-    auditService.log({
-      userId: req.user.id, username: req.user.username,
-      action: 'stack_export', targetType: 'stack',
-      targetId: req.params.name, ip: getClientIp(req),
-    });
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'stack_export', targetType: 'stack',
+    targetId: req.params.name, ip: getClientIp(req),
+  });
 
-    // If ?download=true, send as file
-    if (req.query.download === 'true') {
-      const filename = `stack-${req.params.name}-${new Date().toISOString().substring(0, 10)}.json`;
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      return res.send(JSON.stringify(bundle, null, 2));
-    }
-
-    res.json(bundle);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  // If ?download=true, send as file
+  if (req.query.download === 'true') {
+    const filename = `stack-${req.params.name}-${new Date().toISOString().substring(0, 10)}.json`;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(JSON.stringify(bundle, null, 2));
   }
-});
+
+  res.json(bundle);
+}));
 
 // Export a single container
-router.get('/export/container/:id', requireAuth, async (req, res) => {
-  try {
-    const bundle = await bundleService.exportContainer(req.params.id, req.hostId);
+router.get('/export/container/:id', requireAuth, asyncHandler(async (req, res) => {
+  const bundle = await bundleService.exportContainer(req.params.id, req.hostId);
 
-    if (req.query.download === 'true') {
-      const name = bundle.containers[0]?.name || 'container';
-      const filename = `container-${name}-${new Date().toISOString().substring(0, 10)}.json`;
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      return res.send(JSON.stringify(bundle, null, 2));
-    }
-
-    res.json(bundle);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  if (req.query.download === 'true') {
+    const name = bundle.containers[0]?.name || 'container';
+    const filename = `container-${name}-${new Date().toISOString().substring(0, 10)}.json`;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(JSON.stringify(bundle, null, 2));
   }
-});
+
+  res.json(bundle);
+}));
 
 // Generate compose YAML from a bundle
-router.post('/export/compose', requireAuth, (req, res) => {
-  try {
-    const yaml = bundleService.generateCompose(req.body);
-    res.type('text/yaml').send(yaml);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.post('/export/compose', requireAuth, asyncHandler((req, res) => {
+  const yaml = bundleService.generateCompose(req.body);
+  res.type('text/yaml').send(yaml);
+}));
 
 // ─── Import ─────────────────────────────────────────
 
 // Import a bundle onto a host
-router.post('/import', requireAuth, requireRole('admin'), writeable, async (req, res) => {
-  try {
-    const { bundle, destHostId, autoStart, prefixName } = req.body;
+router.post('/import', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+  const { bundle, destHostId, autoStart, prefixName } = req.body;
 
-    if (!bundle) return res.status(400).json({ error: 'bundle is required (JSON object)' });
-    if (destHostId === undefined) return res.status(400).json({ error: 'destHostId is required' });
+  if (!bundle) return res.status(400).json({ error: 'bundle is required (JSON object)' });
+  if (destHostId === undefined) return res.status(400).json({ error: 'destHostId is required' });
 
-    const result = await bundleService.importBundle(bundle, destHostId, {
-      autoStart: autoStart !== false,
-      prefixName: prefixName || '',
-    });
+  const result = await bundleService.importBundle(bundle, destHostId, {
+    autoStart: autoStart !== false,
+    prefixName: prefixName || '',
+  });
 
-    auditService.log({
-      userId: req.user.id, username: req.user.username,
-      action: 'stack_import', targetType: 'stack',
-      targetId: bundle.stack?.name || bundle.containers?.[0]?.name || 'bundle',
-      details: JSON.stringify({
-        destHostId, succeeded: result.succeeded, failed: result.failed,
-      }),
-      ip: getClientIp(req),
-    });
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'stack_import', targetType: 'stack',
+    targetId: bundle.stack?.name || bundle.containers?.[0]?.name || 'bundle',
+    details: JSON.stringify({
+      destHostId, succeeded: result.succeeded, failed: result.failed,
+    }),
+    ip: getClientIp(req),
+  });
 
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json(result);
+}));
 
 // Validate/preview a bundle before importing
 router.post('/import/preview', requireAuth, (req, res) => {

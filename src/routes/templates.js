@@ -7,6 +7,7 @@ const { requireAuth, requireRole, writeable, requireFeature } = require('../midd
 const auditService = require('../services/audit');
 const { getClientIp } = require('../utils/helpers');
 const { getDb } = require('../db');
+const asyncHandler = require('../utils/asyncHandler');
 
 const router = Router();
 
@@ -283,101 +284,93 @@ router.get('/:id', requireAuth, (req, res) => {
 });
 
 // Create custom template
-router.post('/', requireAuth, requireRole('admin'), (req, res) => {
-  try {
-    const { id, name, category, icon, description, compose } = req.body;
-    if (!id || !name || !compose) return res.status(400).json({ error: 'id, name, and compose are required' });
-    if (!/^[a-zA-Z0-9_-]+$/.test(id)) return res.status(400).json({ error: 'id must be alphanumeric with dashes/underscores' });
+router.post('/', requireAuth, requireRole('admin'), asyncHandler((req, res) => {
+  const { id, name, category, icon, description, compose } = req.body;
+  if (!id || !name || !compose) return res.status(400).json({ error: 'id, name, and compose are required' });
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) return res.status(400).json({ error: 'id must be alphanumeric with dashes/underscores' });
 
-    // Check if id conflicts with built-in
-    if (TEMPLATES.find(t => t.id === id)) {
-      return res.status(409).json({ error: 'A built-in template with this id already exists. Use PUT to override it.' });
-    }
+  // Check if id conflicts with built-in
+  if (TEMPLATES.find(t => t.id === id)) {
+    return res.status(409).json({ error: 'A built-in template with this id already exists. Use PUT to override it.' });
+  }
 
-    const db = getDb();
-    const existing = db.prepare('SELECT id FROM custom_templates WHERE id = ?').get(id);
-    if (existing) return res.status(409).json({ error: 'A custom template with this id already exists' });
+  const db = getDb();
+  const existing = db.prepare('SELECT id FROM custom_templates WHERE id = ?').get(id);
+  if (existing) return res.status(409).json({ error: 'A custom template with this id already exists' });
 
-    db.prepare(`INSERT INTO custom_templates (id, name, category, icon, description, compose, is_builtin_override, created_by, updated_by)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`).run(
-      id, name, category || 'Custom', icon || 'fas fa-cube', description || '', compose,
-      req.user.username, req.user.username
-    );
+  db.prepare(`INSERT INTO custom_templates (id, name, category, icon, description, compose, is_builtin_override, created_by, updated_by)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`).run(
+    id, name, category || 'Custom', icon || 'fas fa-cube', description || '', compose,
+    req.user.username, req.user.username
+  );
 
-    auditService.log({ userId: req.user.id, username: req.user.username,
-      action: 'template_create', targetType: 'template', targetId: id, ip: getClientIp(req) });
+  auditService.log({ userId: req.user.id, username: req.user.username,
+    action: 'template_create', targetType: 'template', targetId: id, ip: getClientIp(req) });
 
-    res.status(201).json({ ok: true, id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  res.status(201).json({ ok: true, id });
+}));
 
 // Update template (custom or override built-in)
-router.put('/:id', requireAuth, requireRole('admin'), (req, res) => {
-  try {
-    const { name, category, icon, description, compose } = req.body;
-    if (!name || !compose) return res.status(400).json({ error: 'name and compose are required' });
+router.put('/:id', requireAuth, requireRole('admin'), asyncHandler((req, res) => {
+  const { name, category, icon, description, compose } = req.body;
+  if (!name || !compose) return res.status(400).json({ error: 'name and compose are required' });
 
-    const db = getDb();
-    const isBuiltin = !!TEMPLATES.find(t => t.id === req.params.id);
-    const existing = db.prepare('SELECT id FROM custom_templates WHERE id = ?').get(req.params.id);
+  const db = getDb();
+  const isBuiltin = !!TEMPLATES.find(t => t.id === req.params.id);
+  const existing = db.prepare('SELECT id FROM custom_templates WHERE id = ?').get(req.params.id);
 
-    if (existing) {
-      // Update existing override/custom
-      db.prepare(`UPDATE custom_templates SET name=?, category=?, icon=?, description=?, compose=?,
-        updated_by=?, updated_at=datetime('now') WHERE id=?`).run(
-        name, category || 'Custom', icon || 'fas fa-cube', description || '', compose,
-        req.user.username, req.params.id
-      );
-    } else if (isBuiltin) {
-      // Create override for built-in
-      db.prepare(`INSERT INTO custom_templates (id, name, category, icon, description, compose, is_builtin_override, created_by, updated_by)
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`).run(
-        req.params.id, name, category || 'Custom', icon || 'fas fa-cube', description || '', compose,
-        req.user.username, req.user.username
-      );
-    } else {
-      return res.status(404).json({ error: 'Template not found' });
-    }
+  if (existing) {
+    // Update existing override/custom
+    db.prepare(`UPDATE custom_templates SET name=?, category=?, icon=?, description=?, compose=?,
+      updated_by=?, updated_at=datetime('now') WHERE id=?`).run(
+      name, category || 'Custom', icon || 'fas fa-cube', description || '', compose,
+      req.user.username, req.params.id
+    );
+  } else if (isBuiltin) {
+    // Create override for built-in
+    db.prepare(`INSERT INTO custom_templates (id, name, category, icon, description, compose, is_builtin_override, created_by, updated_by)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`).run(
+      req.params.id, name, category || 'Custom', icon || 'fas fa-cube', description || '', compose,
+      req.user.username, req.user.username
+    );
+  } else {
+    return res.status(404).json({ error: 'Template not found' });
+  }
 
-    auditService.log({ userId: req.user.id, username: req.user.username,
-      action: 'template_update', targetType: 'template', targetId: req.params.id, ip: getClientIp(req) });
+  auditService.log({ userId: req.user.id, username: req.user.username,
+    action: 'template_update', targetType: 'template', targetId: req.params.id, ip: getClientIp(req) });
 
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  res.json({ ok: true });
+}));
 
 // Reset built-in template to original
-router.post('/:id/reset', requireAuth, requireRole('admin'), (req, res) => {
-  try {
-    const isBuiltin = !!TEMPLATES.find(t => t.id === req.params.id);
-    if (!isBuiltin) return res.status(400).json({ error: 'Only built-in templates can be reset' });
+router.post('/:id/reset', requireAuth, requireRole('admin'), asyncHandler((req, res) => {
+  const isBuiltin = !!TEMPLATES.find(t => t.id === req.params.id);
+  if (!isBuiltin) return res.status(400).json({ error: 'Only built-in templates can be reset' });
 
-    const db = getDb();
-    db.prepare('DELETE FROM custom_templates WHERE id = ? AND is_builtin_override = 1').run(req.params.id);
+  const db = getDb();
+  db.prepare('DELETE FROM custom_templates WHERE id = ? AND is_builtin_override = 1').run(req.params.id);
 
-    auditService.log({ userId: req.user.id, username: req.user.username,
-      action: 'template_reset', targetType: 'template', targetId: req.params.id, ip: getClientIp(req) });
+  auditService.log({ userId: req.user.id, username: req.user.username,
+    action: 'template_reset', targetType: 'template', targetId: req.params.id, ip: getClientIp(req) });
 
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  res.json({ ok: true });
+}));
 
 // Delete custom template (cannot delete built-in)
-router.delete('/:id', requireAuth, requireRole('admin'), (req, res) => {
-  try {
-    const isBuiltin = !!TEMPLATES.find(t => t.id === req.params.id);
-    if (isBuiltin) return res.status(400).json({ error: 'Cannot delete built-in templates. Use PUT to override or POST /reset to restore.' });
+router.delete('/:id', requireAuth, requireRole('admin'), asyncHandler((req, res) => {
+  const isBuiltin = !!TEMPLATES.find(t => t.id === req.params.id);
+  if (isBuiltin) return res.status(400).json({ error: 'Cannot delete built-in templates. Use PUT to override or POST /reset to restore.' });
 
-    const db = getDb();
-    const result = db.prepare('DELETE FROM custom_templates WHERE id = ? AND is_builtin_override = 0').run(req.params.id);
-    if (result.changes === 0) return res.status(404).json({ error: 'Custom template not found' });
+  const db = getDb();
+  const result = db.prepare('DELETE FROM custom_templates WHERE id = ? AND is_builtin_override = 0').run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Custom template not found' });
 
-    auditService.log({ userId: req.user.id, username: req.user.username,
-      action: 'template_delete', targetType: 'template', targetId: req.params.id, ip: getClientIp(req) });
+  auditService.log({ userId: req.user.id, username: req.user.username,
+    action: 'template_delete', targetType: 'template', targetId: req.params.id, ip: getClientIp(req) });
 
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  res.json({ ok: true });
+}));
 
 /** Parse simple compose YAML into service objects (no external YAML library needed) */
 function _parseComposeServices(yaml) {
@@ -432,9 +425,8 @@ function _parseComposeServices(yaml) {
 }
 
 // Deploy a template via Docker API (dockerode — works on any host)
-router.post('/:id/deploy', requireAuth, requireRole('admin', 'operator'), writeable, requireFeature('create'), async (req, res) => {
-  try {
-    const t = findTemplate(req.params.id);
+router.post('/:id/deploy', requireAuth, requireRole('admin', 'operator'), writeable, requireFeature('create'), asyncHandler(async (req, res) => {
+  const t = findTemplate(req.params.id);
     if (!t) return res.status(404).json({ error: 'Template not found' });
 
     const stackName = req.body.name || t.id;
@@ -521,11 +513,8 @@ router.post('/:id/deploy', requireAuth, requireRole('admin', 'operator'), writea
       details: { template: t.name, stackName, containers: results.map(r => r.name) }, ip: getClientIp(req),
     });
 
-    res.json({ ok: true, stackName, containers: results });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ ok: true, stackName, containers: results });
+}));
 
 // ─── Portainer Template Import ─────────────────────────────
 
@@ -647,99 +636,91 @@ function _convertPortainerTemplate(t) {
 }
 
 // Preview Portainer templates (fetch + convert, no save)
-router.post('/import/preview', requireAuth, requireRole('admin'), async (req, res) => {
-  try {
-    const { url } = req.body;
-    if (!url) return res.status(400).json({ error: 'url is required' });
+router.post('/import/preview', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'url is required' });
 
-    // Basic URL validation
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      return res.status(400).json({ error: 'URL must start with http:// or https://' });
-    }
-
-    const data = await _fetchJson(url);
-
-    // Portainer templates can be { version: "2", templates: [...] } or just an array
-    const rawTemplates = Array.isArray(data) ? data : (data.templates || []);
-
-    if (!rawTemplates.length) {
-      return res.status(400).json({ error: 'No templates found at the provided URL' });
-    }
-
-    // Check which IDs already exist
-    const db = getDb();
-    const existingBuiltin = new Set(TEMPLATES.map(t => t.id));
-    const existingCustom = new Set(
-      db.prepare('SELECT id FROM custom_templates').all().map(r => r.id)
-    );
-
-    const converted = rawTemplates.map(t => {
-      const c = _convertPortainerTemplate(t);
-      c.alreadyExists = existingBuiltin.has(c.id) || existingCustom.has(c.id);
-      return c;
-    });
-
-    res.json({
-      total: converted.length,
-      templates: converted,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  // Basic URL validation
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return res.status(400).json({ error: 'URL must start with http:// or https://' });
   }
-});
+
+  const data = await _fetchJson(url);
+
+  // Portainer templates can be { version: "2", templates: [...] } or just an array
+  const rawTemplates = Array.isArray(data) ? data : (data.templates || []);
+
+  if (!rawTemplates.length) {
+    return res.status(400).json({ error: 'No templates found at the provided URL' });
+  }
+
+  // Check which IDs already exist
+  const db = getDb();
+  const existingBuiltin = new Set(TEMPLATES.map(t => t.id));
+  const existingCustom = new Set(
+    db.prepare('SELECT id FROM custom_templates').all().map(r => r.id)
+  );
+
+  const converted = rawTemplates.map(t => {
+    const c = _convertPortainerTemplate(t);
+    c.alreadyExists = existingBuiltin.has(c.id) || existingCustom.has(c.id);
+    return c;
+  });
+
+  res.json({
+    total: converted.length,
+    templates: converted,
+  });
+}));
 
 // Import selected Portainer templates (save to DB)
-router.post('/import', requireAuth, requireRole('admin'), async (req, res) => {
-  try {
-    const { templates: toImport } = req.body;
-    if (!Array.isArray(toImport) || toImport.length === 0) {
-      return res.status(400).json({ error: 'templates array is required' });
-    }
-
-    const db = getDb();
-    const existingBuiltin = new Set(TEMPLATES.map(t => t.id));
-    const existingCustom = new Set(
-      db.prepare('SELECT id FROM custom_templates').all().map(r => r.id)
-    );
-
-    const insert = db.prepare(`INSERT INTO custom_templates (id, name, category, icon, description, compose, is_builtin_override, created_by, updated_by)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`);
-
-    let imported = 0;
-    let skipped = 0;
-    const importMany = db.transaction(() => {
-      for (const t of toImport) {
-        // Deduplicate: append suffix if needed
-        let id = t.id;
-        if (existingBuiltin.has(id) || existingCustom.has(id)) {
-          // Try with -imported suffix
-          id = id + '-imported';
-          if (existingBuiltin.has(id) || existingCustom.has(id)) {
-            skipped++;
-            continue;
-          }
-        }
-        existingCustom.add(id);
-        insert.run(
-          id, t.name, t.category || 'Imported', t.icon || 'fas fa-file-import',
-          (t.description || '').substring(0, 500), t.compose,
-          req.user.username, req.user.username
-        );
-        imported++;
-      }
-    });
-    importMany();
-
-    auditService.log({
-      userId: req.user.id, username: req.user.username,
-      action: 'template_import', targetType: 'template', targetId: 'portainer',
-      details: { imported, skipped, total: toImport.length }, ip: getClientIp(req),
-    });
-
-    res.json({ ok: true, imported, skipped });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+router.post('/import', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+  const { templates: toImport } = req.body;
+  if (!Array.isArray(toImport) || toImport.length === 0) {
+    return res.status(400).json({ error: 'templates array is required' });
   }
-});
+
+  const db = getDb();
+  const existingBuiltin = new Set(TEMPLATES.map(t => t.id));
+  const existingCustom = new Set(
+    db.prepare('SELECT id FROM custom_templates').all().map(r => r.id)
+  );
+
+  const insert = db.prepare(`INSERT INTO custom_templates (id, name, category, icon, description, compose, is_builtin_override, created_by, updated_by)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`);
+
+  let imported = 0;
+  let skipped = 0;
+  const importMany = db.transaction(() => {
+    for (const t of toImport) {
+      // Deduplicate: append suffix if needed
+      let id = t.id;
+      if (existingBuiltin.has(id) || existingCustom.has(id)) {
+        // Try with -imported suffix
+        id = id + '-imported';
+        if (existingBuiltin.has(id) || existingCustom.has(id)) {
+          skipped++;
+          continue;
+        }
+      }
+      existingCustom.add(id);
+      insert.run(
+        id, t.name, t.category || 'Imported', t.icon || 'fas fa-file-import',
+        (t.description || '').substring(0, 500), t.compose,
+        req.user.username, req.user.username
+      );
+      imported++;
+    }
+  });
+  importMany();
+
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'template_import', targetType: 'template', targetId: 'portainer',
+    details: { imported, skipped, total: toImport.length }, ip: getClientIp(req),
+  });
+
+  res.json({ ok: true, imported, skipped });
+}));
 
 module.exports = router;

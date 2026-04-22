@@ -5,6 +5,7 @@ const workflowService = require('../services/workflows');
 const auditService = require('../services/audit');
 const { requireAuth, requireRole, writeable } = require('../middleware/auth');
 const { getClientIp } = require('../utils/helpers');
+const asyncHandler = require('../utils/asyncHandler');
 
 const router = Router();
 
@@ -45,16 +46,14 @@ router.put('/:id', requireAuth, requireRole('admin'), writeable, (req, res) => {
   }
 });
 
-router.delete('/:id', requireAuth, requireRole('admin'), writeable, (req, res) => {
-  try {
-    workflowService.delete(parseInt(req.params.id));
-    auditService.log({
-      userId: req.user.id, username: req.user.username,
-      action: 'workflow_delete', targetType: 'workflow',
-      targetId: req.params.id, ip: getClientIp(req),
-    });
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+router.delete('/:id', requireAuth, requireRole('admin'), writeable, asyncHandler((req, res) => {
+  workflowService.delete(parseInt(req.params.id));
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'workflow_delete', targetType: 'workflow',
+    targetId: req.params.id, ip: getClientIp(req),
+  });
+  res.json({ ok: true });
+}));
 
 module.exports = router;
