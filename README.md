@@ -10,7 +10,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-757%20passing%20(100%25)-brightgreen" alt="Tests"></a>
     <img src="https://img.shields.io/badge/version-6.15.0-blue" alt="Version">
-    <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.5%2F10-brightgreen" alt="Production Readiness"></a>
+    <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.1%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
     <img src="https://img.shields.io/badge/Docker-~80MB-blue" alt="Image Size">
     <img src="https://img.shields.io/badge/RAM-~50MB-blue" alt="RAM Usage">
@@ -490,7 +490,7 @@ Docker Dash requires access to the Docker socket (`/var/run/docker.sock`). This 
 | Tech Debt Scan | 2026-03-27 | 33 items found | All 4 CRITICAL fixed |
 | Production Readiness v5 | 2026-03-28 | 8.05/10 weighted (claimed 9.2) | All P0+P1 resolved |
 | Shell Injection | 2026-03-28 | 0 vectors | All execSync eliminated |
-| Production Readiness v6.15 | 2026-04-22 | 9.5/10 | v5 gaps closed: error-response sanitization on all 500s (v6.14.1), expanded Prometheus metrics (v6.15.0), setInterval leak fixed, CI test count dynamic. Residual: containers.js bundle size, optional Docker-in-Docker integration tests |
+| Production Readiness v6.15.1 | 2026-04-22 | 9.1/10 (defensible weighted) | v5 gaps closed: error-response sanitization on all 500s (v6.14.1), expanded Prometheus metrics with job counters populated (v6.15.0–v6.15.1), setInterval leak fixed, CI test count dynamic, X-Frame-Options: DENY + Permissions-Policy, 0 lint warnings. Residual: containers.js bundle size (Phase 2 deep-spec written, v6.16.0 target), optional Docker-in-Docker integration tests (v7), Redis HA (v7) |
 
 ### Known Security Tradeoffs
 

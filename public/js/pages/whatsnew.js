@@ -10,6 +10,18 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.15.1',
+      date: '2026-04-22',
+      title: 'Phase 1.5 — job metrics wired, security headers tightened, lint clean',
+      changes: [
+        { type: 'feature', text: 'Background job Prometheus counters now actually populated: 13 cron + setInterval callbacks instrumented via new _m(name, fn) helper. Grafana can now track stats-aggregate-1m, alert-evaluate, session-mfa-cleanup, purge-old-data, vacuum-db, certificate-scan, secret-rotation-scan, daily-backup, schedule-executor, s3-backup, sandbox-ttl-sweep. Same refactor pattern as v6.14.1 asyncHandler — net -45 LOC.' },
+        { type: 'security', text: 'HTTP headers tightened: X-Frame-Options: DENY (was SAMEORIGIN via helmet default — Docker Dash is a standalone admin UI, no iframe embedding) + new Permissions-Policy header explicitly denying ~24 browser APIs we never use (camera, mic, geolocation, USB, etc.). Defense-in-depth for XSS-post-escape scenarios. Existing HSTS/Referrer-Policy/COOP/CORP/nosniff defaults unchanged.' },
+        { type: 'fix', text: 'Lint: 2 warnings → 0. Removed stale eslint-disable directive in acme-cloudflare-live.test.js and renamed unused kernel param to _kernel in platform-detect.js per project convention.' },
+        { type: 'improvement', text: 'Phase 2 deep-spec written (plans/deep-spec-containers-split.md, local): splitting the 5,774-line containers.js into list (eager) + detail (lazy-loaded on /containers/:id navigation). Expected: Performance score 7 → 9, initial JS payload -40%. Deferred to v6.16.0 as a dedicated session — touches the most-visited page.' },
+        { type: 'improvement', text: 'Production readiness: honest current score is ~9.1 weighted (was 9.5 aspirational). Performance stays at 7 until Phase 2 ships; after Phase 2 expecting 9.3-9.4. External security audit + Redis HA remain v7 material.' },
+      ],
+    },
+    {
       version: '6.15.0',
       date: '2026-04-22',
       title: 'Production readiness polish — Prometheus metrics + CI hygiene',

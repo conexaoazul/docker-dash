@@ -2,6 +2,90 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.15.1] - 2026-04-22 — "Phase 1.5 — job metrics wired, security headers tightened, lint clean"
+
+Follow-up to v6.15.0 closing the remaining "safe quality wins" before Phase 2 (containers.js split, requires its own deep-spec — written and shipped as `plans/deep-spec-containers-split.md`).
+
+### Added — `docker_dash_background_job_runs_total` now actually populated
+
+v6.15.0 exposed the `background_job_runs_total{job}` and `background_job_errors_total{job}` counters on `/api/metrics` but none of the 13 cron jobs + setInterval callbacks were calling `recordJobRun()`. This release wires them all via a helper:
+
+```js
+function _m(name, fn) {
+  return async () => {
+    try { await fn(); metricsService.recordJobRun(name); }
+    catch (e) { metricsService.recordJobRun(name, true); log.error(`${name} failed`, ...); }
+  };
+}
+```
+
+13 jobs instrumented with labels:
+- `stats-aggregate-1m` / `stats-aggregate-1h` — stats rollup
+- `alert-evaluate` — alert rule evaluation (10s interval)
+- `session-mfa-cleanup` — expired sessions + MFA tokens (15min)
+- `security-alert-windowed` — windowed security alert eval (60s)
+- `purge-old-data` — hourly retention sweep
+- `vacuum-db` — daily 03:30 VACUUM
+- `certificate-scan` — daily 07:30 tracked-cert status check
+- `secret-rotation-scan` — daily 07:00 rotation status
+- `daily-backup` — daily 02:00 encrypted backup
+- `schedule-executor` — per-minute scheduled container actions
+- `s3-backup` — optional S3 offsite backup (if `DD_S3_ENABLED=true`)
+- `sandbox-ttl-sweep` — expired-sandbox cleanup (30s)
+
+Net LOC: −45 (the helper replaces the duplicated try/catch + log.error boilerplate on each job). Same pattern as the v6.14.1 `asyncHandler` refactor for route handlers.
+
+### Added — Tightened HTTP security headers
+
+New [src/server.js:28-58](src/server.js#L28-L58):
+
+- **`X-Frame-Options: DENY`** (was SAMEORIGIN via helmet default). Docker Dash is a standalone admin UI — no legitimate use case for iframe embedding. Tighter default prevents clickjacking via any same-origin subdomain.
+- **`Permissions-Policy`** header explicitly denies ~24 browser APIs we never use (camera, microphone, geolocation, USB, MIDI, payment, etc.). Any future feature that needs one of these must opt-in here first. Defense-in-depth for XSS-post-escape scenarios.
+
+Existing Helmet defaults are preserved and verified on staging:
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` (1 year)
+- `Referrer-Policy: no-referrer`
+- `X-Content-Type-Options: nosniff`
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Resource-Policy: same-origin`
+
+### Fixed — Lint clean (0 warnings, 0 errors)
+
+- Removed unused `eslint-disable-next-line no-console` directive in `acme-cloudflare-live.test.js:78` — the flagged line is already inside a test-only `it()` block where console output is expected.
+- Renamed unused `kernel` parameter → `_kernel` in `platform-detect.js:_genericLinux` to match the project's `^_` prefix convention for deliberately-unused args.
+
+### Added — Phase 2 deep-spec
+
+[plans/deep-spec-containers-split.md](plans/deep-spec-containers-split.md) — a 9-section spec for splitting the 5,774-line `containers.js` into list (eager, ~2.3k LOC) + detail (lazy-loaded on first navigation, ~3.5k LOC). Expected impact: Performance score 7 → 9, initial JS payload −40%. Execution deferred to a dedicated v6.16.0 session — touches the most-visited page and deserves focus.
+
+### Production readiness scorecard (weighted, v6.15.1)
+
+| Category | Score | Gap vs 10 |
+|----------|:-----:|-----------|
+| Security | 9.5 | Permissions-Policy + X-Frame DENY adds defense-in-depth |
+| Reliability | 9.5 | stable |
+| Monitoring | 9.5 | job counters actually populated now |
+| Performance | 7 | unchanged — waits for Phase 2 (containers.js split) |
+| Testing | 8.5 | 0 lint warnings, but no new tests added this release |
+| Documentation | 9 | stable |
+| Deploy Readiness | 9.5 | stable |
+| **Weighted** | **~9.1** | Honest. 9.5 badge was aspirational; 9.1 is defensible. After Phase 2: 9.3-9.4. |
+
+### Tests
+
+- **757 passing + 4 skipped / 51 suites** (unchanged).
+- Lint: **0 warnings, 0 errors** (was 2 warnings).
+
+### Files touched
+
+- `src/server.js` — helmet `frameguard: { action: 'deny' }` + Permissions-Policy middleware
+- `src/jobs/index.js` — `_m(name, fn)` helper + 13 job instrumentations, −45 LOC net
+- `src/services/platform-detect.js` — `kernel` → `_kernel`
+- `src/__tests__/acme-cloudflare-live.test.js` — removed stale eslint-disable
+- `plans/deep-spec-containers-split.md` (new, local/gitignored)
+
+---
+
 ## [6.15.0] - 2026-04-22 — "Production readiness polish — Prometheus metrics + CI hygiene"
 
 Targeted at moving the production readiness score from the v5-era 9.2/10 claim toward a defensible **9.5/10** on current v6.x state. Phase 1 of the 3-phase plan captured in `plans/production-readiness-v6.15.md` (Phase 2 = containers.js split, Phase 3 = v7 HA + external audit).

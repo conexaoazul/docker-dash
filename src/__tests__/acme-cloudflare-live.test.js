@@ -75,7 +75,6 @@ runOrSkip('Cloudflare live API — credential validation (requires CLOUDFLARE_TE
 describe('Cloudflare live API — runtime environment', () => {
   it('reports whether CLOUDFLARE_TEST_TOKEN is configured', () => {
     // This test always passes — it's just a visible marker.
-    // eslint-disable-next-line no-console
     if (!HAS_TOKEN) {
       console.log('[acme-cloudflare-live] CLOUDFLARE_TEST_TOKEN not set — live tests SKIPPED');
     }

@@ -149,7 +149,7 @@ function _detectGenericLinux(os, kernel) {
   return _genericLinux(os, kernel);
 }
 
-function _genericLinux(os = '', kernel = '') {
+function _genericLinux(os = '', _kernel = '') {
   return {
     platform: 'linux',
     label: os || 'Linux',

@@ -10,8 +10,29 @@ const dockerService = require('../services/docker');
 const { getDb } = require('../db');
 const config = require('../config');
 const log = require('../utils/logger')('jobs');
+const metricsService = require('../services/metrics');
 
 const jobs = [];
+
+/**
+ * Wrap a cron callback so runs + errors are counted for Prometheus
+ * (`docker_dash_background_job_runs_total{job}`, `_errors_total{job}`).
+ * Replaces the ad-hoc try/catch boilerplate around most jobs. Inner
+ * try/catch blocks (e.g. per-record SQL error handling inside the
+ * certificate scan) stay as-is — only the outer scheduler-level
+ * catch is owned by this helper.
+ */
+function _m(name, fn) {
+  return async () => {
+    try {
+      await fn();
+      metricsService.recordJobRun(name);
+    } catch (e) {
+      metricsService.recordJobRun(name, true);
+      log.error(`${name} failed`, { message: e.message || String(e) });
+    }
+  };
+}
 
 /**
  * Purge all data older than retention limits from every table.
@@ -152,48 +173,34 @@ function startAll() {
   // We handle aggregation and cleanup via cron
 
   // Aggregate raw → 1m every 2 minutes
-  jobs.push(cron.schedule('*/2 * * * *', () => {
-    try { statsService.aggregate1m(); }
-    catch (e) { log.error('1m aggregation failed', e.message); }
-  }));
+  jobs.push(cron.schedule('*/2 * * * *', _m('stats-aggregate-1m', () => statsService.aggregate1m())));
 
   // Aggregate 1m → 1h every 10 minutes
-  jobs.push(cron.schedule('*/10 * * * *', () => {
-    try { statsService.aggregate1h(); }
-    catch (e) { log.error('1h aggregation failed', e.message); }
-  }));
+  jobs.push(cron.schedule('*/10 * * * *', _m('stats-aggregate-1h', () => statsService.aggregate1h())));
 
   // Alert evaluation every 10 seconds (via setInterval for precision)
-  const alertInterval = setInterval(() => {
-    try { alertService.evaluate(); }
-    catch (e) { log.error('Alert evaluation failed', e.message); }
-  }, 10000);
+  const alertInterval = setInterval(_m('alert-evaluate', () => alertService.evaluate()), 10000);
 
   // Clean expired sessions and MFA tokens every 15 minutes
-  jobs.push(cron.schedule('*/15 * * * *', () => {
-    try { authService.cleanSessions(); }
-    catch (e) { log.error('Session cleanup failed', e.message); }
-    try { authService.cleanMfaTokens(); }
-    catch (e) { log.error('MFA token cleanup failed', e.message); }
-  }));
+  jobs.push(cron.schedule('*/15 * * * *', _m('session-mfa-cleanup', () => {
+    authService.cleanSessions();
+    authService.cleanMfaTokens();
+  })));
 
   // Security alert windowed evaluation every 60 seconds
-  const securityAlertInterval = setInterval(() => {
-    try {
-      const securityAlerts = require('../services/securityAlerts');
-      securityAlerts.evaluateWindowed();
-    } catch (e) { log.error('Security alert windowed eval failed', e.message); }
-  }, 60000);
+  const securityAlertInterval = setInterval(_m('security-alert-windowed', () => {
+    const securityAlerts = require('../services/securityAlerts');
+    securityAlerts.evaluateWindowed();
+  }), 60000);
 
   // Purge ALL old data from every table — every hour
-  jobs.push(cron.schedule('5 * * * *', purgeAllOldData));
+  jobs.push(cron.schedule('5 * * * *', _m('purge-old-data', purgeAllOldData)));
 
   // VACUUM database to reclaim disk space — daily at 03:30
-  jobs.push(cron.schedule('30 3 * * *', vacuumDatabase));
+  jobs.push(cron.schedule('30 3 * * *', _m('vacuum-db', vacuumDatabase)));
 
   // Tracked certificates — re-parse + status check daily at 07:30
-  jobs.push(cron.schedule('30 7 * * *', () => {
-    try {
+  jobs.push(cron.schedule('30 7 * * *', _m('certificate-scan', () => {
       const db = getDb();
       const certService = require('../services/certificates');
       const fs2 = require('fs');
@@ -234,12 +241,10 @@ function startAll() {
         } catch { /* ignore */ }
         log.info('Certificate scan', { total: rows.length, expired, critical, warning });
       }
-    } catch (e) { log.error('Certificate scan failed', e.message); }
-  }));
+  })));
 
   // Secret rotations — evaluate statuses + emit security alerts daily at 07:00
-  jobs.push(cron.schedule('0 7 * * *', () => {
-    try {
+  jobs.push(cron.schedule('0 7 * * *', _m('secret-rotation-scan', () => {
       const db = getDb();
       const rows = db.prepare(`SELECT id, app_name, env_key, next_due_at, status FROM secret_rotations`).all();
       const now = Date.now();
@@ -261,12 +266,10 @@ function startAll() {
         } catch { /* audit may be disabled */ }
         log.info('Secret rotations scanned', { overdue, dueSoon, total: rows.length });
       }
-    } catch (e) { log.error('Secret rotation scan failed', e.message); }
-  }));
+  })));
 
   // Daily database backup at 02:00
-  jobs.push(cron.schedule('0 2 * * *', () => {
-    try {
+  jobs.push(cron.schedule('0 2 * * *', _m('daily-backup', () => {
       const db = getDb();
       const path = require('path');
       const fss = require('fs');
@@ -349,12 +352,10 @@ function startAll() {
           try { fss.unlinkSync(tempPath); } catch { /* cleanup */ }
         }
       }).catch(e => log.error('Daily backup failed', e.message));
-    } catch (e) { log.error('Daily backup error', e.message); }
-  }));
+  })));
 
   // Container schedule execution every minute (DB-backed with JSON fallback)
-  jobs.push(cron.schedule('* * * * *', async () => {
-    try {
+  jobs.push(cron.schedule('* * * * *', _m('schedule-executor', async () => {
       const now = new Date();
       let schedules = [];
 
@@ -403,18 +404,15 @@ function startAll() {
           log.error(`Schedule check error: ${e.message}`);
         }
       }
-    } catch (e) { log.error('Schedule check failed', e.message); }
-  }));
+  })));
 
   // S3 backup (if configured)
   if (config.s3 && config.s3.enabled) {
     const s3Schedule = config.s3.backupSchedule || '0 3 * * *';
-    jobs.push(cron.schedule(s3Schedule, async () => {
-      try {
-        const s3Backup = require('../services/s3-backup');
-        await s3Backup.uploadBackup();
-      } catch (e) { log.error('S3 backup failed', e.message); }
-    }));
+    jobs.push(cron.schedule(s3Schedule, _m('s3-backup', async () => {
+      const s3Backup = require('../services/s3-backup');
+      await s3Backup.uploadBackup();
+    })));
     log.info('S3 backup scheduled', { cron: s3Schedule });
   }
 
@@ -428,8 +426,7 @@ function startAll() {
   setTimeout(purgeAllOldData, 30000);
 
   // Sandbox TTL cleanup — check every 30 seconds for expired sandbox containers
-  _sandboxInterval = setInterval(async () => {
-    try {
+  _sandboxInterval = setInterval(_m('sandbox-ttl-sweep', async () => {
       const docker = require('../services/docker').getDocker(0);
       const containers = await docker.listContainers({ all: true, filters: { label: ['docker-dash.sandbox=true'] } });
       const now = Date.now();
@@ -463,8 +460,7 @@ function startAll() {
           try { require('../ws').broadcast('sandbox:expired', { name, image: c.Image }); } catch { }
         }
       }
-    } catch { /* Docker may be unreachable */ }
-  }, 30000);
+  }), 30000);
 
   log.info('Background jobs started');
 

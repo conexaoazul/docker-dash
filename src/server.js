@@ -25,6 +25,13 @@ const log = require('./utils/logger')('server');
 const app = express();
 
 // Security headers
+// Helmet defaults (v8+) already set HSTS (1yr + includeSubDomains), Referrer-Policy
+// no-referrer, COOP/CORP same-origin, X-Content-Type-Options nosniff, X-XSS-Protection 0.
+// Overrides below:
+//   - CSP: unsafe-eval kept for Chart.js (tracked in SECURITY.md as a known tradeoff);
+//     unsafe-inline for <style> only (no inline scripts — scriptSrcAttr 'none' blocks them).
+//   - frameguard: tightened from default SAMEORIGIN to DENY — Docker Dash is a standalone
+//     admin UI; no legitimate use case for iframe embedding.
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -38,7 +45,23 @@ app.use(helmet({
       upgradeInsecureRequests: null,
     },
   },
+  frameguard: { action: 'deny' },
 }));
+
+// Permissions-Policy — explicitly deny browser APIs we never use. Any future
+// feature that needs one of these (e.g. audio notifications) must opt-in here.
+app.use((req, res, next) => {
+  res.setHeader(
+    'Permissions-Policy',
+    'accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), ' +
+    'cross-origin-isolated=(), display-capture=(), document-domain=(), encrypted-media=(), ' +
+    'execution-while-not-rendered=(), execution-while-out-of-viewport=(), fullscreen=(self), ' +
+    'geolocation=(), gyroscope=(), keyboard-map=(), magnetometer=(), microphone=(), ' +
+    'midi=(), navigation-override=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), ' +
+    'screen-wake-lock=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()'
+  );
+  next();
+});
 
 app.use(express.json({ limit: '2mb' })); // Reduced from 10mb — increase per-route if needed
 
