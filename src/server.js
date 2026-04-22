@@ -407,7 +407,7 @@ async function start() {
 
 // ─── Graceful Shutdown ──────────────────────────────────────
 
-function shutdown(signal) {
+async function shutdown(signal) {
   log.info(`${signal} received, shutting down...`);
 
   const statsService = require('./services/stats');
@@ -421,6 +421,14 @@ function shutdown(signal) {
 
   const jobs = require('./jobs');
   jobs.stopAll();
+
+  // v7.0.0: release the leader lock in Redis (via Lua DEL-if-owned) and
+  // close Redis connections. Without this, a rolling restart in HA mode
+  // waits up to 30s (TTL) for another replica to take over instead of
+  // handover happening in milliseconds.
+  try { await require('./services/cluster').shutdown(); } catch (e) {
+    log.warn('Cluster shutdown failed (non-fatal)', { message: e.message });
+  }
 
   server.close(() => {
     closeDb();
