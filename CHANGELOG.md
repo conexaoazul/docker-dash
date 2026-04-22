@@ -2,6 +2,51 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.14.2] - 2026-04-22 — "UX polish — token hygiene + two latent CSS bugs fixed"
+
+Post-v6.14.0 cross-release UX audit surfaced 11 inconsistencies accumulated across v6.11.x–v6.14.0. This release ships the 7 trivial ones (all S-class per the audit); the 3 medium and 1 large items need a design-system decision first and are deferred.
+
+### Fixed — Two latent CSS bugs
+
+**Neither was "cosmetic preference" — both were working-by-accident or visibly broken.**
+
+- **`var(--bg-dim)` was referenced 8 times but never declared** ([public/css/app.css:15-54](public/css/app.css#L15-L54) before this release). Fell back to transparent. The Translate progress container, missing-keys table header, Review table header, egress table header, and egress detail row were all rendering **without their intended dark-row shading** since v6.11.0 / v6.7. Declared as alias: `--bg-dim: var(--surface2)`. 8 call sites immediately restore correct rendering.
+- **`var(--text-muted)` was referenced 37 times but never declared.** Worked by accident — CSS inheritance happened to pick up a dim-grey from the parent `color`. Would have broken visibly on any theme swap (e.g. enterprise mode or light theme). Declared as alias: `--text-muted: var(--text-dim)`. Both dark and light theme blocks updated.
+
+### Changed — Token hygiene
+
+- **Tailwind-style reds and yellows replaced with design tokens** ([public/js/pages/system.js](public/js/pages/system.js)). The Translations tab + older Egress panel used `#ef4444` (14 occurrences) and `#f59e0b` (4 occurrences) in inline styles. Replaced all 18 with `var(--red)` / `var(--yellow)`. Side-by-side the Multi-Host host-offline card (which uses `--red` = `#f85149`) and the Translations Usage progress bar were showing visibly different shades of red. Now they match.
+- **`#334155` slate-700 fallback replaced with `var(--text-dim)`** ([public/js/pages/multihost.js](public/js/pages/multihost.js) — 4 occurrences). Only surfaced when the backend omits a `color` field on a platform / cloud badge, but when it did it wouldn't match the theme. Now theme-aware.
+- **"Latest" pill in What's New uses `.badge-running`** instead of inline `style="background:var(--green);color:#fff"` ([public/js/pages/whatsnew.js:1227](public/js/pages/whatsnew.js#L1227)). Same visual result, but now participates in the same class-based styling as every other green badge.
+- **Google + DeepL brand colours extracted to a named constant** ([public/js/pages/system.js](public/js/pages/system.js) — in `_renderTranslationsProviders`). Was inline in a template literal (`#4285f4` / `#0f2b46`). Now `BRAND_COLOR = { google, deepl }` — still hex because brand colours are vendor identity, not theme tokens (explicitly kept out of `:root` to not confuse a future dark/light swap).
+
+### Added — `.empty-msg.is-error` modifier
+
+- New class in [public/css/app.css:717](public/css/app.css#L717): `.empty-msg.is-error { color: var(--red); }`. Replaces the 8 inline `style="color:var(--red)"` repetitions in the `.empty-msg` elements ([public/js/pages/system.js](public/js/pages/system.js)). Behaves identically; now uniform.
+
+### Deferred (explicit)
+
+The 4 non-S items from the audit are **intentionally not in this release**:
+- **Provider-card inputs → `.form-control`** (M, 30-60 min): 8 inline-styled inputs in Translations panels. Inputs look identical today; migration is hygiene.
+- **`_platformPill(data)` helper in multihost.js** (M, 30 min): platform + cloud pills are hand-copied templates ~90 chars each. Pure refactor, no user-visible effect. Defer until next multi-host feature touches the same code.
+- **`.pill-tag` shared class** (M, 30 min): NAS/CLOUD/VM mini-tags have their own style (`padding:1px 5px;…`). Low-value standalone; couple with the helper above.
+- **Unified pill component** (L, half-day): four different pill heights/radii/fonts coexist on the Multi-Host card. Needs a design decision ("which of the four is canonical?") before refactoring. Prerequisite: author `DESIGN.md` (which doesn't exist — the `:root` block is the only source of truth).
+
+These are tracked as post-audit items — noted in the audit artifact, not BACKLOG (they're not "known issues" users trigger, they're drift to clean up on the next design-system pass).
+
+### Tests
+
+- **740 passing + 4 skipped / 50 suites** (unchanged — pure frontend changes, test suite doesn't exercise CSS).
+
+### Files touched
+
+- `public/css/app.css` — declared `--bg-dim` and `--text-muted` in both theme blocks; added `.empty-msg.is-error` class.
+- `public/js/pages/system.js` — 18 Tailwind hex → tokens, `.is-error` class adoption, brand-colour constant.
+- `public/js/pages/multihost.js` — slate fallback → token (4x).
+- `public/js/pages/whatsnew.js` — `.badge-running` class on "Latest" pill.
+
+---
+
 ## [6.14.1] - 2026-04-22 — "asyncHandler refactor (+ accidental info-leak fix)"
 
 Post-v6.14.0 cleanup promised in the previous release notes: consolidate the try/catch + `res.status(500).json({ error: err.message })` boilerplate into a single `asyncHandler(fn)` wrapper. 175 handlers migrated across 21 route files. **Net diff: −521 LOC.**

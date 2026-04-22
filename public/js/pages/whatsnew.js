@@ -10,6 +10,19 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.14.2',
+      date: '2026-04-22',
+      title: 'UX polish — two latent CSS bugs fixed + token hygiene',
+      changes: [
+        { type: 'fix', text: 'Latent CSS bug: var(--bg-dim) was referenced in 8 places but never declared. Translate progress container, missing-keys table header, Review table header, egress table header and detail row were all rendering WITHOUT their intended dark-row shading since v6.11.0. Declared as alias of var(--surface2). All 8 sites immediately look correct.' },
+        { type: 'fix', text: 'Latent CSS bug: var(--text-muted) was referenced 37 times across 7 pages but never declared. Worked by accident (CSS inheritance happened to pick up a dim grey). Would have broken visibly on any theme swap. Declared as alias of var(--text-dim).' },
+        { type: 'improvement', text: 'Two different reds and two different yellows unified. The Translations tab and Egress panel used Tailwind-style #ef4444 / #f59e0b (18 occurrences). Replaced all with var(--red) / var(--yellow). Side-by-side inconsistencies with the Multi-Host offline-host card are gone.' },
+        { type: 'improvement', text: '#334155 slate fallback on platform/cloud badges replaced with var(--text-dim) — now theme-aware if backend ever omits a color field.' },
+        { type: 'improvement', text: 'New .empty-msg.is-error class replaces inline color:var(--red) on 8 empty-state elements in system.js. "Latest" pill in What\'s New now uses .badge-running class instead of inline style. Google + DeepL brand colors extracted to a BRAND_COLOR constant (still hex because brand identity ≠ theme token).' },
+        { type: 'improvement', text: 'Based on a cross-release UX audit (11 inconsistencies total: 4 High, 3 Medium, 4 Low/Trivial). This release ships the 7 S-items (~1h effort). M + L items deferred pending a DESIGN.md design-system pass — they have no user-visible impact today and need a design decision first.' },
+      ],
+    },
+    {
       version: '6.14.1',
       date: '2026-04-22',
       title: 'asyncHandler refactor + accidental info-leak fix',
@@ -1224,7 +1237,7 @@ const WhatsNewPage = {
               ${Utils.escapeHtml(release.title)}
             </h3>
             <span class="text-sm text-muted" style="margin-left:auto">${Utils.escapeHtml(release.date)}</span>
-            ${isLatest ? '<span class="badge" style="background:var(--green);color:#fff;font-size:10px">Latest</span>' : ''}
+            ${isLatest ? '<span class="badge badge-running" style="font-size:10px">Latest</span>' : ''}
           </div>
           <div class="card-body">${sections}</div>
         </div>

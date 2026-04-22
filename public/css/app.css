@@ -18,10 +18,12 @@
   --surface:        #0d1117;
   --surface2:       #161b22;
   --surface3:       #1c2333;
+  --bg-dim:         var(--surface2);              /* alias: table-header + subtle-row bg */
   --border:         rgba(48, 54, 61, 0.6);
   --border-bright:  rgba(56, 68, 84, 0.8);
   --text:           #b1bac4;
   --text-dim:       #6e7681;
+  --text-muted:     var(--text-dim);              /* alias used in inline styles across pages */
   --text-bright:    #e6edf3;
   --text-white:     #f0f6fc;
   --accent:         #388bfd;
@@ -712,6 +714,7 @@ tr.clickable:hover td { color: var(--text-bright); }
 .data-table.compact td { padding: 6px 10px; font-size: 12px; }
 .env-table-wrap { max-height: 300px; overflow-y: auto; }
 .empty-msg { text-align: center; color: var(--text-dim); padding: 48px 24px; font-size: 14px; }
+.empty-msg.is-error { color: var(--red); }
 .empty-msg i { display: block; font-size: 32px; margin-bottom: 14px; opacity: 0.3; }
 .page-loading { text-align: center; color: var(--text-dim); padding: 72px; font-size: 14px; }
 .page-loading i { margin-right: 10px; }
@@ -1240,8 +1243,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 [data-theme="light"] {
   --bg: #f5f6fa; --bg-gradient: linear-gradient(135deg, #f5f6fa 0%, #eef0f5 50%, #f0f1f5 100%);
   --surface: #ffffff; --surface2: #f8f9fb; --surface3: #eef0f5;
+  --bg-dim: var(--surface2);
   --border: rgba(200, 210, 220, 0.6); --border-bright: rgba(180, 190, 200, 0.8);
-  --text: #3d4852; --text-dim: #64748b; --text-bright: #1a202c; --text-white: #0d1117;
+  --text: #3d4852; --text-dim: #64748b; --text-muted: var(--text-dim);
+  --text-bright: #1a202c; --text-white: #0d1117;
   --accent: #2563eb; --accent-hover: #3b82f6; --accent-dim: rgba(37, 99, 235, 0.08);
   --green: #16a34a; --green-dim: rgba(22, 163, 74, 0.08);
   --red: #dc2626; --red-dim: rgba(220, 38, 38, 0.08);

@@ -3635,7 +3635,7 @@ DB_PASS=secret"></textarea>
         this._showSecretsWizard();
       });
     } catch (err) {
-      el.innerHTML = '<div class="empty-msg" style="color:var(--red)">Error: ' + err.message + '</div>';
+      el.innerHTML = '<div class="empty-msg is-error">Error: ' + err.message + '</div>';
     }
 
     // Remediate Wizard entry points on Secrets Audit rows
@@ -4036,7 +4036,7 @@ DB_PASS=secret"></textarea>
         } catch (err) { Toast.error(err.message); }
       }));
     } catch (err) {
-      el.innerHTML = '<div class="empty-msg" style="color:var(--red)">Error: ' + err.message + '</div>';
+      el.innerHTML = '<div class="empty-msg is-error">Error: ' + err.message + '</div>';
     }
   },
 
@@ -4190,7 +4190,7 @@ DB_PASS=secret"></textarea>
         catch (err) { Toast.error(err.message); }
       }));
     } catch (err) {
-      el.innerHTML = '<div class="empty-msg" style="color:var(--red)">Error: ' + err.message + '</div>';
+      el.innerHTML = '<div class="empty-msg is-error">Error: ' + err.message + '</div>';
     }
   },
 
@@ -4814,7 +4814,7 @@ DB_PASS=secret"></textarea>
     const presets = presetsData.presets || [];
 
     const badge = (sev) => {
-      const colors = { critical: '#ef4444', warning: '#f59e0b', info: '#64748b' };
+      const colors = { critical: 'var(--red)', warning: 'var(--yellow)', info: '#64748b' };
       return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:#fff;background:${colors[sev] || '#64748b'}">${sev.toUpperCase()}</span>`;
     };
 
@@ -4829,7 +4829,7 @@ DB_PASS=secret"></textarea>
         : r.findings.length > 0 ? 'info' : null;
 
       const verdict = r.canReachInternet
-        ? (r.canReachIMDS ? '<span style="color:#ef4444">Internet + IMDS</span>' : '<span style="color:#f59e0b">Internet</span>')
+        ? (r.canReachIMDS ? '<span style="color:var(--red)">Internet + IMDS</span>' : '<span style="color:var(--yellow)">Internet</span>')
         : '<span style="color:#22c55e">Isolated</span>';
 
       const findingsHtml = r.findings.length === 0
@@ -4876,7 +4876,7 @@ DB_PASS=secret"></textarea>
           <td><code style="font-size:12px">${Utils.escapeHtml(r.networkMode || 'default')}</code></td>
           <td>${netsHtml}</td>
           <td>${verdict}</td>
-          <td style="text-align:right"><strong style="color:${r.score >= 80 ? '#22c55e' : r.score >= 60 ? '#f59e0b' : '#ef4444'}">${r.score}</strong></td>
+          <td style="text-align:right"><strong style="color:${r.score >= 80 ? '#22c55e' : r.score >= 60 ? 'var(--yellow)' : 'var(--red)'}">${r.score}</strong></td>
           <td>${filterCell}</td>
           <td style="text-align:center"><i class="fas fa-chevron-down egress-chev" style="color:var(--text-dim)"></i></td>
         </tr>
@@ -5016,7 +5016,7 @@ DB_PASS=secret"></textarea>
                 ${groups.map(g => `
                   <tr style="border-bottom:1px solid var(--surface2)">
                     <td style="padding:5px 8px;font-family:var(--mono)"><strong>${Utils.escapeHtml(g.hostname)}</strong></td>
-                    <td style="padding:5px 8px;text-align:right;color:#ef4444;font-weight:600">${g.count}</td>
+                    <td style="padding:5px 8px;text-align:right;color:var(--red);font-weight:600">${g.count}</td>
                     <td style="padding:5px 8px;color:var(--text-dim)">${g.last_seen}</td>
                     <td style="padding:5px 8px;font-family:var(--mono)">${Utils.escapeHtml(g.ports || '')}</td>
                     <td style="padding:5px 8px;text-align:right">
@@ -5031,7 +5031,7 @@ DB_PASS=secret"></textarea>
           + (entries.length === 0
             ? `<div style="color:var(--text-dim);font-size:12px;padding:8px"><i class="fas fa-shield-check" style="margin-right:6px"></i>No deny events yet.</div>`
             : `<div style="max-height:200px;overflow-y:auto;font-family:var(--mono);font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px">
-                ${entries.map(e => `<div><span style="color:var(--text-dim)">${e.blocked_at}</span> <strong>${Utils.escapeHtml(e.hostname)}</strong>:<span style="color:var(--accent)">${e.port}</span> <span style="color:#ef4444">[${Utils.escapeHtml(e.reason)}]</span></div>`).join('')}
+                ${entries.map(e => `<div><span style="color:var(--text-dim)">${e.blocked_at}</span> <strong>${Utils.escapeHtml(e.hostname)}</strong>:<span style="color:var(--accent)">${e.port}</span> <span style="color:var(--red)">[${Utils.escapeHtml(e.reason)}]</span></div>`).join('')}
               </div>`);
       }
 
@@ -5057,7 +5057,7 @@ DB_PASS=secret"></textarea>
         } catch (err) { Toast.error(err.message); }
       }));
     } catch (e) {
-      slotEl.innerHTML = `<div style="color:#ef4444;font-size:12px">Failed to load deny log: ${Utils.escapeHtml(e.message)}</div>`;
+      slotEl.innerHTML = `<div style="color:var(--red);font-size:12px">Failed to load deny log: ${Utils.escapeHtml(e.message)}</div>`;
     }
   },
 
@@ -5065,7 +5065,7 @@ DB_PASS=secret"></textarea>
     const btn = (v, label) => `<button class="btn btn-xs ${v === view ? 'btn-primary' : 'btn-secondary'} egress-blocklog-view-btn" data-view="${v}">${label}</button>`;
     return `
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <i class="fas fa-ban" style="color:#ef4444"></i>
+        <i class="fas fa-ban" style="color:var(--red)"></i>
         <strong style="font-size:12px">Deny log</strong>
         <span style="color:var(--text-dim);font-size:11px">(${count} ${view === 'grouped' ? 'hosts' : 'events'})</span>
         <div style="flex:1"></div>
@@ -5160,7 +5160,7 @@ DB_PASS=secret"></textarea>
           if (policy.preset === 'custom' || policy.preset === 'audit-only') {
             mc.querySelector('#ef-allowlist').value = (policy.allowlist || []).join('\n');
           }
-        } catch (e) { setStatus('Could not load policy: ' + e.message, '#ef4444'); }
+        } catch (e) { setStatus('Could not load policy: ' + e.message, 'var(--red)'); }
       })();
     }
 
@@ -5191,7 +5191,7 @@ DB_PASS=secret"></textarea>
         Toast.success('Egress filter applied');
         setTimeout(() => { Modal.close(); onSaved && onSaved(); }, 600);
       } catch (e) {
-        setStatus('Failed: ' + e.message, '#ef4444');
+        setStatus('Failed: ' + e.message, 'var(--red)');
         Toast.error(e.message);
       }
     };
@@ -5207,7 +5207,7 @@ DB_PASS=secret"></textarea>
           Toast.success('Egress filter unapplied');
           setTimeout(() => { Modal.close(); onSaved && onSaved(); }, 600);
         } catch (e) {
-          setStatus('Failed: ' + e.message, '#ef4444');
+          setStatus('Failed: ' + e.message, 'var(--red)');
           Toast.error(e.message);
         }
       });
@@ -5258,6 +5258,9 @@ DB_PASS=secret"></textarea>
 
   async _renderTranslationsProviders(el) {
     el.innerHTML = `<div class="text-muted text-sm"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Loading…</div>`;
+    // Brand colours — kept hex because these are vendor brand identities,
+    // not theme tokens. Don't move to :root (they would confuse a dark/light swap).
+    const BRAND_COLOR = { google: '#4285f4', deepl: '#0f2b46' };
     try {
       const { providers } = await Api.translationsProviders();
       const byName = Object.fromEntries(providers.map(p => [p.provider, p]));
@@ -5265,7 +5268,7 @@ DB_PASS=secret"></textarea>
         const p = byName[providerName];
         return `
           <div class="card" style="margin:0">
-            <div class="card-header"><h3 style="margin:0"><i class="fas ${providerName === 'google' ? 'fa-google' : 'fa-language'}" style="margin-right:8px;color:${providerName === 'google' ? '#4285f4' : '#0f2b46'}"></i>${displayName}</h3>
+            <div class="card-header"><h3 style="margin:0"><i class="fas ${providerName === 'google' ? 'fa-google' : 'fa-language'}" style="margin-right:8px;color:${BRAND_COLOR[providerName] || 'var(--text-dim)'}"></i>${displayName}</h3>
               ${p ? `<span class="badge ${p.is_active ? 'badge-running' : 'badge-stopped'}" style="font-size:10px">${p.is_active ? 'active' : 'disabled'}</span>` : '<span class="badge badge-warning" style="font-size:10px">not configured</span>'}
             </div>
             <div class="card-body">
@@ -5305,12 +5308,12 @@ DB_PASS=secret"></textarea>
         const apiKey = el.querySelector(`.tprov-key[data-provider="${provider}"]`).value.trim();
         const monthlyLimit = parseInt(el.querySelector(`.tprov-limit[data-provider="${provider}"]`).value, 10) || 500000;
         const notes = el.querySelector(`.tprov-notes[data-provider="${provider}"]`).value.trim();
-        if (!apiKey) { setStatus(provider, 'API key required', '#ef4444'); return; }
+        if (!apiKey) { setStatus(provider, 'API key required', 'var(--red)'); return; }
         try {
           await Api.translationsUpsertProvider({ provider, apiKey, monthlyLimit, notes });
           Toast.success(`${provider} provider saved`);
           this._renderTranslationsProviders(el);
-        } catch (err) { setStatus(provider, 'Failed: ' + err.message, '#ef4444'); }
+        } catch (err) { setStatus(provider, 'Failed: ' + err.message, 'var(--red)'); }
       }));
       el.querySelectorAll('.tprov-test').forEach(b => b.addEventListener('click', async () => {
         const provider = b.closest('.card').querySelector('.tprov-status').dataset.provider;
@@ -5318,7 +5321,7 @@ DB_PASS=secret"></textarea>
         try {
           const r = await Api.translationsTestProvider(parseInt(b.dataset.id, 10));
           setStatus(provider, '<i class="fas fa-check-circle" style="color:var(--green);margin-right:4px"></i>Key valid', 'var(--green)');
-        } catch (err) { setStatus(provider, '<i class="fas fa-times-circle" style="color:#ef4444;margin-right:4px"></i>' + Utils.escapeHtml(err.message), '#ef4444'); }
+        } catch (err) { setStatus(provider, '<i class="fas fa-times-circle" style="color:var(--red);margin-right:4px"></i>' + Utils.escapeHtml(err.message), 'var(--red)'); }
       }));
       el.querySelectorAll('.tprov-toggle').forEach(b => b.addEventListener('click', async () => {
         try {
@@ -5334,7 +5337,7 @@ DB_PASS=secret"></textarea>
         } catch (err) { Toast.error(err.message); }
       }));
     } catch (err) {
-      el.innerHTML = `<div class="empty-msg" style="color:var(--red)">Failed: ${Utils.escapeHtml(err.message)}</div>`;
+      el.innerHTML = `<div class="empty-msg is-error">Failed: ${Utils.escapeHtml(err.message)}</div>`;
     }
   },
 
@@ -5349,7 +5352,7 @@ DB_PASS=secret"></textarea>
       const bar = (u) => {
         const warn = u.percent >= 80;
         const danger = u.percent >= 100;
-        const color = danger ? '#ef4444' : warn ? '#f59e0b' : 'var(--accent)';
+        const color = danger ? 'var(--red)' : warn ? 'var(--yellow)' : 'var(--accent)';
         return `
           <div class="card" style="margin:0">
             <div class="card-header"><h3 style="margin:0">${Utils.escapeHtml(u.provider)}</h3>
@@ -5377,7 +5380,7 @@ DB_PASS=secret"></textarea>
           ${usage.map(bar).join('')}
         </div>`;
     } catch (err) {
-      el.innerHTML = `<div class="empty-msg" style="color:var(--red)">Failed: ${Utils.escapeHtml(err.message)}</div>`;
+      el.innerHTML = `<div class="empty-msg is-error">Failed: ${Utils.escapeHtml(err.message)}</div>`;
     }
   },
 
@@ -5550,10 +5553,10 @@ DB_PASS=secret"></textarea>
               btn.innerHTML = '<i class="fas fa-language" style="margin-right:4px"></i>Translate selected';
             }
           });
-        } catch (err) { panel.innerHTML = `<div class="empty-msg" style="color:var(--red)">Failed: ${Utils.escapeHtml(err.message)}</div>`; }
+        } catch (err) { panel.innerHTML = `<div class="empty-msg is-error">Failed: ${Utils.escapeHtml(err.message)}</div>`; }
       });
     } catch (err) {
-      el.innerHTML = `<div class="empty-msg" style="color:var(--red)">Failed: ${Utils.escapeHtml(err.message)}</div>`;
+      el.innerHTML = `<div class="empty-msg is-error">Failed: ${Utils.escapeHtml(err.message)}</div>`;
     }
   },
 
@@ -5641,7 +5644,7 @@ DB_PASS=secret"></textarea>
         catch (err) { Toast.error(err.message); }
       }));
     } catch (err) {
-      el.innerHTML = `<div class="empty-msg" style="color:var(--red)">Failed: ${Utils.escapeHtml(err.message)}</div>`;
+      el.innerHTML = `<div class="empty-msg is-error">Failed: ${Utils.escapeHtml(err.message)}</div>`;
     }
   },
 

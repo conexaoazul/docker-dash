@@ -422,14 +422,14 @@ const MultiHostPage = {
           ${(host.info.platform && host.info.platform.platform !== 'linux') || host.info.cloud ? `
           <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px">
             ${host.info.platform && host.info.platform.platform !== 'linux' ? `
-            <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:12px;background:${host.info.platform.color || '#334155'}22;border:1px solid ${host.info.platform.color || '#334155'}66;font-size:11px;font-weight:600" title="${Utils.escapeHtml(host.info.platform.notes || '')}">
-              <i class="${Utils.escapeHtml(host.info.platform.iconClass || 'fab fa-linux')}" style="color:${host.info.platform.color || '#334155'}"></i>
+            <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:12px;background:${host.info.platform.color || 'var(--text-dim)'}22;border:1px solid ${host.info.platform.color || 'var(--text-dim)'}66;font-size:11px;font-weight:600" title="${Utils.escapeHtml(host.info.platform.notes || '')}">
+              <i class="${Utils.escapeHtml(host.info.platform.iconClass || 'fab fa-linux')}" style="color:${host.info.platform.color || 'var(--text-dim)'}"></i>
               ${Utils.escapeHtml(host.info.platform.label)}${host.info.platform.version ? ` <span style="color:var(--text-dim);font-weight:400">${Utils.escapeHtml(host.info.platform.version)}</span>` : ''}
               ${host.info.platform.category === 'nas' ? '<span style="padding:1px 5px;background:rgba(0,0,0,0.2);border-radius:3px;font-size:9px;margin-left:2px">NAS</span>' : ''}
             </span>` : ''}
             ${host.info.cloud ? `
-            <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:12px;background:${host.info.cloud.color || '#334155'}22;border:1px solid ${host.info.cloud.color || '#334155'}66;font-size:11px;font-weight:600" title="${Utils.escapeHtml((host.info.cloud.raw && host.info.cloud.raw.sys_vendor ? 'DMI sys_vendor: ' + host.info.cloud.raw.sys_vendor : ''))}">
-              <i class="${Utils.escapeHtml(host.info.cloud.iconClass || 'fas fa-cloud')}" style="color:${host.info.cloud.color || '#334155'}"></i>
+            <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:12px;background:${host.info.cloud.color || 'var(--text-dim)'}22;border:1px solid ${host.info.cloud.color || 'var(--text-dim)'}66;font-size:11px;font-weight:600" title="${Utils.escapeHtml((host.info.cloud.raw && host.info.cloud.raw.sys_vendor ? 'DMI sys_vendor: ' + host.info.cloud.raw.sys_vendor : ''))}">
+              <i class="${Utils.escapeHtml(host.info.cloud.iconClass || 'fas fa-cloud')}" style="color:${host.info.cloud.color || 'var(--text-dim)'}"></i>
               ${Utils.escapeHtml(host.info.cloud.label)}
               ${host.info.cloud.vendor !== 'baremetal' ? '<span style="padding:1px 5px;background:rgba(0,0,0,0.2);border-radius:3px;font-size:9px;margin-left:2px">' + (['vmware','virtualbox','kvm','xen','parallels'].includes(host.info.cloud.vendor) ? 'VM' : 'CLOUD') + '</span>' : ''}
             </span>` : ''}
