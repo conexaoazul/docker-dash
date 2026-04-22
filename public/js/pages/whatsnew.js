@@ -10,6 +10,19 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.17.1',
+      date: '2026-04-22',
+      title: 'HA Phase 3 — WebSocket pub/sub via Redis',
+      changes: [
+        { type: 'feature', text: 'Cross-replica WS broadcasts — user on replica A now receives events emitted by replica B (alerts, container state, log lines). Uses Redis pub/sub on a single channel ddash:pubsub. Before: silent event delivery gap in HA mode. Now: sub-millisecond cross-replica delivery on a healthy localhost Redis.' },
+        { type: 'improvement', text: 'Loop-safe by nodeId filter — publisher replica receives its own echo back and discards it. Local delivery still happens exactly once via direct _localBroadcast in the broadcast() call itself; cross-replica arrives via the subscriber callback.' },
+        { type: 'improvement', text: 'Separate subscriber Redis client (ioredis requires it — subscribed connections can\'t issue other commands). Lazy-connects on first subscribe. Standalone mode: still completely no-op, zero Redis connection.' },
+        { type: 'improvement', text: 'Fail-safe: best-effort publish, malformed envelopes dropped silently, subscribe errors logged but don\'t crash WS. Availability > strict delivery.' },
+        { type: 'improvement', text: 'Tests: 866 → 871 (+5 real pub/sub behavior tests via ioredis-mock, replacing 1 stub assertion). Covers self-echo filtering, routing, fan-out, malformed-envelope resilience.' },
+        { type: 'fix', text: '⚠️ DO NOT run multi-replica in HA mode yet. This release makes the situation WORSE than v6.17.0 because WS events now propagate cross-replica, so duplicate Docker event streams (one per replica) would deliver every event twice. Fixed in v6.17.2 via leader election on the event stream.' },
+      ],
+    },
+    {
       version: '6.17.0',
       date: '2026-04-22',
       title: 'HA mode preview — optional Redis-backed rate limiter + cluster foundation',

@@ -8,8 +8,8 @@
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/releases/latest"><img src="https://img.shields.io/github/v/release/bogdanpricop/docker-dash?color=blue" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
-    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-866%20passing%20(100%25)-brightgreen" alt="Tests"></a>
-    <img src="https://img.shields.io/badge/version-6.17.0-blue" alt="Version">
+    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-871%20passing%20(100%25)-brightgreen" alt="Tests"></a>
+    <img src="https://img.shields.io/badge/version-6.17.1-blue" alt="Version">
     <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.7%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
     <img src="https://img.shields.io/badge/Docker-~80MB-blue" alt="Image Size">
@@ -26,9 +26,9 @@
   </p>
 </p>
 
-**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.17.0**
+**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.17.1**
 
-**New in v6.17.0:** Optional HA mode via `DD_MODE=ha` + Redis. Preview only — Redis-backed rate limiter + cluster abstraction shipped; WS pub/sub + cron leader election land in v7.0. See [docs/features/ha-mode.md](docs/features/ha-mode.md).
+**New in v6.17.x:** Optional HA mode via `DD_MODE=ha` + Redis. v6.17.0 shipped cluster abstraction + Redis rate limiter. **v6.17.1 adds cross-replica WS broadcasts via Redis pub/sub.** Cron leader election lands in v6.17.2 (real multi-replica safe). See [docs/features/ha-mode.md](docs/features/ha-mode.md).
 
 ## Screenshots
 

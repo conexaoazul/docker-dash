@@ -8,6 +8,7 @@ const { dockerEvents } = require('../services/misc');
 const config = require('../config');
 const log = require('../utils/logger')('ws');
 const { tryParseJson } = require('../utils/helpers');
+const cluster = require('../services/cluster');
 
 class WsServer {
   constructor() {
@@ -141,10 +142,24 @@ class WsServer {
     // Set up alert notifier
     alertService.setNotifier((type, data) => this.broadcast(type, data));
 
+    // v6.17.1 Phase 3 — subscribe to cross-replica WS broadcasts from other
+    // HA replicas. In standalone mode this is a no-op. The cluster module
+    // filters out self-echoes via `nodeId`, so local delivery still happens
+    // exactly once (via the direct `_localBroadcast` call in our own
+    // `broadcast()`); only messages from OTHER replicas arrive here.
+    cluster.subscribe('ws:broadcast', (payload) => {
+      if (!payload || !payload.type) return;
+      if (payload.kind === 'all') {
+        this._localBroadcastAll(payload.type, payload.data);
+      } else {
+        this._localBroadcast(payload.type, payload.data, payload.channel || null);
+      }
+    });
+
     // Start Docker events listeners for all active hosts
     this._startAllEventStreams();
 
-    log.info('WebSocket server attached');
+    log.info('WebSocket server attached', { mode: cluster.isHa() ? 'ha' : 'standalone', nodeId: cluster.nodeId() });
   }
 
   async _handleMessage(ws, raw) {
@@ -256,8 +271,24 @@ class WsServer {
     }
   }
 
-  /** Broadcast to all clients subscribed to a channel or globally */
+  /** Broadcast to all clients subscribed to a channel or globally.
+   *  v6.17.1: in HA mode, also publishes to Redis pub/sub so other replicas
+   *  relay to their local clients. Loop-safe via `nodeId` filter in cluster.js. */
   broadcast(type, data, channel = null) {
+    // Cross-replica publish (best-effort, fire-and-forget in HA; no-op standalone)
+    cluster.publish('ws:broadcast', { kind: 'channel', type, data, channel }).catch(() => {});
+    this._localBroadcast(type, data, channel);
+  }
+
+  /** Broadcast to all authenticated clients. HA-aware like `broadcast`. */
+  broadcastAll(type, data) {
+    cluster.publish('ws:broadcast', { kind: 'all', type, data }).catch(() => {});
+    this._localBroadcastAll(type, data);
+  }
+
+  /** Local-only delivery for a channel broadcast (called directly on publish,
+   *  and indirectly by the cluster subscriber when another replica broadcasts). */
+  _localBroadcast(type, data, channel = null) {
     const message = JSON.stringify({ type, data, channel, time: Date.now() });
     for (const [ws, client] of this.clients) {
       if (ws.readyState !== 1) continue; // OPEN
@@ -266,8 +297,8 @@ class WsServer {
     }
   }
 
-  /** Broadcast to all authenticated clients */
-  broadcastAll(type, data) {
+  /** Local-only delivery for broadcastAll. */
+  _localBroadcastAll(type, data) {
     const message = JSON.stringify({ type, data, time: Date.now() });
     for (const [ws] of this.clients) {
       if (ws.readyState !== 1) continue;

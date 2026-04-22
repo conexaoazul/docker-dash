@@ -123,16 +123,96 @@ describe('cluster — HA mode (DD_MODE=ha, ioredis-mock)', () => {
     expect(allowedY.allowed).toBe(true);
   });
 
-  it('isLeader() returns true in HA v6.17.0 (election stubbed until v7.0.0-rc.1)', async () => {
-    // Documented limitation of the v6.17.0 preview — every node claims leader.
-    // Users are instructed NOT to run multi-replica in HA mode yet.
+  it('isLeader() returns true in HA v6.17.1 (election stubbed until v7.0.0-rc.1)', async () => {
+    // Documented limitation — every node claims leader. Users are instructed
+    // NOT to run multi-replica in HA mode until leader election ships.
     expect(await cluster.isLeader()).toBe(true);
   });
 
-  it('publish/subscribe are still stubs in v6.17.0', async () => {
+  // ─── Phase 3: pub/sub (v6.17.1) ─────────────────────────────────
+
+  it('publish sends an envelope with nodeId to the Redis pub/sub channel', async () => {
+    const r = await cluster.redis();
+    const publishSpy = jest.spyOn(r, 'publish');
+    await cluster.publish('ws:broadcast', { kind: 'all', type: 'test', data: 42 });
+    expect(publishSpy).toHaveBeenCalled();
+    const call = publishSpy.mock.calls[publishSpy.mock.calls.length - 1];
+    expect(call[0]).toBe('ddash:pubsub');
+    const envelope = JSON.parse(call[1]);
+    expect(envelope.nodeId).toBe(cluster.nodeId());
+    expect(envelope.appChannel).toBe('ws:broadcast');
+    expect(envelope.payload).toEqual({ kind: 'all', type: 'test', data: 42 });
+    publishSpy.mockRestore();
+  });
+
+  it('subscribe filters out self-published messages', async () => {
     let received = null;
-    cluster.subscribe('test-ha-channel', (p) => { received = p; });
-    await cluster.publish('test-ha-channel', { hello: 'ha' });
+    cluster.subscribe('self-loop-test', (p) => { received = p; });
+    // Wait for subscriber connection to settle (ioredis-mock is synchronous
+    // but the subscribe()+publish() cycle still needs a microtask tick)
+    await new Promise(r => setTimeout(r, 50));
+    await cluster.publish('self-loop-test', { test: 'self' });
+    await new Promise(r => setTimeout(r, 100));
+    expect(received).toBeNull();
+  });
+
+  it('subscribe receives messages from OTHER node IDs', async () => {
+    let received = null;
+    cluster.subscribe('foreign-test', (p) => { received = p; });
+    await new Promise(r => setTimeout(r, 50));
+    // Simulate a foreign-node publish by constructing the envelope directly
+    // with a different nodeId and publishing via our own Redis client.
+    const r = await cluster.redis();
+    const foreignEnvelope = JSON.stringify({
+      nodeId: 'foreign-node-deadbeef',
+      appChannel: 'foreign-test',
+      payload: { test: 'foreign' },
+    });
+    await r.publish('ddash:pubsub', foreignEnvelope);
+    await new Promise(r => setTimeout(r, 100));
+    expect(received).toEqual({ test: 'foreign' });
+  });
+
+  it('subscribe routes to the correct app channel (ignores others)', async () => {
+    let chanA = null;
+    let chanB = null;
+    cluster.subscribe('chan-a', (p) => { chanA = p; });
+    cluster.subscribe('chan-b', (p) => { chanB = p; });
+    await new Promise(r => setTimeout(r, 50));
+    const r = await cluster.redis();
+    await r.publish('ddash:pubsub', JSON.stringify({
+      nodeId: 'other', appChannel: 'chan-a', payload: { msg: 'A' },
+    }));
+    await r.publish('ddash:pubsub', JSON.stringify({
+      nodeId: 'other', appChannel: 'chan-b', payload: { msg: 'B' },
+    }));
+    await new Promise(r => setTimeout(r, 100));
+    expect(chanA).toEqual({ msg: 'A' });
+    expect(chanB).toEqual({ msg: 'B' });
+  });
+
+  it('multiple handlers on the same channel all fire', async () => {
+    const calls = [];
+    cluster.subscribe('multi-handler-test', (p) => calls.push(['h1', p]));
+    cluster.subscribe('multi-handler-test', (p) => calls.push(['h2', p]));
+    await new Promise(r => setTimeout(r, 50));
+    const r = await cluster.redis();
+    await r.publish('ddash:pubsub', JSON.stringify({
+      nodeId: 'other', appChannel: 'multi-handler-test', payload: { n: 1 },
+    }));
+    await new Promise(r => setTimeout(r, 100));
+    expect(calls).toHaveLength(2);
+    expect(calls.map(c => c[0])).toEqual(expect.arrayContaining(['h1', 'h2']));
+  });
+
+  it('malformed envelope JSON is silently dropped (no throw)', async () => {
+    let received = null;
+    cluster.subscribe('bad-json-test', (p) => { received = p; });
+    await new Promise(r => setTimeout(r, 50));
+    const r = await cluster.redis();
+    // Direct publish of garbage — must not crash the subscriber
+    await r.publish('ddash:pubsub', 'this is not json');
+    await new Promise(r => setTimeout(r, 50));
     expect(received).toBeNull();
   });
 });

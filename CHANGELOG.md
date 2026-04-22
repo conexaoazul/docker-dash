@@ -2,6 +2,57 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.17.1] - 2026-04-22 — "HA Phase 3 — WebSocket pub/sub via Redis"
+
+Cross-replica WebSocket events now work. User connected to replica A **now receives** events emitted by replica B (alerts, container state changes, log lines) through Redis pub/sub. Before this, multi-replica HA deploys had silent event delivery gaps.
+
+### Implementation
+
+[`src/services/cluster.js`](src/services/cluster.js) — replaced the v6.17.0 pub/sub stubs with a real implementation:
+
+- **Single Redis channel** `ddash:pubsub` carries all application-level pub/sub traffic. App-level channel routing happens in the subscriber callback. Simpler than per-channel Redis subscriptions for the ~3-5 app channels we'll end up with.
+- **Envelope** includes `{ nodeId, appChannel, payload }`. Subscriber filters out messages where `envelope.nodeId === NODE_ID` — prevents deliver-twice-locally loop when a replica publishes its own broadcasts.
+- **Separate subscriber client** — ioredis requires the subscribe state to run on a dedicated connection (subscribers can't issue other commands). `_subClient` is lazy-connected on first `subscribe()` call; `_redis` (publisher) stays for `publish()` + all rate-limiter ops.
+- **Best-effort publish** — errors logged + swallowed. Local delivery is the primary path; cross-replica is eventually-consistent. An unreachable Redis mid-message doesn't break WS for the publishing replica.
+- **Malformed envelopes silently dropped** — a corrupted message on the shared channel must not crash the subscriber. Tested.
+
+[`src/ws/index.js`](src/ws/index.js) — rewired broadcast methods:
+
+- `broadcast(type, data, channel)` now publishes to `ws:broadcast` on Redis AND delivers locally. Local delivery is immediate; cross-replica arrives within Redis's pub/sub latency (sub-ms on a healthy localhost Redis).
+- `broadcastAll(type, data)` — same pattern.
+- New `_localBroadcast` / `_localBroadcastAll` helpers — called directly by the publishing replica AND by the cluster subscriber when relaying from other replicas.
+- New subscribe at `attach()`: `cluster.subscribe('ws:broadcast', payload → _localBroadcast…)`. Delivers cross-replica messages to local clients without re-publishing (loop-safe by the nodeId filter in cluster.js).
+- Log line now shows cluster mode + nodeId: `WebSocket server attached { mode: 'standalone', nodeId: 'standalone' }` or `{ mode: 'ha', nodeId: '<uuid>' }`.
+
+### Tests — 6 new cluster tests (871 total)
+
+- `publish sends envelope with nodeId to Redis pub/sub channel` — spy on `redis.publish`, assert channel + envelope shape
+- `subscribe filters out self-published messages` — loop-prevention
+- `subscribe receives messages from OTHER node IDs` — cross-replica delivery (simulated foreign node via direct Redis publish with a different nodeId)
+- `subscribe routes to the correct app channel` — routing logic
+- `multiple handlers on the same channel all fire` — fan-out
+- `malformed envelope JSON is silently dropped` — robustness
+
+All 871 tests pass via `ioredis-mock` — still no real Redis required in CI.
+
+### Still remaining for v7.0.0
+
+- **v6.17.2** — Cron / SSH tunnel / Docker event stream **leader election** via Redis `SET NX PX`. Current limitation: running 2+ replicas in HA mode runs every cron job on every replica (duplicate backups, concurrent `VACUUM`). v6.17.1 **makes this worse** because WS events now propagate cross-replica, so duplicate Docker event stream in HA mode would deliver every event twice to connected users. **Don't run multi-replica yet.**
+- **v7.0.0 stable** — Failover runbook, sticky-session LB docs, real multi-replica staging soak.
+
+### Tests / Lint
+
+- **871 passing / 4 skipped / 57 suites** (was 866 / 57 in v6.17.0; +6 Phase 3 tests, test count unchanged from v6.17.0 by replacing 1 stub-assertion test with 6 real-behavior tests — net +5 actually, so 871 is correct).
+- Lint: 0 warnings / 0 errors.
+
+### Files touched
+
+- `src/services/cluster.js` — +60 LOC (pub/sub impl + subscriber client + envelope routing)
+- `src/ws/index.js` — broadcast rewired through cluster.publish + cluster.subscribe on attach
+- `src/__tests__/cluster.test.js` — replaced 1 stub test with 6 behavior tests
+
+---
+
 ## [6.17.0] - 2026-04-22 — "HA mode preview — Redis-backed rate limiter + cluster foundation"
 
 **Opt-in HA** — closes BACKLOG F30 partially. `DD_MODE=ha` + Redis unlocks cross-replica rate limiting; the rest of the HA story (WS pub/sub, cron leader election) lands in v7.0.0. Standalone users: **zero impact** — default unchanged, `ioredis` is in `optionalDependencies` (not `dependencies`), no new env vars required.

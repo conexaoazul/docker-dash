@@ -81,16 +81,75 @@ async function rateLimitTick(key, maxRequests, windowMs) {
   return { allowed: true, remaining: maxRequests - count, retryAfterSec: null };
 }
 
-// ─── Phase 3 stubs (wired in v7.0.0-alpha.1) ─────────────────────
+// ─── Phase 3 — Redis pub/sub (v6.17.1) ────────────────────────────
+//
+// Single Redis channel `ddash:pubsub` carries all application-level pub/sub
+// traffic. App-level channel routing happens in the subscriber callback.
+// Envelope includes `nodeId` so publishers ignore their own echoes (avoids
+// deliver-twice-locally loop).
+//
+// Why single Redis channel: app-level channels (ws:broadcast, etc.) are ~3-5
+// total. Sub-channels would reduce filtering cost slightly but multiply
+// connection state. For the volume Docker Dash handles (~10s msg/sec) a
+// single subscribed channel + in-process dispatch is simpler and plenty fast.
 
-async function publish(_channel, _payload) {
-  if (!isHa()) return;
-  // TODO v7.0.0-alpha.1 — Redis pub/sub for cross-replica WS broadcasts.
+const REDIS_PUBSUB_CHANNEL = 'ddash:pubsub';
+let _subClient = null;
+let _subClientPromise = null;
+const _subscribers = new Map(); // appChannel → Set<handler>
+
+async function _ensureSubscriber() {
+  if (_subClient) return _subClient;
+  if (_subClientPromise) return _subClientPromise;
+  _subClientPromise = (async () => {
+    let Redis;
+    try { Redis = require('ioredis'); }
+    catch { throw new Error('ioredis missing — install it or unset DD_MODE'); }
+    const c = new Redis(REDIS_URL, { lazyConnect: false, maxRetriesPerRequest: 3 });
+    c.on('error', (e) => log.error('Redis subscriber error', { message: e.message }));
+    c.on('message', (_chan, raw) => {
+      let env;
+      try { env = JSON.parse(raw); } catch { return; }
+      if (!env || env.nodeId === NODE_ID) return; // skip self-echo
+      const handlers = _subscribers.get(env.appChannel);
+      if (!handlers) return;
+      for (const h of handlers) {
+        try { h(env.payload); }
+        catch (e) { log.warn('subscriber handler threw', { message: e.message }); }
+      }
+    });
+    await c.subscribe(REDIS_PUBSUB_CHANNEL);
+    _subClient = c;
+    log.info('Redis subscriber connected', { channel: REDIS_PUBSUB_CHANNEL, nodeId: NODE_ID });
+    return c;
+  })();
+  return _subClientPromise;
 }
 
-function subscribe(_channel, _handler) {
+/** Publish to cross-replica. Best-effort (errors logged + swallowed —
+ *  pub/sub is eventually-consistent, local delivery must not fail). */
+async function publish(appChannel, payload) {
   if (!isHa()) return;
-  // TODO v7.0.0-alpha.1 — subscribe handler registration.
+  try {
+    const r = await redis();
+    const envelope = JSON.stringify({ nodeId: NODE_ID, appChannel, payload });
+    await r.publish(REDIS_PUBSUB_CHANNEL, envelope);
+  } catch (err) {
+    log.warn('publish failed (local delivery unaffected)', { appChannel, message: err.message });
+  }
+}
+
+/** Subscribe to a cross-replica channel. Handler receives the `payload`
+ *  object, already filtered to exclude messages from this node. */
+function subscribe(appChannel, handler) {
+  if (!isHa()) return;
+  let set = _subscribers.get(appChannel);
+  if (!set) { set = new Set(); _subscribers.set(appChannel, set); }
+  set.add(handler);
+  // Fire-and-forget — the subscriber client connects async; messages published
+  // before it's ready are lost (acceptable for our use case: WS broadcasts
+  // and cache invalidations are eventually consistent).
+  _ensureSubscriber().catch((e) => log.error('subscriber connect failed', { message: e.message }));
 }
 
 // ─── Phase 4 stubs (wired in v7.0.0-rc.1) ────────────────────────
@@ -107,11 +166,17 @@ function onBecomeLeader(_fn) { /* TODO v7.0.0-rc.1 */ }
 function onBecomeReader(_fn) { /* TODO v7.0.0-rc.1 */ }
 
 async function shutdown() {
+  if (_subClient) {
+    try { await _subClient.quit(); } catch { /* ignore */ }
+    _subClient = null;
+    _subClientPromise = null;
+  }
   if (_redis) {
     try { await _redis.quit(); } catch { /* ignore */ }
     _redis = null;
     _redisPromise = null;
   }
+  _subscribers.clear();
 }
 
 module.exports = {
@@ -121,5 +186,11 @@ module.exports = {
   isLeader, onBecomeLeader, onBecomeReader,
   shutdown,
   // test-only: reset internal state
-  _reset() { _redis = null; _redisPromise = null; },
+  _reset() {
+    _redis = null;
+    _redisPromise = null;
+    _subClient = null;
+    _subClientPromise = null;
+    _subscribers.clear();
+  },
 };
