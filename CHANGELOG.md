@@ -2,6 +2,51 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.14.3] - 2026-04-22 — "NAS Docker section in the host-connection guide"
+
+The "How to Connect Docker Hosts" card on `#/hosts` covered TCP+TLS, SSH Tunnel, Docker Desktop, and Unix Socket — but had nothing about NAS platforms even though we'd shipped detection + per-platform How-Tos for 5 of them in v6.12.0–v6.12.2. Closes that gap.
+
+### Added — NAS Docker connection card
+
+Full-width section between the 2×2 connection-type grid and the architecture diagram. Two columns:
+
+**Left — generic connection setup (any NAS):**
+1. Enable SSH on the NAS UI
+2. Add admin user to the `docker` group
+3. Set up SSH key auth (links to the canonical SSH Key How-To shipped in v6.13.1)
+4. Add Host → SSH Tunnel
+5. Pill links to the 5 platform-specific How-Tos: Synology DSM, Unraid, TrueNAS SCALE, QNAP, OpenMediaVault — each with the platform's brand color so users can spot their NAS at a glance
+
+**Right — Synology security hardening (DSM 7.x):**
+9 actionable items, each with the exact DSM Control Panel path:
+- SSH key auth + disable PasswordAuthentication (with the "test the key first" warning)
+- Move SSH off port 22 to a non-standard port
+- DSM 2-factor authentication for admin
+- Auto Block after N failed logins
+- Firewall: SSH to LAN only
+- Disable the built-in `admin` user
+- Mount Docker socket read-only when running Docker Dash on the NAS itself
+- Weekly DSM Security Advisor scan
+- HTTPS-only DSM UI (with a note about HTTP credential capture even on LAN)
+
+Closing tip points users back to the auto-detected platform badge on the Multi-Host page.
+
+### Bilingual
+
+- `pages.hosts.guideNas*` keys added to both `en.js` and `ro.js` — 19 new strings × 2 languages = 38 entries. Matches the existing bilingual pattern; the Translations tab + DeepL/Google integration shipped in v6.11.0 can fill the other 9 languages with one click when an admin gets to it.
+
+### Tests
+
+- **740 passing + 4 skipped / 50 suites** (unchanged — pure UI addition).
+
+### Files touched
+
+- `public/js/pages/hosts.js` — new full-width NAS card in `_renderGuide()`
+- `public/js/i18n/en.js` — 19 new keys
+- `public/js/i18n/ro.js` — 19 new keys (Romanian translations)
+
+---
+
 ## [6.14.2] - 2026-04-22 — "UX polish — token hygiene + two latent CSS bugs fixed"
 
 Post-v6.14.0 cross-release UX audit surfaced 11 inconsistencies accumulated across v6.11.x–v6.14.0. This release ships the 7 trivial ones (all S-class per the audit); the 3 medium and 1 large items need a design-system decision first and are deferred.

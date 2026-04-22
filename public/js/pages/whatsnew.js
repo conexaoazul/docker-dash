@@ -10,6 +10,17 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.14.3',
+      date: '2026-04-22',
+      title: 'NAS Docker section in the host-connection guide',
+      changes: [
+        { type: 'feature', text: 'New full-width NAS Docker section in the "How to Connect Docker Hosts" card on #/hosts. Closes the gap where v6.12.0-v6.12.2 added platform detection + How-Tos for 5 NAS platforms but the host-connection guide on #/hosts never mentioned them.' },
+        { type: 'feature', text: 'Left column — generic SSH-Tunnel setup that works on any NAS, with brand-colored pill links to the 5 platform-specific How-Tos: Synology DSM (slate blue), Unraid (orange), TrueNAS SCALE (teal), QNAP (red), OpenMediaVault (green). Users see their NAS at a glance.' },
+        { type: 'feature', text: 'Right column — 9-item Synology DSM 7.x security hardening checklist: SSH key auth + disable password, move SSH off port 22, 2FA for admin, Auto Block after failed logins, firewall SSH to LAN only, disable built-in admin user, read-only docker.sock mount, weekly Security Advisor scan, HTTPS-only DSM UI. Each with the exact Control Panel path.' },
+        { type: 'improvement', text: 'Bilingual: 19 new i18n keys in en.js + ro.js. Matches existing pattern; the Translations tab can fill the other 9 languages on demand.' },
+      ],
+    },
+    {
       version: '6.14.2',
       date: '2026-04-22',
       title: 'UX polish — two latent CSS bugs fixed + token hygiene',

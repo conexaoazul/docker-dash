@@ -625,6 +625,63 @@ ssh your-user@host "docker ps"</div>
             </div>
           </div>
 
+          <!-- NAS Docker — full-width row covering setup + Synology security best practices -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+              <i class="fas fa-hdd" style="color:#11457e;font-size:18px"></i>
+              <strong style="font-size:14px">${i18n.t('pages.hosts.guideNasTitle')}</strong>
+              <span class="badge" style="font-size:10px;background:var(--bg-dim)">${i18n.t('pages.hosts.guideNasBadge')}</span>
+            </div>
+            <p class="text-sm text-muted" style="margin:0 0 14px">${i18n.t('pages.hosts.guideNasIntro')}</p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+              <!-- Connection setup -->
+              <div>
+                <div style="font-weight:600;margin-bottom:8px;font-size:13px">
+                  <i class="fas fa-link" style="color:var(--accent);margin-right:6px"></i>${i18n.t('pages.hosts.guideNasConnTitle')}
+                </div>
+                <ol class="text-sm" style="padding-left:20px;line-height:1.9;margin:0;color:var(--text)">
+                  <li>${i18n.t('pages.hosts.guideNasStep1')}</li>
+                  <li>${i18n.t('pages.hosts.guideNasStep2')} <code>docker</code></li>
+                  <li>${i18n.t('pages.hosts.guideNasStep3')} → <a href="#/howto/ssh-key-auth">${i18n.t('pages.hosts.guideNasStep3Link')}</a></li>
+                  <li>${i18n.t('pages.hosts.guideNasStep4')}</li>
+                  <li>${i18n.t('pages.hosts.guideNasGuides')}:
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+                      <a href="#/howto/synology-dsm" class="badge" style="background:#11457e;color:#fff;text-decoration:none;font-size:10px"><i class="fas fa-hdd" style="margin-right:4px"></i>Synology DSM</a>
+                      <a href="#/howto/unraid" class="badge" style="background:#f15a29;color:#fff;text-decoration:none;font-size:10px"><i class="fab fa-docker" style="margin-right:4px"></i>Unraid</a>
+                      <a href="#/howto/truenas-scale" class="badge" style="background:#0095d5;color:#fff;text-decoration:none;font-size:10px"><i class="fas fa-server" style="margin-right:4px"></i>TrueNAS SCALE</a>
+                      <a href="#/howto/qnap-qts" class="badge" style="background:#ee3a25;color:#fff;text-decoration:none;font-size:10px"><i class="fas fa-hdd" style="margin-right:4px"></i>QNAP</a>
+                      <a href="#/howto/openmediavault" class="badge" style="background:#43a047;color:#fff;text-decoration:none;font-size:10px"><i class="fas fa-server" style="margin-right:4px"></i>OpenMediaVault</a>
+                    </div>
+                  </li>
+                </ol>
+              </div>
+
+              <!-- Synology security hardening -->
+              <div>
+                <div style="font-weight:600;margin-bottom:8px;font-size:13px;color:var(--green)">
+                  <i class="fas fa-shield-alt" style="margin-right:6px"></i>${i18n.t('pages.hosts.guideNasSecTitle')}
+                </div>
+                <ul class="text-sm" style="padding-left:20px;line-height:1.9;margin:0;color:var(--text)">
+                  <li>${i18n.t('pages.hosts.guideNasSec1')}</li>
+                  <li>${i18n.t('pages.hosts.guideNasSec2')}</li>
+                  <li>${i18n.t('pages.hosts.guideNasSec3')}</li>
+                  <li>${i18n.t('pages.hosts.guideNasSec4')}</li>
+                  <li>${i18n.t('pages.hosts.guideNasSec5')}</li>
+                  <li>${i18n.t('pages.hosts.guideNasSec6')}</li>
+                  <li>${i18n.t('pages.hosts.guideNasSec7')}</li>
+                  <li>${i18n.t('pages.hosts.guideNasSec8')}</li>
+                  <li>${i18n.t('pages.hosts.guideNasSec9')}</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="tip-box" style="margin-top:14px">
+              <i class="fas fa-lightbulb"></i>
+              <div>${i18n.t('pages.hosts.guideNasTip')}</div>
+            </div>
+          </div>
+
           <!-- Architecture diagram -->
           <div style="border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:16px">
             <div style="font-weight:600;margin-bottom:10px"><i class="fas fa-project-diagram" style="color:var(--accent);margin-right:6px"></i>${i18n.t('pages.hosts.guideArch')}</div>
