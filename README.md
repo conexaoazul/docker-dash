@@ -1,8 +1,9 @@
 <p align="center">
   <h1 align="center">🐳 Docker Dash</h1>
   <p align="center">
-    A lightweight, full-featured Docker management dashboard.<br>
-    Self-hosted alternative to Portainer — built with Node.js, vanilla JavaScript, and SQLite.
+    A full-featured Docker management dashboard that runs in two modes:<br>
+    <strong>Standalone</strong> for homelab and small teams · <strong>HA</strong> for corporate always-on deploys.<br>
+    Same codebase, same binary, zero vendor lock-in.
   </p>
   <p align="center">
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -16,25 +17,61 @@
     <img src="https://img.shields.io/badge/RAM-~50MB-blue" alt="RAM Usage">
   </p>
   <p align="center">
-    <a href="#where-to-start"><strong>Where to start</strong></a> &bull;
+    <a href="#deployment-modes"><strong>Deployment modes</strong></a> &bull;
+    <a href="#target-audience">Target audience</a> &bull;
     <a href="#quick-start">Quick Start</a> &bull;
     <a href="#features">Features</a> &bull;
     <a href="#screenshots">Screenshots</a> &bull;
     <a href="#comparison">Comparison</a> &bull;
-    <a href="#multi-host">Multi-Host</a> &bull;
     <a href="#contributing">Contributing</a>
   </p>
 </p>
 
-**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v7.0.0**
+## Deployment modes
 
-**HA mode production-ready in v7.0.0** (standalone default unchanged):
-- **v6.17.0** — cluster abstraction + Redis-backed rate limiter
-- **v6.17.1** — cross-replica WebSocket broadcasts via Redis pub/sub
-- **v6.17.2** — cron + Docker event stream + git polling leader election via Redis `SET NX PX`
-- **v7.0.0** — cluster observability (`/api/cluster/status`, `/api/health` exposes `role`, 4 new Prometheus gauges), operator runbook, production-grade LB configs (Caddy + Traefik + HAProxy + nginx)
+Docker Dash runs in two modes from a single codebase. Pick based on your needs:
 
-See [HA Mode](docs/features/ha-mode.md) · [Failover runbook](docs/features/ha-failover-runbook.md) · [LB configs](docs/features/ha-lb-configs.md).
+|  | **Standalone** (default) | **HA** (opt-in, v7.0.0+) |
+|---|---|---|
+| **Dependencies** | Just Docker | Docker + Redis + sticky-session load balancer |
+| **Replicas** | 1 | 2–5 (production-validated) |
+| **Failover** | Restart on crash (Docker restart policy) | Automatic — leader lock in Redis, ~30s worst case, milliseconds on graceful restart |
+| **Cross-replica events** | N/A | Redis pub/sub (loop-safe, sub-ms delivery) |
+| **Rate limiter** | In-process sliding window | Redis `INCR` fixed window, shared across replicas |
+| **Sessions** | SQLite (works in both modes) | SQLite (single-writer on leader) |
+| **Best for** | Homelab · dev/staging · SMB · single-office | Corporate dashboards · on-prem K8s · always-on infrastructure panels |
+| **Complexity** | 1 container, zero config beyond `.env` | 3+ containers, LB config, failover runbook |
+| **Operational overhead** | None | Prometheus monitoring recommended (cluster health alerts) |
+
+**`DD_MODE` is the only switch.** Unset (default) = standalone, identical to every prior v6.x release. `DD_MODE=ha` + `REDIS_URL` = HA mode.
+
+**Feature parity:** every feature works in both modes. HA doesn't unlock "enterprise" features — it just adds redundancy.
+
+**Fully backwards-compatible.** An existing standalone deployment upgrades to HA without migration, and downgrades back without data loss. Your SQLite volume carries over.
+
+Deep reading: [HA Mode reference](docs/features/ha-mode.md) · [Failover runbook](docs/features/ha-failover-runbook.md) · [LB configs (Caddy/Traefik/HAProxy/nginx)](docs/features/ha-lb-configs.md)
+
+## Target audience
+
+**Good fit for Docker Dash:**
+
+| You are… | Use mode | Why |
+|---|---|---|
+| Homelab enthusiast · self-hosting Plex/*arr/Nextcloud | Standalone | Single-host, simple, no build step, no database to babysit |
+| Small team running a shared dev environment | Standalone (+ `--profile tls` Caddy) | HTTPS + SSO without fighting certificates manually |
+| SMB with 1–3 Docker hosts, shared ops role | Standalone + multi-host SSH tunnel | Manage multiple hosts from one UI, no agent to deploy |
+| NAS user (Synology · Unraid · TrueNAS · QNAP · OMV) | Standalone | Platform auto-detection, tailored How-To guides, works with Container Manager |
+| VPS user (Hetzner · DO · EC2 · GCE · Azure · Linode · Vultr) | Standalone + DMI cloud detection | Cloud vendor badges, generic VPS How-To guide |
+| Corporate team with 99.9% uptime SLA | **HA mode** (2–3 replicas) | Leader election + failover + shared rate limiter + cross-replica WS |
+| On-prem Kubernetes with Docker Dash as internal tool | **HA mode** (StatefulSet, sticky session Ingress) | Survives pod restarts, rolling deploys with no dashboard downtime |
+
+**Not a good fit:**
+
+- **Kubernetes-native production workloads** — use [Rancher](https://rancher.com/) or [Portainer BE](https://www.portainer.io/business) instead. Docker Dash targets the Docker daemon directly; it doesn't manage K8s objects.
+- **Geographic distribution across regions** — SQLite single-writer limits you to same-AZ HA. If you need multi-region active-active, you need a different tool (or wait for a hypothetical Docker Dash Postgres backend, which is not on the roadmap).
+- **Multi-tenant SaaS** — Docker Dash assumes one organization per instance. RBAC works within that instance but there's no tenant isolation layer.
+- **CI/CD pipeline orchestration** — Docker Dash manages running containers, not build pipelines. Use GitHub Actions, GitLab CI, Jenkins, etc. for that. Docker Dash's GitOps feature is for *deploying* from Git, not building.
+- **Image registry** — Docker Dash *uses* registries (Docker Hub, GHCR, GitLab) but is not a registry itself. For self-hosted registry, use [Harbor](https://goharbor.io/) or [distribution/distribution](https://distribution.github.io/distribution/).
 
 ## Screenshots
 
@@ -235,24 +272,30 @@ Dedicated reference docs for the deeper features, in [docs/features/](docs/featu
 
 ## Where to start
 
-Two short reads, each tailored to a different background. Pick the one that matches you and skim before installing.
+Three short reads, each tailored to a different background. Pick the one that matches you.
 
 <table>
   <tr>
-    <td width="50%" valign="top">
+    <td width="33%" valign="top">
       <h3>🚀 New to Docker?</h3>
       <p>The recipe-and-kitchen metaphor, why containers fix <em>"works on my machine"</em>, what you see in the first 30 seconds of opening Docker Dash, and what you can do in your first hour. No jargon.</p>
-      <p><strong><a href="docs/guides/why-docker-dash-beginners.md">Read: Why Docker &amp; Docker Dash — Beginner's Guide →</a></strong></p>
+      <p><strong><a href="docs/guides/why-docker-dash-beginners.md">Read: Beginner's Guide →</a></strong></p>
     </td>
-    <td width="50%" valign="top">
+    <td width="33%" valign="top">
       <h3>⎇ Developer using Git?</h3>
       <p>The git → Docker mental bridge (<code>commit</code> = image, <code>package.json</code> = compose), the 5 places dev-with-git gets stuck, and how Docker Dash compares against Portainer / Dockge / bash scripts. With a GitOps workflow.</p>
-      <p><strong><a href="docs/guides/why-docker-dash-developers.md">Read: Docker Dash for Developers Using Git →</a></strong></p>
+      <p><strong><a href="docs/guides/why-docker-dash-developers.md">Read: Developers Using Git →</a></strong></p>
+    </td>
+    <td width="34%" valign="top">
+      <h3>🛠 Ops / SRE evaluating HA?</h3>
+      <p>When to flip <code>DD_MODE=ha</code>, when to stay standalone, failover mechanics (Redis <code>SET NX PX</code>, leader lock TTL, Lua <code>DEL-if-owned</code> graceful handover), operational runbook covering 6 failure scenarios, and copy-paste LB configs for Caddy/Traefik/HAProxy/nginx.</p>
+      <p><strong><a href="docs/features/ha-mode.md">Read: HA Mode →</a></strong></p>
+      <p>↳ <a href="docs/features/ha-failover-runbook.md">Failover Runbook</a> · <a href="docs/features/ha-lb-configs.md">LB Configs</a></p>
     </td>
   </tr>
 </table>
 
-> Both guides are also available inside the app under <strong>How-To Guides</strong> with bilingual EN/RO content and surfaced as buttons in the page header.
+> The first two guides are also available inside the app under <strong>How-To Guides</strong> with bilingual EN/RO content and surfaced as buttons in the page header. HA docs are operator-facing and live in the repo / docs only.
 
 ## Quick Start
 
@@ -286,13 +329,41 @@ open http://localhost:8101
 
 Default credentials: `admin` / `admin` — on first login, a **security setup wizard** will require you to change the password.
 
+### Enabling HA mode
+
+Once standalone works, switching to HA is a flag flip:
+
+```bash
+# .env
+DD_MODE=ha
+REDIS_URL=redis://redis:6379
+
+# Bring up Redis alongside Docker Dash
+docker compose --profile ha up -d
+
+# Then scale to multiple replicas behind a sticky-session LB (see LB configs doc)
+```
+
+See the [HA Mode reference](docs/features/ha-mode.md) for the full enablement procedure, [Failover runbook](docs/features/ha-failover-runbook.md) for operational scenarios, and [LB configs](docs/features/ha-lb-configs.md) for production-ready Caddy/Traefik/HAProxy/nginx configurations.
+
 ## Requirements
+
+### Standalone
 
 - Docker Engine 20.10+ (or Docker Desktop 4.x+)
 - Docker Compose v2
-- ~50MB RAM, minimal CPU
+- ~50MB RAM, minimal CPU, ~80MB disk for the image
+
+### HA mode (additional)
+
+- Redis 7+ (ships as `redis:7-alpine` in the `--profile ha` compose profile; ~30MB image, ~5-15MB RAM)
+- Sticky-session-capable load balancer for 2+ replica deploys (Caddy, Traefik, HAProxy, nginx — [configs provided](docs/features/ha-lb-configs.md))
+- Shared volume for SQLite (Docker named volume works on same host; K8s `ReadWriteMany` PVC for multi-node)
+- Operator familiarity with Redis basics (single instance is fine — Sentinel only needed for Redis HA separately)
 
 ## Architecture
+
+### Standalone mode (default)
 
 ```
 ┌─────────────────┐     ┌───────────────────┐
@@ -308,6 +379,47 @@ Default credentials: `admin` / `admin` — on first login, a **security setup wi
               │ WAL mode   │ │ Socket │ │ TCP/SSH   │
               └────────────┘ └────────┘ └───────────┘
 ```
+
+### HA mode (opt-in)
+
+```
+                  ┌─────────────────────────────────┐
+                  │  Sticky-session Load Balancer   │
+                  │  (Caddy / Traefik / HAProxy /   │
+                  │   nginx — configs provided)     │
+                  └─────────────────┬───────────────┘
+                                    │
+                  ┌─────────────────┼─────────────────┐
+                  │                 │                 │
+            ┌─────▼─────┐     ┌─────▼─────┐     ┌─────▼─────┐
+            │ replica A │     │ replica B │     │ replica C │
+            │  LEADER   │     │  reader   │     │  reader   │
+            │ cron+WS   │     │ HTTP only │     │ HTTP only │
+            │ event-    │     │           │     │           │
+            │ stream    │     │           │     │           │
+            └─────┬─────┘     └─────┬─────┘     └─────┬─────┘
+                  │                 │                 │
+                  │    ┌────────────┴────────────┐    │
+                  │    │                         │    │
+                  └────┤   shared SQLite volume  ├────┘
+                       │  (single-writer: leader)│
+                       └─────────────────────────┘
+                  ┌────────────────────────────────────┐
+                  │           Redis 7-alpine           │
+                  │  ┌───────────┐  ┌──────────────┐  │
+                  │  │ leader    │  │ rate-limit   │  │
+                  │  │ lock +    │  │ INCR + PX    │  │
+                  │  │ heartbeat │  │              │  │
+                  │  └───────────┘  └──────────────┘  │
+                  │  ┌────────────────────────────┐   │
+                  │  │ ddash:pubsub (WS events)   │   │
+                  │  └────────────────────────────┘   │
+                  └────────────────────────────────────┘
+```
+
+One replica holds the Redis `leader` lock (30s TTL + 10s heartbeat). Leader runs cron jobs, Docker event stream, git polling. Readers serve HTTP + deliver WS events from pub/sub. Graceful handover on `docker stop` via Lua `DEL-if-owned` — failover in milliseconds. Ungraceful leader death — next heartbeat reader wins (≤30s worst case).
+
+SSH tunnels run per-replica (readers need them to serve HTTP reads). No active-active write scale-out — SQLite stays single-writer.
 
 | Layer | Technology |
 |-------|-----------|
@@ -369,6 +481,10 @@ All config via environment variables. See [`.env.example`](.env.example) for the
 | `EVENT_RETENTION_DAYS` | `7` | Keep Docker events for N days |
 | `ENABLE_EXEC` | `true` | Allow terminal exec into containers |
 | `READ_ONLY_MODE` | `false` | Disable all write operations |
+| `DD_MODE` | *(unset — standalone)* | Set to `ha` to enable HA mode. Requires `REDIS_URL`. |
+| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL. Only consulted when `DD_MODE=ha`. |
+| `TRUST_PROXY` | `loopback` (prod) / `true` (dev) | Trusted proxy range for `X-Forwarded-*` headers. Set to your load balancer's IP/CIDR in HA. |
+| `COOKIE_SECURE` | `false` | Set `true` when behind HTTPS. Required for sticky-session cookies over TLS-terminating LBs. |
 
 ## Development
 
@@ -440,6 +556,7 @@ docker-dash/
 | **Safe-Pull + Pipeline** | **5-stage** | — | — | — | — | — | — | basic |
 | **Container Rollback** | ✅ | — | — | ✅ | — | ✅ | — | — |
 | Multi-Host (agentless) | ✅ | agent req. | agent req. | agent | — | ✅ | agent | ✅ |
+| **Optional HA mode (no vendor lock-in)** | **✅ v7.0.0** | — | commercial tier | — | — | K8s-based | — | — |
 | Git Integration | ✅ | BE only | ✅ | ✅ | — | Fleet | — | — |
 | Webhooks + Polling | ✅ | BE only | ✅ | ✅ | — | ✅ | — | — |
 | **Docker Swarm Mode** | ✅ | ✅ | ✅ | — | — | K8s focus | — | — |

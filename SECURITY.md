@@ -152,15 +152,18 @@ The following are conscious design decisions, not oversights. Each represents a 
 
 **Mitigation:** Disabled by default (`ENABLE_SSO_HEADERS=false`). `.env.example` contains an explicit WARNING comment. Trust proxy is restricted to `loopback` in production. The feature is documented as requiring a trusted reverse proxy between the application and the internet.
 
-### 5. Rate limiter is in-memory only
+### 5. Rate limiter backend depends on deployment mode
 
-**What:** The HTTP rate limiter uses an in-memory `Map`, not an external store (Redis, etc.).
+**What:** In **standalone mode (default)**, the HTTP rate limiter uses an in-memory `Map` — sliding-window semantics. In **HA mode (`DD_MODE=ha`, v6.17.0+)**, the rate limiter backs onto Redis `INCR` + `PEXPIRE` — fixed-window semantics, shared across all replicas.
 
-**Why:** Zero external dependencies. For single-instance deployment (the primary use case), in-memory rate limiting is sufficient and introduces no operational complexity.
+**Why:** Zero external dependencies is the default positioning; standalone users get rate limiting without running Redis. HA deployments opt into Redis anyway (for leader election + pub/sub), and the rate-limiter win — enforcing limits across N replicas instead of `limit × N` effective — is free on top of the existing Redis.
 
-**Impact:** Rate limits reset on restart. In a (currently unsupported) multi-replica deployment, each instance would have independent counters, reducing rate limiting effectiveness.
+**Impact:**
+- **Standalone:** rate limits reset on process restart. In a single-replica deploy that's appropriate; restart is rare.
+- **HA (fixed-window):** 2× theoretical burst at bucket boundaries compared to sliding-window standalone. Example: a `10 req/min` limit could allow up to 20 requests in a 2-second window spanning two buckets. Average case is identical; burst matters only for DDoS-class inputs which are not what an internal rate limiter is for anyway.
+- **HA (Redis unreachable mid-request):** fail-open — request is allowed with a `warn` log. Prioritizes availability over strict enforcement. The rate limiter is a fair-use tool, not a security boundary.
 
-**Mitigation:** Documented as single-instance only. The rate limiter includes automatic cleanup of expired entries to prevent memory growth. For the target audience (homelab, SMB, single-node), this is appropriate.
+**Mitigation:** Documented in [docs/features/ha-mode.md](docs/features/ha-mode.md#rate-limiter-semantics). Both modes implement the same API surface (`X-RateLimit-Remaining` response header, `Retry-After` on 429), so clients can't tell which backend is serving them. For target audiences (homelab standalone, corporate HA), both enforcement shapes are appropriate.
 
 ### 6. Docker socket access is inherently privileged
 
@@ -174,13 +177,15 @@ The following are conscious design decisions, not oversights. Each represents a 
 
 ## Deployment Recommendations
 
-| Deployment scenario | Suitability | Notes |
-|---------------------|-------------|-------|
-| Homelab / personal | **Excellent** | Ideal use case. Run behind HTTPS, generate strong secrets. |
-| Small team / staging | **Good** | Put behind reverse proxy (Caddy/Traefik). Use SSO if available. |
-| Production (internal) | **Good** | Restrict network access, use TLS, disable exec if not needed. |
-| Public internet | **Capable with caveats** | Must use HTTPS, strong secrets, and understand CSP trade-off. |
-| Enterprise / multi-tenant | **Not recommended yet** | Needs stricter CSP, distributed rate limiter, and audit. |
+| Deployment scenario | Mode | Suitability | Notes |
+|---|---|---|---|
+| Homelab / personal | Standalone | **Excellent** | Ideal use case. Run behind HTTPS, generate strong secrets. |
+| Small team / staging | Standalone + `--profile tls` | **Excellent** | Caddy handles HTTPS + Let's Encrypt. Use SSO if available (LDAP / Authelia / Authentik). |
+| Production (internal, single-host) | Standalone | **Good** | Restrict network access, use TLS, disable exec if not needed. |
+| Production (internal, high-availability) | **HA** (`DD_MODE=ha`) | **Good** — v7.0.0+ | 2-3 replicas + Redis + sticky-session LB. Leader election + cross-replica WS + Redis rate limiter. Followed by staging soak per the [failover runbook](docs/features/ha-failover-runbook.md). |
+| Public internet | Standalone or HA | **Capable with caveats** | Must use HTTPS, strong secrets, and understand CSP trade-off (`unsafe-eval` for Chart.js). |
+| Multi-tenant SaaS | — | **Not recommended** | Docker Dash assumes one organization per instance. No tenant isolation layer. |
+| Geographic multi-region active-active | — | **Not supported** | SQLite single-writer limits HA to same-AZ. Would require a Postgres backend (not on current roadmap). |
 
 ## Vulnerability Fixes (v3.7.1 — v3.9.0)
 
