@@ -31,7 +31,7 @@
 
 Docker Dash runs in two modes from a single codebase. Pick based on your needs:
 
-|  | **Standalone** (default) | **HA** (opt-in, v7.0.0+) |
+|  | **Standalone** (default) | **HA** (opt-in, v7.0.0+) · **Observability** (opt-in, v7.1.0+) |
 |---|---|---|
 | **Dependencies** | Just Docker | Docker + Redis + sticky-session load balancer |
 | **Replicas** | 1 | 2–5 (production-validated) |
@@ -270,6 +270,7 @@ Dedicated reference docs for the deeper features, in [docs/features/](docs/featu
 - **[HA Failover Runbook](docs/features/ha-failover-runbook.md)** — operator procedures: leader death, rolling restart, Redis failure, split-brain detection, recovery checklist
 - **[HA Load Balancer Configs](docs/features/ha-lb-configs.md)** — copy-paste examples for Caddy + Traefik + HAProxy + nginx with sticky-session + WS upgrade + health checks
 - **[Observability Stack (v7.1.0)](docs/features/observability.md)** — opt-in Prometheus + Grafana via `docker compose --profile observability up -d`, 8-panel dashboard auto-provisioned, recommended alerts, integration with existing Prometheus/Grafana
+- **[Observability Wizard (v7.2.0)](docs/features/observability.md#1a-in-app-wizard-v720)** — admin UI at **System → Observability**. Detects existing Prometheus/Grafana on the host and offers 3 UX branches: integrate (both found → copy scrape snippet + one-click dashboard import via Grafana API), partial deploy, or full deploy with copy-paste instructions. Admin-only, audit-logged, token never persisted
 
 ## Where to start
 
@@ -558,6 +559,7 @@ docker-dash/
 | **Container Rollback** | ✅ | — | — | ✅ | — | ✅ | — | — |
 | Multi-Host (agentless) | ✅ | agent req. | agent req. | agent | — | ✅ | agent | ✅ |
 | **Optional HA mode (no vendor lock-in)** | **✅ v7.0.0** | — | commercial tier | — | — | K8s-based | — | — |
+| **Bundled Prometheus + Grafana + wizard** | **✅ v7.2.0** | — | — | — | — | — | — | — |
 | Git Integration | ✅ | BE only | ✅ | ✅ | — | Fleet | — | — |
 | Webhooks + Polling | ✅ | BE only | ✅ | ✅ | — | ✅ | — | — |
 | **Docker Swarm Mode** | ✅ | ✅ | ✅ | — | — | K8s focus | — | — |
@@ -631,6 +633,7 @@ Docker Dash requires access to the Docker socket (`/var/run/docker.sock`). This 
 | Production Readiness v6.16.0 | 2026-04-22 | 9.5/10 | Phase 2 shipped: `containers.js` (5774 lines, largest JS file) split into list-eager (3226 lines) + detail-lazy (2595 lines loaded on first `/containers/:id` navigation via script injection). Performance category 7 → 9, initial JS payload −45% for users not visiting a container detail page. 757 tests unchanged |
 | Production Readiness v6.16.1 | 2026-04-22 | **9.7/10** | Testing 8.5 → 9.5 (+86 tests across 4 previously-untested services: permissions RBAC, settings CRUD, security-alerts rule evaluation, event-notifier dispatch). Documentation 9 → 9.5 (3 new feature reference docs under `docs/features/`: Prometheus metrics, platform detection, translations tooling). Residual: Docker-in-Docker integration tests (v7), Redis HA mode (v7), external 3rd-party audit (v7) — 10/10 requires all three |
 | Production Readiness v7.0.0 | 2026-04-22 | **9.8/10** | HA mode production-ready: opt-in `DD_MODE=ha` + Redis. 4-phase rollout (v6.17.0 rate limiter, v6.17.1 WS pub/sub, v6.17.2 leader election, v7.0.0 observability + operator runbook + LB configs). Standalone default unchanged. Staging soak verified: 3-replica deploy with lock acquire, graceful leader handover, Redis restart recovery. `/api/cluster/status` + 4 Prometheus gauges. BACKLOG F30 closed. Residual gap to 10: external 3rd-party security audit (budget + vendor coordination) |
+| v7.1.0–v7.2.0 | 2026-04-22 | **9.8/10** | Observability bundle shipped: opt-in Prometheus + Grafana compose profile with 8-panel auto-provisioned dashboard (v7.1.0), then in-app wizard at **System → Observability** that detects existing monitoring stacks and offers integrate/deploy/hybrid paths with one-click dashboard import via Grafana API (v7.2.0). Admin-only, 10s outbound timeout, tokens never persisted. 28 new tests. No production-readiness score change — UX layer on top of v7.0.0's foundation |
 
 ### Known Security Tradeoffs
 
