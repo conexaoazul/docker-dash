@@ -70,7 +70,8 @@ app.use(require('./middleware/csrf'));
 // '10.0.0.1' = trust specific proxy IP
 app.set('trust proxy', process.env.TRUST_PROXY || (config.app.env === 'production' ? 'loopback' : true));
 
-// Request latency tracking + logging
+// Request latency tracking + logging + Prometheus metrics
+const metricsService = require('./services/metrics');
 app.use((req, res, next) => {
   if (req.url.startsWith('/api/health') || req.url.startsWith('/ws') || !req.url.startsWith('/api')) {
     return next();
@@ -84,6 +85,10 @@ app.use((req, res, next) => {
       log.warn('Slow request', { method: req.method, url: req.url, duration: `${duration}ms`, status: res.statusCode });
     } else if (config.app.env === 'development') {
       log.debug(`${req.method} ${req.url} ${res.statusCode} ${duration}ms`);
+    }
+    // Record for Prometheus (v6.15.0). Exclude /api/metrics itself to avoid self-measurement skew.
+    if (!req.url.startsWith('/api/metrics')) {
+      metricsService.recordRequest(req.method, res.statusCode, duration);
     }
     // Expose latency header for debugging (guard: headers may already be sent for streamed responses)
     if (!res.headersSent) res.setHeader('X-Response-Time', `${duration}ms`);

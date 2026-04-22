@@ -2,6 +2,61 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [6.15.0] - 2026-04-22 — "Production readiness polish — Prometheus metrics + CI hygiene"
+
+Targeted at moving the production readiness score from the v5-era 9.2/10 claim toward a defensible **9.5/10** on current v6.x state. Phase 1 of the 3-phase plan captured in `plans/production-readiness-v6.15.md` (Phase 2 = containers.js split, Phase 3 = v7 HA + external audit).
+
+### Added — Proper Prometheus metrics service
+
+New [src/services/metrics.js](src/services/metrics.js) collects application-level counters + gauges in memory and renders them in standard Prometheus text format. No new dependency — the protocol is just labeled key=value lines. Before this release, `/api/metrics` exposed only 3 gauges (container count, total CPU, total memory). Monitoring score moves from 8 → 9.
+
+New metrics (on top of the existing 3 stats-derived gauges):
+
+- `docker_dash_uptime_seconds` — process uptime gauge
+- `docker_dash_http_requests_total{method,status}` — counter by method + `2xx`/`3xx`/`4xx`/`5xx` bucket
+- `docker_dash_http_request_duration_ms{method,status}` — summed request duration; divide by the counter above to get average latency per bucket
+- `docker_dash_http_errors_total{status}` — exact-status counter for 4xx + 5xx responses (404, 500, 503, etc.)
+- `docker_dash_ws_connections_active` — current WebSocket connection gauge
+- `docker_dash_ws_connections_total` — lifetime WebSocket connects counter
+- `docker_dash_background_job_runs_total{job}` — counter per background job name (reserved for future wiring; not populated yet — see §Roadmap)
+- `docker_dash_background_job_errors_total{job}` — counter per job error
+
+Zero overhead: the existing request-tracking middleware at [src/server.js:74](src/server.js) already measured duration for slow-request logging and the `X-Response-Time` header. We just piggyback `metricsService.recordRequest()` on the existing hook. The `/api/metrics` endpoint itself is excluded from self-measurement to avoid skew.
+
+**Tests:** 17 new tests in [src/__tests__/metrics.test.js](src/__tests__/metrics.test.js) covering record/render/edge cases (invalid status codes, missing duration, negative values, null job names, Prometheus output format).
+
+### Changed — CI summary reports the real test count
+
+[.github/workflows/ci.yml](.github/workflows/ci.yml) had `echo "- Tests: ✅ (384 tests — 100% passing)"` hardcoded in the summary step since around v5. The Jest run itself was fine, only the cosmetic step-summary string was stale. Now the test step captures Jest output, extracts `passed` + `skipped` counts, and the summary uses those values via `${{ steps.tests.outputs.passed }}`. Deploy Readiness score moves from 9 → 9.5.
+
+### Documentation
+
+- README production readiness badge: **9.2/10 → 9.5/10** with an updated Audit History table row citing what closed the v5 gaps.
+- Test counts bumped everywhere: 740 → **757** (17 new metrics tests).
+
+### What Phase 1 does NOT cover
+
+- **containers.js split** (5774 lines unminified, largest single JS file served) — Performance gap (-2 in v5 audit). Deferred to a v6.16.0 Phase 2 release that needs a deep-spec on how to split (candidate sub-modules: list, detail, compose editor, file browser). Requires dynamic `import()` — works without a build step, but needs the pages refactored to import lazily.
+- **Docker-in-Docker integration tests** — Testing gap (-0.5). Structural: needs Docker available in GHA runners. Defer to v7.
+- **Distributed rate limiter** — Security / HA gap. BACKLOG F30. Material for v7 "HA mode" with an opt-in `DD_MODE=ha` env var.
+- **External third-party security audit** — Out of scope for self-hosted OSS.
+
+### Files touched
+
+- `src/services/metrics.js` (new, ~150 LOC)
+- `src/__tests__/metrics.test.js` (new, 17 tests)
+- `src/server.js` — 3-line middleware extension (no new layer added)
+- `src/ws/index.js` — 2-line hook on connect/disconnect
+- `src/routes/misc.js` — appended `metricsService.renderPrometheus()` to `/api/metrics` output
+- `.github/workflows/ci.yml` — dynamic test-count extraction + summary
+- `README.md` / `SECURITY.md` / `CONTRIBUTING.md` — test counts 740 → 757; README badges + audit row updated
+
+### Tests
+
+- **757 passing + 4 skipped / 51 suites** (was 740 / 50).
+
+---
+
 ## [6.14.3] - 2026-04-22 — "NAS Docker section in the host-connection guide"
 
 The "How to Connect Docker Hosts" card on `#/hosts` covered TCP+TLS, SSH Tunnel, Docker Desktop, and Unix Socket — but had nothing about NAS platforms even though we'd shipped detection + per-platform How-Tos for 5 of them in v6.12.0–v6.12.2. Closes that gap.

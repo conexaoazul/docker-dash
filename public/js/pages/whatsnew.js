@@ -10,6 +10,18 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '6.15.0',
+      date: '2026-04-22',
+      title: 'Production readiness polish — Prometheus metrics + CI hygiene',
+      changes: [
+        { type: 'feature', text: 'New src/services/metrics.js — real Prometheus metrics collection. Before: /api/metrics exposed 3 gauges (containers, cpu, memory). Now: adds uptime, http_requests_total{method,status}, http_request_duration_ms, http_errors_total{status}, ws_connections_active + _total, background_job_runs_total + _errors_total. Grafana-ready without adding a new dependency.' },
+        { type: 'improvement', text: 'Zero-overhead instrumentation: the existing request-tracking middleware at server.js:74 already measured duration for slow-request logging and X-Response-Time header. We piggyback recordRequest() on the existing hook — no new middleware layer added. The /api/metrics endpoint itself is excluded from self-measurement.' },
+        { type: 'fix', text: 'CI summary hardcoded "384 tests" since v5. The Jest run was always correct, only the cosmetic $GITHUB_STEP_SUMMARY string was stale. Now captured dynamically from Jest output — passed + skipped counts reported accurately.' },
+        { type: 'improvement', text: 'Production readiness badge: 9.2/10 → 9.5/10 with an updated Audit History entry citing what closed the v5-era gaps (error-response sanitization on all 500s from v6.14.1, expanded Prometheus metrics from this release, setInterval leak already fixed, CI test count dynamic). Residual deferred: containers.js split to Phase 2, Docker-in-Docker tests to v7.' },
+        { type: 'improvement', text: 'Tests: 740 → 757 (+17 metrics tests covering record/render/edge cases). Still zero external dependencies.' },
+      ],
+    },
+    {
       version: '6.14.3',
       date: '2026-04-22',
       title: 'NAS Docker section in the host-connection guide',

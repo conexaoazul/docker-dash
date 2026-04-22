@@ -120,6 +120,8 @@ class WsServer {
       const client = { user, subscriptions: new Set(), isAlive: true, msgCount: 0, msgResetTime: Date.now() };
       this.clients.set(ws, client);
       log.debug('Client connected', { username: user.username });
+      // v6.15.0: Prometheus gauge
+      try { require('../services/metrics').recordWsConnection(1); } catch { /* best-effort */ }
 
       ws.on('pong', () => {
         const c = this.clients.get(ws);
@@ -127,7 +129,10 @@ class WsServer {
       });
 
       ws.on('message', (data) => this._handleMessage(ws, data));
-      ws.on('close', () => this._cleanupClient(ws));
+      ws.on('close', () => {
+        this._cleanupClient(ws);
+        try { require('../services/metrics').recordWsConnection(-1); } catch { /* best-effort */ }
+      });
       ws.on('error', (err) => log.error('WS error', err.message));
 
       ws.send(JSON.stringify({ type: 'connected', user: { id: user.id, username: user.username } }));

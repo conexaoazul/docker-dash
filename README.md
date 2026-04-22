@@ -8,9 +8,9 @@
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/releases/latest"><img src="https://img.shields.io/github/v/release/bogdanpricop/docker-dash?color=blue" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
-    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-740%20passing%20(100%25)-brightgreen" alt="Tests"></a>
-    <img src="https://img.shields.io/badge/version-6.14.3-blue" alt="Version">
-    <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.2%2F10-brightgreen" alt="Production Readiness"></a>
+    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-757%20passing%20(100%25)-brightgreen" alt="Tests"></a>
+    <img src="https://img.shields.io/badge/version-6.15.0-blue" alt="Version">
+    <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.5%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
     <img src="https://img.shields.io/badge/Docker-~80MB-blue" alt="Image Size">
     <img src="https://img.shields.io/badge/RAM-~50MB-blue" alt="RAM Usage">
@@ -26,7 +26,7 @@
   </p>
 </p>
 
-**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.14.3**
+**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.15.0**
 
 ## Screenshots
 
@@ -212,7 +212,7 @@
 - **Self-Reporting Footprint** — Docker Dash memory, uptime, DB size at `/api/footprint`
 - **Let's Encrypt Wizard** — 3-step UI for issuing certs via DNS-01 (Cloudflare, Route53, DigitalOcean, Hetzner, Linode) or HTTP-01. Encrypted credential vault, auto-renewal via Caddy, hash-chained audit trail. Open source — no other Docker UI ships this
 - **Container Remediation Wizard** — 3-step UI that turns Secrets Audit + CIS Benchmark findings into actionable fixes. 20-entry catalog, 4 live-updatable (zero downtime), 16 with compose-recreate + auto-rollback. Git-PR mode for git-backed stacks. No other OSS Docker UI ships this
-- **740 Tests** — 50 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations (100% passing)
+- **757 Tests** — 51 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics (100% passing)
 
 ## Where to start
 
@@ -488,8 +488,9 @@ Docker Dash requires access to the Docker socket (`/var/run/docker.sock`). This 
 | Audit | Date | Score | Critical Issues |
 |-------|------|-------|----------------|
 | Tech Debt Scan | 2026-03-27 | 33 items found | All 4 CRITICAL fixed |
-| Production Readiness | 2026-03-28 | 9.2/10 | All P0+P1 resolved |
+| Production Readiness v5 | 2026-03-28 | 8.05/10 weighted (claimed 9.2) | All P0+P1 resolved |
 | Shell Injection | 2026-03-28 | 0 vectors | All execSync eliminated |
+| Production Readiness v6.15 | 2026-04-22 | 9.5/10 | v5 gaps closed: error-response sanitization on all 500s (v6.14.1), expanded Prometheus metrics (v6.15.0), setInterval leak fixed, CI test count dynamic. Residual: containers.js bundle size, optional Docker-in-Docker integration tests |
 
 ### Known Security Tradeoffs
 
@@ -501,10 +502,10 @@ These are conscious design decisions documented in [SECURITY.md](SECURITY.md):
 
 ### Test Coverage
 
-- **740 tests** across **50 test suites** (100% passing — 4 skipped are live-CF integration tests gated on a CI secret)
-- Unit tests: crypto, helpers, validation, git patterns, platform detection, DMI cloud detection, translations, filter escape
+- **757 tests** across **51 test suites** (100% passing — 4 skipped are live-CF integration tests gated on a CI secret)
+- Unit tests: crypto, helpers, validation, git patterns, platform detection, DMI cloud detection, translations, filter escape, metrics rendering
 - Integration tests: auth flow, API endpoints, RBAC, security, ACME + remediation orchestrators
-- CI runs on every push via GitHub Actions (pinned to Node 24 actions as of v6.13.1, clearing the June 2026 deprecation)
+- CI runs on every push via GitHub Actions (pinned to Node 24 actions as of v6.13.1, clearing the June 2026 deprecation; test count reported dynamically in the CI summary as of v6.15.0)
 
 ## Contributing
 

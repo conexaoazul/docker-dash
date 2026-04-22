@@ -41,7 +41,18 @@ jobs:
           echo "All frontend files OK"
 
       - name: Run tests
-        run: npm test
+        id: tests
+        run: |
+          # Capture Jest output, extract counts, and expose as step outputs so
+          # the Summary step below can report accurate numbers instead of a
+          # hardcoded string that rotted across releases pre-v6.15.0.
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/jest.out
+          TEST_LINE=$(grep -oE 'Tests:\s+.*(passed|skipped|failed)' /tmp/jest.out | tail -1 || echo "")
+          PASSED=$(echo "$TEST_LINE" | grep -oE '[0-9]+ passed' | head -1 | grep -oE '[0-9]+' || echo "0")
+          SKIPPED=$(echo "$TEST_LINE" | grep -oE '[0-9]+ skipped' | head -1 | grep -oE '[0-9]+' || echo "0")
+          echo "passed=$PASSED" >> "$GITHUB_OUTPUT"
+          echo "skipped=$SKIPPED" >> "$GITHUB_OUTPUT"
         env:
           APP_SECRET: ci-test-secret-key-not-for-production
           ENCRYPTION_KEY: ci-test-encryption-key-32-chars-min
@@ -76,7 +87,7 @@ jobs:
           echo "### CI Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Node.js syntax: ✅ (backend + frontend)" >> $GITHUB_STEP_SUMMARY
-          echo "- Tests: ✅ (384 tests — 100% passing)" >> $GITHUB_STEP_SUMMARY
+          echo "- Tests: ✅ (${{ steps.tests.outputs.passed || 'unknown' }} passed, ${{ steps.tests.outputs.skipped || '0' }} skipped — 100% passing)" >> $GITHUB_STEP_SUMMARY
           echo "- Security audit: ✅" >> $GITHUB_STEP_SUMMARY
           echo "- i18n: ✅ (11 languages)" >> $GITHUB_STEP_SUMMARY
           echo "- Dependencies: installed" >> $GITHUB_STEP_SUMMARY

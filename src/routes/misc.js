@@ -33,6 +33,8 @@ router.get('/health', (req, res) => {
 router.get('/metrics', optionalAuth, (req, res) => {
   try {
     const overview = statsService.getOverview();
+    const metricsService = require('../services/metrics');
+
     const lines = [
       '# HELP docker_dash_containers_total Total containers',
       '# TYPE docker_dash_containers_total gauge',
@@ -51,7 +53,11 @@ router.get('/metrics', optionalAuth, (req, res) => {
       lines.push(`docker_dash_container_memory_bytes{name="${name}"} ${c.mem_usage}`);
     }
 
-    res.type('text/plain').send(lines.join('\n') + '\n');
+    // v6.15.0: application-level metrics (uptime, HTTP stats, WS gauge, background jobs).
+    // Appended to the existing stats-derived container gauges above.
+    const appMetrics = metricsService.renderPrometheus();
+
+    res.type('text/plain').send(lines.join('\n') + '\n' + appMetrics);
   } catch (err) {
     res.status(500).send('# Error generating metrics\n');
   }
