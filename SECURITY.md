@@ -4,10 +4,11 @@
 
 | Version | Supported          |
 |---------|--------------------|
-| 5.x     | :white_check_mark: |
-| 4.x     | :white_check_mark: (security fixes only) |
-| 3.x     | :white_check_mark: (security fixes only) |
-| < 3.0   | :x:                |
+| 6.14.x  | :white_check_mark: (current) |
+| 6.13.x  | :white_check_mark: (security fixes only) |
+| 6.12.x  | :white_check_mark: (security fixes only) |
+| 6.11.x  | :white_check_mark: (security fixes only) |
+| < 6.11  | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -87,7 +88,7 @@ If you discover a security vulnerability in Docker Dash, please report it respon
 
 ## Testing
 
-- **384 tests** across 29 test files (100% passing)
+- **740 tests** across 50 test suites (100% passing; 4 skipped are live-Cloudflare integration tests gated on a CI secret)
 - Unit tests: crypto round-trip, input validation, shell sanitization, git patterns
 - Integration tests: auth flow (login, session, logout, SSO), API endpoints (supertest), RBAC, security alerts
 - **CI pipeline** — GitHub Actions runs tests + syntax check + npm audit on every push

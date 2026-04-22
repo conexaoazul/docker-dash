@@ -8,8 +8,8 @@
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/releases/latest"><img src="https://img.shields.io/github/v/release/bogdanpricop/docker-dash?color=blue" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
-    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-530%20passing%20(100%25)-brightgreen" alt="Tests"></a>
-    <img src="https://img.shields.io/badge/version-6.6.0-blue" alt="Version">
+    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-740%20passing%20(100%25)-brightgreen" alt="Tests"></a>
+    <img src="https://img.shields.io/badge/version-6.14.3-blue" alt="Version">
     <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.2%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
     <img src="https://img.shields.io/badge/Docker-~80MB-blue" alt="Image Size">
@@ -26,7 +26,7 @@
   </p>
 </p>
 
-**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.6.0**
+**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.14.3**
 
 ## Screenshots
 
@@ -121,6 +121,11 @@
 - **Guided Troubleshooting** — 8-step diagnostic wizard (state, health, logs, ports, volumes, resources)
 - **Container Rollback** — One-click revert to previous image with version history
 - **First-login Setup Wizard** — Forces password change, recommends disabling default admin
+- **Outbound Network Filter** (v6.7) — Per-container egress policy sidecar with TLS-SNI + HTTP-Host peek. Allowlist-based, blocks IMDS by default, logs denied connections. No TLS decryption
+- **Per-container Security tab** (v6.10) — 2×2 grid combining Secrets score, Egress reachability + filter state, CIS findings, and Image Vulnerabilities on every container's detail page
+- **Stack-level Security Audits** (v6.9.3) — One-click Secrets Audit + Egress Audit buttons on every stack, matching Security Scan + CIS Benchmark. Drill down to Fix via Remediation Wizard
+- **Remediation Wizard drill-down** (v6.9.4) — Image-centric security findings now link to running containers using that image, then open Fix scoped to the container
+- **Error-response sanitization** (v6.14.1) — Central error middleware scrubs `/home/` and `/data/` paths, redacts URL credentials, replaces raw error messages with `"Internal server error"` on 5xx. Closes an accidental info-leak from the pre-Express-5 try/catch pattern
 
 ### Git Integration (GitOps)
 - **Deploy from Git** — Clone repos, select branch, compose file path, deploy with one click
@@ -134,10 +139,12 @@
 
 ### Multi-Host
 - **TCP + TLS** — Connect remote Docker hosts over the network with mutual TLS
-- **SSH Tunnel** — Secure tunnel via SSH (no need to expose Docker API)
+- **SSH Tunnel** — Secure tunnel via SSH (no need to expose Docker API). v6.8 adds a full exec / fileExists / readFile / writeFile channel so the Remediation Wizard Apply mode works end-to-end on remote hosts
 - **Docker Desktop** — Connect to Windows/Mac Docker Desktop instances
 - **Podman Compatible** — Works with Podman via Docker-compatible API socket
 - **Host Selector** — Switch between hosts from the sidebar dropdown
+- **NAS support** (v6.12) — Auto-detects Synology DSM, Unraid, TrueNAS SCALE, QNAP QTS/QuTS hero, OpenMediaVault from `docker info`. No SSH probes, no SDKs. Dedicated per-platform How-To guides cover the platform-specific quirks (Container Manager socket, User Home Service, ix-* managed containers, variable QTS socket path, omv-extras Docker plugin, etc.)
+- **Cloud vendor badges** (v6.12.1) — Optional DMI probe (`/sys/class/dmi/id/sys_vendor` + `product_name`) identifies AWS EC2, Google Cloud, Azure VM, DigitalOcean, Hetzner, Linode, Vultr, Oracle Cloud, Scaleway, OVHcloud, plus on-prem hypervisors (VMware, VirtualBox, KVM/QEMU, Xen, Parallels). Renders as a second colored pill on the Multi-Host card
 
 ### Operations
 - **Stacks Page** — Unified Compose + Git stacks management with actions (up/down/restart/pull)
@@ -184,7 +191,7 @@
 - **Security Alerts** — 5 default rules (brute force, admin created, MFA disabled), threshold detection
 
 ### Knowledge Base
-- **How-To Guides** — 46 built-in bilingual guides (EN + RO) covering Docker basics, Linux, networking, security, Compose, Swarm, troubleshooting, backup, and performance
+- **How-To Guides** — 63 built-in bilingual guides (EN + RO) covering Docker basics, Linux, networking, security, Compose, Swarm, troubleshooting, backup, performance — plus dedicated platform setups for Synology DSM, Unraid, TrueNAS SCALE, QNAP, OpenMediaVault, Generic VPS (Hetzner/DO/EC2/GCE/Azure/Linode/Vultr), and a canonical SSH key auth guide with per-platform public-key placement instructions
 - **Guide Editor** — Admins can create, edit, and delete custom guides with HTML content in both languages
 - **Search & Categories** — Filter by 9 categories, difficulty level, and free-text search across all guides
 
@@ -197,6 +204,7 @@
 - **Container Metadata** — Custom labels, descriptions, links, categories, owner, notes
 - **Dark/Light Theme** — Per-user sync across devices, system-aware toggle, mobile responsive
 - **i18n** — 11 languages: English, Romanian, German, Italian, French, Spanish, Portuguese, Chinese, Japanese, Korean, Klingon ([add yours](public/js/i18n/README.md))
+- **Translations tab** (v6.11) — Built-in Google Translate + DeepL integration for the 25% of keys missing in non-EN locales. Per-provider monthly quota tracking (500k chars each free tier), auto-accept toggle, chunked batch with progress bar + cancel, runtime DB overrides applied on login (no file download / git commit / container rebuild). AES-GCM encrypted API keys, hash-chained audit trail
 - **Klingon Easter Egg** — Full activation animation with sound, dagger cursor, red theme
 - **Command Palette** — Ctrl+K quick navigation with keyboard shortcuts
 - **Watchtower Detection** — Auto-detect and migrate from Watchtower to native safe-pull
@@ -204,7 +212,7 @@
 - **Self-Reporting Footprint** — Docker Dash memory, uptime, DB size at `/api/footprint`
 - **Let's Encrypt Wizard** — 3-step UI for issuing certs via DNS-01 (Cloudflare, Route53, DigitalOcean, Hetzner, Linode) or HTTP-01. Encrypted credential vault, auto-renewal via Caddy, hash-chained audit trail. Open source — no other Docker UI ships this
 - **Container Remediation Wizard** — 3-step UI that turns Secrets Audit + CIS Benchmark findings into actionable fixes. 20-entry catalog, 4 live-updatable (zero downtime), 16 with compose-recreate + auto-rollback. Git-PR mode for git-backed stacks. No other OSS Docker UI ships this
-- **530 Tests** — 38 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators (100% passing)
+- **740 Tests** — 50 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations (100% passing)
 
 ## Where to start
 
@@ -284,7 +292,7 @@ Default credentials: `admin` / `admin` — on first login, a **security setup wi
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Node.js 20, Express 4, dockerode, better-sqlite3, ws, ssh2, ldapjs |
+| Backend | Node.js 20, Express 5, dockerode, better-sqlite3, ws, ssh2, ldapts |
 | Frontend | Vanilla JavaScript SPA, Chart.js, xterm.js, Font Awesome (CDN) |
 | Database | SQLite with WAL mode, auto-aggregation, configurable retention |
 | Security | bcrypt, Helmet CSP, rate limiting, session-based auth, Bearer token fallback |
@@ -301,9 +309,10 @@ Docker Dash can manage multiple Docker hosts from a single instance:
 | **TCP + TLS** | Remote Linux servers | Docker API exposed on port 2376 + TLS certificates |
 | **Docker Desktop** | Windows / Mac | "Expose daemon on TCP" enabled in DD Settings |
 | **SSH Tunnel** | Secure remote (no API exposure) | SSH access + `socat` installed + user in `docker` group |
+| **SSH to NAS** | Synology / Unraid / TrueNAS SCALE / QNAP / OMV | SSH access + admin in `docker` group. Platform auto-detected from `docker info` — dedicated How-To guide per platform |
 | **Unix Socket** | Local (default) | Docker socket mounted (automatic) |
 
-The app includes a **built-in setup guide** (Hosts page) with step-by-step instructions for each method, including TLS certificate generation and per-OS `socat` installation commands.
+The app includes a **built-in setup guide** (Hosts page) with step-by-step instructions for each method, including TLS certificate generation, per-OS `socat` installation commands, SSH key authentication setup, and a 9-item Synology DSM 7.x security hardening checklist (added in v6.14.3).
 
 ## Podman Support
 
@@ -374,7 +383,7 @@ Currently supported: **English**, **Romanian**, **German**, **Italian**, **Frenc
 docker-dash/
 ├── src/
 │   ├── config/          # Environment-based configuration
-│   ├── db/              # SQLite setup + 37 auto-migrations
+│   ├── db/              # SQLite setup + 60 auto-migrations
 │   ├── middleware/       # Auth, rate limiting, hostId extraction
 │   ├── routes/          # REST API (containers, images, volumes, networks, swarm, hosts, ...)
 │   ├── services/        # Business logic (docker, stats, alerts, ssh-tunnel, registry, ldap, cis-benchmark, ssl)
@@ -492,10 +501,10 @@ These are conscious design decisions documented in [SECURITY.md](SECURITY.md):
 
 ### Test Coverage
 
-- **384 tests** across **29 test files** (100% passing)
-- Unit tests: crypto, helpers, validation, git patterns
-- Integration tests: auth flow, API endpoints, RBAC, security
-- CI runs on every push via GitHub Actions
+- **740 tests** across **50 test suites** (100% passing — 4 skipped are live-CF integration tests gated on a CI secret)
+- Unit tests: crypto, helpers, validation, git patterns, platform detection, DMI cloud detection, translations, filter escape
+- Integration tests: auth flow, API endpoints, RBAC, security, ACME + remediation orchestrators
+- CI runs on every push via GitHub Actions (pinned to Node 24 actions as of v6.13.1, clearing the June 2026 deprecation)
 
 ## Contributing
 
