@@ -2,6 +2,101 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.2.0] - 2026-04-22 — "In-app Observability Wizard"
+
+Turns the v7.1.0 observability primitives (compose profile + dashboard JSON + docs) into an admin UI wizard at **System → Observability**. Detects existing Prometheus / Grafana running on the host and offers the right path — integrate, deploy, or hybrid — without operators needing to read the full doc first.
+
+### Added — Wizard page `/system/observability`
+
+Three UX branches driven by detection result:
+
+- **Both Prometheus + Grafana found** (green banner) — shows scrape-config YAML with a Copy button + form to import the Docker Dash dashboard directly into the detected Grafana (URL pre-filled from the container's exposed port).
+- **Only one found** (yellow banner) — explains what's missing + three sub-options: deploy bundled stack, install missing piece manually, or integrate manually. Each sub-option has its own action.
+- **Neither found** (info banner) — primary CTA: `docker compose --profile observability up -d` with post-boot instructions. Secondary CTA: form to import the dashboard to a remote Grafana (for operators who have Grafana in SaaS or on a different host).
+
+All states share a footer link to the full operator guide.
+
+### Added — Backend endpoints (admin-only)
+
+- **`GET /api/observability/detect`** — scans running containers for Prometheus / Grafana image prefixes (`prom/prometheus`, `grafana/grafana`, `grafana/grafana-enterprise`, `bitnami/prometheus`, `bitnami/grafana`). Returns `{ prometheus, grafana, dockerDashContainerId, scrapeConfigSnippet }`. Never modifies Docker state. Never throws — dockerService failure returns empty result with a warn log. Safe to call repeatedly.
+
+- **`POST /api/observability/import-dashboard`** — forwards the bundled dashboard JSON to the user-provided Grafana URL + token. Uses `POST /api/dashboards/db` with `Authorization: Bearer <token>`, `overwrite: true`, message identifier, 10-second timeout, no redirect following. Token is **never stored** in the DB or logs; `grafanaUrl` goes to audit log (both on success and failure).
+
+### Added — Services + tests
+
+- `src/services/observability-detect.js` (~110 LOC) — detection logic
+- `src/services/observability-import.js` (~115 LOC) — dashboard POST + scrape-config snippet generator
+- `src/routes/observability.js` (~60 LOC) — admin-gated routes
+- `src/__tests__/observability-detect.test.js` — **15 tests**: image pattern matching (case-insensitive + alternate prefixes), port resolution, missing-Names handling, dockerDashContainerId self-identification (with deliberate exclusion of `-redis`/`-prometheus`/`-grafana`/`-caddy` siblings), throw safety, first-match preference
+- `src/__tests__/observability-import.test.js` — **13 tests**: scrape-config snippet (default + custom target + custom port + 15s interval), importDashboard arg validation (missing URL/token/malformed), HTTP behavior (POST shape, Bearer auth, non-200 handling, network errors, non-JSON 200, id+version stripping)
+
+**Total new tests: 28.** Suite: 879 → **907 passing / 59 suites**.
+
+### Added — Frontend + i18n
+
+- `public/js/pages/observability-wizard.js` (~450 LOC) — the page, handlers, 3-state rendering
+- Sidebar entry under the System cluster (admin-only — hidden from operators/viewers via existing RBAC middleware)
+- `public/js/i18n/en.js` + `ro.js` — 40 new keys under `pages.observability.*` (bilingual baseline; other 9 languages can be auto-filled via the Translations tab once a bilingual admin accepts the machine translations)
+- `public/index.html` — sidebar nav-item + `<script>` tag for the wizard page + `ObservabilityWizardPage` in `App._pages` registry
+
+### Added — Docs
+
+- New `§1a. In-app wizard` section in [`docs/features/observability.md`](docs/features/observability.md) — explains detection, security (admin-only, token handling, audit, 10s timeout, no redirects), limitations (local daemon only, custom tags not matched, no auto-deploy in v7.2).
+
+### Security ([deep-spec §5](plans/deep-spec-observability-wizard.md))
+
+- Both endpoints require `admin` role. Sidebar link hidden for operators + viewers.
+- Outbound POST to Grafana is constrained: 10-second timeout, no redirect following (default Node.js HTTPS/HTTP behavior — safe).
+- Grafana token never persisted: entered in `<input type="password">`, posted once over authenticated session, forwarded via `Authorization: Bearer`, cleared from the DOM on success, garbage-collected on server side.
+- Audit log: `observability_dashboard_imported` on success + `observability_dashboard_import_failed` on failure, both with `grafanaUrl` + admin username, never the token.
+
+### Explicit non-goals for v7.2.0
+
+- **No in-UI auto-deploy.** The deploy path shows copy-paste instructions; operators run `docker compose --profile observability up -d` on the host. Rationale: running compose-up from inside the Docker Dash container requires host path knowledge (the compose file lives on the host, not in our image) which we can't reliably provide across platforms. v7.3.0 may add auto-deploy via dockerode with embedded config.
+- **No network-reachability probe.** We detect by image prefix, not by HTTP probe. Faster + simpler + doesn't cause false negatives on slow-starting containers.
+- **No Prometheus config auto-update.** We show the scrape snippet and let the operator paste it. Silent modification of prometheus.yml would be unsafe.
+
+### Staging soak
+
+Deployed to staging (which is running v7.1.0 observability profile from the previous release). Wizard correctly detected:
+
+- Prometheus: `docker-dash-prometheus` (image `prom/prometheus:v3.0.1`, internal URL `http://docker-dash-prometheus:9090`)
+- Grafana: `docker-dash-grafana` (image `grafana/grafana:11.3.0`, external port `3005`)
+- Self: Docker Dash container identified correctly
+
+"Both detected" branch rendered with correct scrape config snippet. Copy button worked. Dashboard import form pre-filled with `http://192.168.13.20:3005`. Manual import via the UI form successfully POSTed to Grafana and returned the dashboard URL.
+
+### Tests / Lint
+
+- **907 passing + 4 skipped / 59 suites** (was 879 / 57)
+- Lint: 0 warnings / 0 errors
+- `npm audit` clean
+
+### Files touched
+
+- `src/services/observability-detect.js` (new)
+- `src/services/observability-import.js` (new)
+- `src/routes/observability.js` (new)
+- `src/server.js` — mount new route
+- `src/__tests__/observability-detect.test.js` (new, 15 tests)
+- `src/__tests__/observability-import.test.js` (new, 13 tests)
+- `public/js/pages/observability-wizard.js` (new)
+- `public/js/app.js` — page registry
+- `public/index.html` — sidebar + script tag
+- `public/js/i18n/en.js` + `ro.js` — 40 new keys each
+- `docs/features/observability.md` — new §1a wizard section
+- `plans/deep-spec-observability-wizard.md` (local, gitignored)
+
+### Roadmap — v7.3.0
+
+- In-UI auto-deploy via dockerode (no host compose required)
+- Live reachability probe (detect handles) + version introspection
+- Ship additional provisioned dashboards (HA cluster health, container fleet)
+- Alert-rule provisioning (push our recommended PromQL alerts to user's Grafana)
+- Remote-write config for Grafana Cloud / similar SaaS collectors
+
+---
+
 ## [7.1.0] - 2026-04-22 — "Observability stack — Prometheus + Grafana opt-in profile"
 
 Opt-in observability: `docker compose --profile observability up -d` adds Prometheus (scraping `/api/metrics` every 15s) + Grafana (pre-provisioned data source + 8-panel overview dashboard) alongside the app. Zero UI config — the dashboard populates within 30s of first scrape.

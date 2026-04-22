@@ -38,6 +38,7 @@ const App = {
     'logs':           () => LogsPage,
     'timeline':       () => TimelinePage,
     'howto':          () => HowToPage,
+    'observability':  () => ObservabilityWizardPage,
   },
 
   async init() {

@@ -19,6 +19,32 @@ For operators who already run Prometheus or Grafana: skip this profile and integ
 
 Both services run with `no-new-privileges:true`. Data persists across restarts via named Docker volumes (`docker-dash-prometheus-data`, `docker-dash-grafana-data`).
 
+## 1a. In-app wizard (v7.2.0+)
+
+Instead of learning Prometheus + Grafana config from scratch, navigate to **System → Observability** in the Docker Dash UI. The wizard detects what's already running on your host and shows the right next steps:
+
+| Detection result | What the wizard offers |
+|------------------|------------------------|
+| Both Prometheus + Grafana found | Scrape-config YAML snippet (Copy button) + "Import dashboard" form (URL + service-account token → one-click import via Grafana API) |
+| Only one found | Three options — deploy our bundled stack, install the missing piece manually, or integrate manually |
+| Neither found | Deploy command + "Or import to remote Grafana" form |
+
+**Admin-only.** The wizard uses:
+
+- `GET /api/observability/detect` — scans running containers for Prometheus/Grafana image prefixes (`prom/prometheus`, `grafana/grafana`, `bitnami/*`, Grafana Enterprise). Never modifies Docker state.
+- `POST /api/observability/import-dashboard` — receives a Grafana URL + service-account token, forwards our dashboard JSON to `<grafanaUrl>/api/dashboards/db` with `Authorization: Bearer <token>`. Token is **never stored** in Docker Dash — it's forwarded and discarded after the response.
+
+**Security notes** ([deep-spec §5](../../plans/deep-spec-observability-wizard.md)):
+- Both endpoints require `admin` role. Operators and viewers don't see the sidebar link.
+- Outbound import POST has a 10-second timeout. No redirect following.
+- Audit log entry per import (success or failure) — records Grafana URL + admin username, excludes token.
+- Token field uses `<input type="password">` and is cleared from the DOM on success.
+
+**Limitations:**
+- Detection only sees containers on the local Docker daemon. Prometheus/Grafana running on a different host are not auto-detected — use the "external Grafana" form to point at them manually.
+- Custom image tags (private mirrors, non-standard names) aren't matched. Operators in that situation already know what they have and can use the manual form.
+- The wizard doesn't auto-deploy. The "Deploy" path shows copy-paste instructions. Rationale: deploying Prometheus + Grafana from inside the Docker Dash container requires config-file bind-mounts the container can't provide without host path knowledge. v7.3.0 may add auto-deploy via dockerode with embedded config.
+
 ## 2. Enabling
 
 ```bash

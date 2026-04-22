@@ -10,6 +10,20 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '7.2.0',
+      date: '2026-04-22',
+      title: 'In-app Observability Wizard — detect + guide + import',
+      changes: [
+        { type: 'feature', text: 'New admin page System → Observability. Wizard detects Prometheus + Grafana running on the host and offers the right next steps: integration (both found) / partial deploy (one found) / full deploy (neither). Zero docs reading required to connect Docker Dash to your monitoring.' },
+        { type: 'feature', text: 'Detection scans running containers for prom/prometheus, grafana/grafana, grafana/grafana-enterprise, bitnami/prometheus, bitnami/grafana. Identifies Docker Dash itself so the scrape-config snippet uses the right target name. Admin-only via GET /api/observability/detect.' },
+        { type: 'feature', text: '"Import dashboard" one-click: paste Grafana URL + service-account token, we POST the Docker Dash Overview dashboard JSON via Grafana API and return a direct link. Token is NEVER stored — forwarded once and cleared from the DOM on success. Audit log per import (success/failure) with URL + admin username, never the token.' },
+        { type: 'feature', text: 'Copy button for the Prometheus scrape-config YAML snippet. Pre-filled with the correct target name + port based on detection.' },
+        { type: 'improvement', text: '28 new tests — 15 for detection (image patterns, port resolution, self-identification, throw safety), 13 for import (scrape snippet generation, arg validation, HTTP behavior with mocked requests, non-JSON response tolerance, id/version stripping for re-import). Suite: 879 → 907 / 59 suites.' },
+        { type: 'improvement', text: 'Bilingual EN + RO i18n (40 new keys each). Other 9 languages auto-fill via the Translations tab when a bilingual admin reviews the machine translations.' },
+        { type: 'fix', text: 'Explicit non-goals for v7.2.0: no in-UI auto-deploy (copy-paste command instead — rationale in deep-spec), no network reachability probe (image prefix is faster + avoids false negatives on slow-starting containers), no silent Prometheus config mutation (we show the snippet, operators paste it — never modify their prometheus.yml without consent). v7.3.0 may add auto-deploy via dockerode.' },
+      ],
+    },
+    {
       version: '7.1.0',
       date: '2026-04-22',
       title: 'Observability stack — Prometheus + Grafana opt-in profile',

@@ -160,6 +160,7 @@ app.use('/api/egress-filter', apiLimiter, require('./routes/egress-filter'));
 app.use('/api/translations', apiLimiter, require('./routes/translations'));
 app.use('/api/remediate', apiLimiter, require('./routes/remediate'));
 app.use('/api/log-forwarders', apiLimiter, require('./routes/log-forwarders'));
+app.use('/api/observability', apiLimiter, require('./routes/observability'));
 app.use('/api/swarm', apiLimiter, require('./routes/swarm'));
 app.use('/api', apiLimiter, require('./routes/misc'));
 

@@ -405,6 +405,60 @@ i18n.register('ro', 'RO', 'Română', {
       guideNasSec9: '<strong>Doar HTTPS pentru UI-ul DSM</strong> (Control Panel → Network → DSM Settings → Automatically redirect HTTP to HTTPS). Inclusiv pe LAN — credentialele HTTP pe WiFi sunt triviale de capturat.',
       guideNasTip: 'Auto-detect identifica platforma NAS + versiunea DSM/QTS/OMV/etc. din <code>docker info</code>, fara configurare suplimentara. Cauta badge-ul de platforma deasupra cardului de host pe pagina Multi-Host.',
     },
+    // ── Observability Wizard ─────────────────────
+    observability: {
+      title: 'Wizard Observabilitate',
+      subtitle: 'Conecteaza metricile Docker Dash la Prometheus + Grafana. Wizard-ul detecteaza stack-urile de monitorizare existente pe acest host si ofera pasii urmatori potriviti.',
+      rescan: 'Rescaneaza',
+      scanning: 'Scanez containerele de monitorizare...',
+      detectError: 'Detectia a esuat: {{err}}',
+      fullGuide: 'Ghid complet pentru operatori — docs/features/observability.md',
+      stateA: {
+        banner: 'Stack de monitorizare detectat',
+      },
+      stateB: {
+        banner: 'Am gasit {{found}} dar nu si {{missing}}',
+        intro: '{{found}} ruleaza: {{details}}',
+        options: 'Optiuni pentru a completa stack-ul cu {{missing}}:',
+      },
+      stateC: {
+        banner: 'Niciun stack de monitorizare detectat pe acest host',
+        deployTitle: 'Deploy stack-ul Prometheus + Grafana inclus',
+        deployDesc: 'Docker Dash are un compose profile optional pentru observabilitate care porneste Prometheus (scrape /api/metrics la 15s) si Grafana (cu dashboard-ul "Docker Dash — Overview" pre-provisioned). Dupa rularea comenzii de mai jos, revino aici si click Rescan.',
+        rescan: 'Rescaneaza dupa deploy',
+        externalTitle: 'Sau importa dashboard-ul intr-un Grafana remote',
+        externalDesc: 'Daca rulezi deja Grafana in alta parte (alt host, SaaS, etc.), introdu URL-ul si un token de service-account cu permisiune Dashboard:Write. Vom face POST cu JSON-ul dashboard-ului si primesti un link direct.',
+      },
+      actionScrape: {
+        title: 'Pasul 1 — Adauga Docker Dash in scrape config-ul Prometheus',
+        desc: 'Lipeste acest YAML in prometheus.yml sub scrape_configs: — apoi reload Prometheus (curl -X POST <prom-url>/-/reload daca --web.enable-lifecycle e activ, sau restart container).',
+        copy: 'Copiaza snippet',
+        copied: 'Copiat in clipboard',
+        hint: 'Editeaza target-ul daca Prometheus scraps cross-host sau intre retele.',
+      },
+      actionImport: {
+        title: 'Pasul 2 — Importa dashboard-ul Docker Dash in Grafana',
+        desc: 'Creeaza (sau actualizeaza) dashboard-ul "Docker Dash — Overview" cu 8 panel-uri. Necesita un token de service-account Grafana cu scope Dashboard:Write — token-ul tau este forwardat catre Grafana si NU este stocat de Docker Dash.',
+        urlLabel: 'URL de baza Grafana',
+        tokenLabel: 'Token service-account Grafana',
+        tokenHint: 'Creeaza unul la Grafana → Administration → Service accounts → New service account (role: Editor).',
+        submit: 'Importa dashboard',
+        importing: 'Import dashboard in Grafana...',
+        success: 'Dashboard importat cu succes',
+        openDashboard: 'Deschide dashboard-ul importat',
+        missingFields: 'URL-ul si token-ul sunt obligatorii',
+      },
+      optionDeploy: {
+        title: 'Optiunea A — Deploy profile-ul observability inclus',
+        desc: 'Ruleaza Prometheus + Grafana incluse de Docker Dash. Cea mai rapida cale. Nu necesita infrastructura de monitorizare existenta.',
+        rescanHint: 'Dupa ce containerele pornesc, revino pe aceasta pagina si click Rescan.',
+      },
+      optionManual: {
+        title: 'Optiunea B — Instaleaza {{missing}} singur, apoi integreaza',
+        desc: 'Daca preferi propria instalare de {{missing}} (versiune diferita, config diferit), fa-o separat si foloseste calea de integrare manuala.',
+        integrateLink: 'Ghid de integrare — docs/features/observability.md §5',
+      },
+    },
     // ── About ────────────────────────────────────
     about: {
       title: 'Despre',

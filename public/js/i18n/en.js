@@ -438,6 +438,60 @@ i18n.register('en', 'EN', 'English', {
       guideNasSec9: '<strong>HTTPS-only for DSM UI</strong> (Control Panel → Network → DSM Settings → Automatically redirect HTTP to HTTPS). Even on LAN — HTTP credentials over WiFi are trivial to capture.',
       guideNasTip: 'Auto-detection identifies your NAS platform + DSM/QTS/OMV/etc. version from <code>docker info</code> with no extra configuration. Look for the platform badge above the host card on the Multi-Host page.',
     },
+    // ── Observability Wizard ─────────────────────
+    observability: {
+      title: 'Observability Wizard',
+      subtitle: 'Connect Docker Dash metrics to Prometheus + Grafana. The wizard detects existing monitoring stacks on this host and offers the right next steps.',
+      rescan: 'Rescan',
+      scanning: 'Scanning for monitoring containers…',
+      detectError: 'Detection failed: {{err}}',
+      fullGuide: 'Full operator guide — docs/features/observability.md',
+      stateA: {
+        banner: 'Monitoring stack detected',
+      },
+      stateB: {
+        banner: 'Found {{found}} but no {{missing}}',
+        intro: '{{found}} is running: {{details}}',
+        options: 'Options to complete the stack with {{missing}}:',
+      },
+      stateC: {
+        banner: 'No monitoring stack detected on this host',
+        deployTitle: 'Deploy the bundled Prometheus + Grafana stack',
+        deployDesc: 'Docker Dash ships an opt-in observability compose profile that brings up Prometheus (scrape /api/metrics every 15s) and Grafana (with the pre-provisioned "Docker Dash — Overview" dashboard). After running the command below, come back and click Rescan.',
+        rescan: 'Rescan after deploy',
+        externalTitle: 'Or import the dashboard to a remote Grafana',
+        externalDesc: 'If you already run Grafana elsewhere (another host, SaaS, etc.), enter its URL and a service-account token with Dashboard:Write permission. We\'ll POST the dashboard JSON and return a direct link.',
+      },
+      actionScrape: {
+        title: 'Step 1 — Add Docker Dash to Prometheus scrape config',
+        desc: 'Paste this YAML into your prometheus.yml under scrape_configs: — then reload Prometheus (curl -X POST <prom-url>/-/reload if --web.enable-lifecycle is enabled, or restart the container).',
+        copy: 'Copy snippet',
+        copied: 'Copied to clipboard',
+        hint: 'Edit the target host if Prometheus scrapes cross-host or across networks.',
+      },
+      actionImport: {
+        title: 'Step 2 — Import the Docker Dash dashboard into Grafana',
+        desc: 'Creates (or updates) the "Docker Dash — Overview" dashboard with 8 panels. Requires a Grafana service-account token with Dashboard:Write scope — your token is forwarded to Grafana and NOT stored by Docker Dash.',
+        urlLabel: 'Grafana base URL',
+        tokenLabel: 'Grafana service-account token',
+        tokenHint: 'Create one at Grafana → Administration → Service accounts → New service account (role: Editor).',
+        submit: 'Import dashboard',
+        importing: 'Importing dashboard to Grafana…',
+        success: 'Dashboard imported successfully',
+        openDashboard: 'Open imported dashboard',
+        missingFields: 'URL and token are both required',
+      },
+      optionDeploy: {
+        title: 'Option A — Deploy the bundled observability profile',
+        desc: 'Run Docker Dash\'s bundled Prometheus + Grafana. Fastest path. No existing monitoring infrastructure needed.',
+        rescanHint: 'After the containers start, come back to this page and click Rescan.',
+      },
+      optionManual: {
+        title: 'Option B — Install {{missing}} yourself, then integrate',
+        desc: 'If you prefer your own {{missing}} install (different version, different config), deploy it separately and use the manual integration path.',
+        integrateLink: 'Integration guide — docs/features/observability.md §5',
+      },
+    },
     // ── About ────────────────────────────────────
     about: {
       title: 'About',

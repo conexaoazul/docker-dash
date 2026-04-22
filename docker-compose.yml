@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        APP_VERSION: "${APP_VERSION:-7.1.0}"
-    image: docker-dash:${APP_VERSION:-7.1.0}
+        APP_VERSION: "${APP_VERSION:-7.2.0}"
+    image: docker-dash:${APP_VERSION:-7.2.0}
     container_name: docker-dash
     restart: unless-stopped
     env_file:
@@ -54,7 +54,7 @@ services:
   dd-egress-filter:
     build:
       context: ./docker/egress-filter
-    image: docker-dash-egress-filter:${APP_VERSION:-7.1.0}
+    image: docker-dash-egress-filter:${APP_VERSION:-7.2.0}
     container_name: dd-egress-filter
     restart: unless-stopped
     # Uses the default bridge so target containers on the default bridge can
@@ -83,14 +83,14 @@ services:
   #   DD_MODE=ha
   #   REDIS_URL=redis://redis:6379
   #
-  # v7.1.0 ships the foundation (Redis-backed rate limiter + cluster abstraction).
+  # v7.2.0 ships the foundation (Redis-backed rate limiter + cluster abstraction).
   # DO NOT run multi-replica in HA mode yet — WS pub/sub + cron leader election
-  # land in v7.1.0-alpha.1 / v7.1.0-rc.1. Running v7.1.0 HA with 2+ replicas
+  # land in v7.2.0-alpha.1 / v7.2.0-rc.1. Running v7.2.0 HA with 2+ replicas
   # causes duplicate cron execution (duplicate backups, concurrent VACUUM).
   #
   # Single-instance HA (1 replica + Redis) is useful for warming up operational
   # tooling (Prometheus scrape of Redis, sticky-session LB config drill, etc.)
-  # before rolling out true multi-replica in v7.1.0.
+  # before rolling out true multi-replica in v7.2.0.
   redis:
     image: redis:7-alpine
     container_name: docker-dash-redis
@@ -108,7 +108,7 @@ services:
     profiles:
       - ha
 
-  # Optional observability stack (v7.1.0) — enable with:
+  # Optional observability stack (v7.2.0) — enable with:
   #   docker compose --profile observability up -d
   #
   # Ships Prometheus (scrape /api/metrics every 15s) + Grafana (auto-provisioned
