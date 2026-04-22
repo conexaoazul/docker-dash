@@ -175,6 +175,8 @@ const LEADER_HEARTBEAT_MS = 10000;
 
 let _leaderState = 'unknown';       // 'leader' | 'reader' | 'unknown'
 let _leaderTimer = null;
+let _leaderSince = null;             // ms timestamp since last transition TO leader
+let _lastHeartbeatAt = null;         // ms timestamp of last successful heartbeat / election
 const _onLeaderCbs = [];
 const _onReaderCbs = [];
 
@@ -203,10 +205,10 @@ async function _electOnce() {
     // Extend our existing lock (XX = only if key exists; silently fails if
     // the lock has expired and was grabbed by someone else).
     const ok = await r.set(LEADER_KEY, NODE_ID, 'XX', 'PX', LEADER_TTL_MS).catch(() => null);
-    if (ok === 'OK') return;  // still leader
+    if (ok === 'OK') { _lastHeartbeatAt = Date.now(); return; }  // still leader
     // Lock lost — check who has it
     const holder = await r.get(LEADER_KEY).catch(() => null);
-    if (holder === NODE_ID) return;  // race: we got it back somehow, still OK
+    if (holder === NODE_ID) { _lastHeartbeatAt = Date.now(); return; }  // race: still ours
     _transitionTo('reader');
     return;
   }
@@ -214,6 +216,7 @@ async function _electOnce() {
   // Reader path — try to acquire
   const ok = await r.set(LEADER_KEY, NODE_ID, 'NX', 'PX', LEADER_TTL_MS).catch(() => null);
   if (ok === 'OK') {
+    _lastHeartbeatAt = Date.now();
     _transitionTo('leader');
     return;
   }
@@ -224,8 +227,10 @@ async function _electOnce() {
   const holder = await r.get(LEADER_KEY).catch(() => null);
   if (holder === NODE_ID) {
     await r.pexpire(LEADER_KEY, LEADER_TTL_MS).catch(() => null);
+    _lastHeartbeatAt = Date.now();
     _transitionTo('leader');
   } else {
+    _lastHeartbeatAt = Date.now();
     _transitionTo('reader');
   }
 }
@@ -234,12 +239,34 @@ function _transitionTo(role) {
   if (_leaderState === role) return;
   const prev = _leaderState;
   _leaderState = role;
+  if (role === 'leader') _leaderSince = Date.now();
+  else _leaderSince = null;
   log.info('Cluster role changed', { from: prev, to: role, nodeId: NODE_ID });
   const cbs = role === 'leader' ? _onLeaderCbs : _onReaderCbs;
   for (const cb of cbs) {
     try { cb(); }
     catch (e) { log.warn('role-transition callback threw', { message: e.message, role }); }
   }
+}
+
+/** Return a plain-object snapshot of cluster state for /api/cluster/status
+ *  and /api/metrics. Safe to call from any thread; no I/O. */
+function getStatus() {
+  const now = Date.now();
+  return {
+    mode: isHa() ? 'ha' : 'standalone',
+    nodeId: NODE_ID,
+    role: isHa() ? _leaderState : 'standalone',
+    // ms since this node became leader (null if not leader)
+    leaderSinceMs: _leaderSince ? (now - _leaderSince) : null,
+    // ms since last successful heartbeat / election poll (HA only)
+    heartbeatAgeMs: isHa() && _lastHeartbeatAt ? (now - _lastHeartbeatAt) : null,
+    // ms TTL of the leader lock (static config, exposed for observability)
+    leaderLockTtlMs: isHa() ? LEADER_TTL_MS : null,
+    heartbeatIntervalMs: isHa() ? LEADER_HEARTBEAT_MS : null,
+    // Redis connection health (true/false/null for standalone)
+    redisConnected: !isHa() ? null : !!(_redis && _redis.status === 'ready'),
+  };
 }
 
 /** Register a callback to run when this node becomes leader.
@@ -289,6 +316,7 @@ module.exports = {
   rateLimitTick,
   publish, subscribe,
   isLeader, onBecomeLeader, onBecomeReader,
+  getStatus,
   shutdown,
   // test-only: reset internal state
   _reset() {

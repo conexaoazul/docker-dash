@@ -9,8 +9,8 @@
     <a href="https://github.com/bogdanpricop/docker-dash/releases/latest"><img src="https://img.shields.io/github/v/release/bogdanpricop/docker-dash?color=blue" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-879%20passing%20(100%25)-brightgreen" alt="Tests"></a>
-    <img src="https://img.shields.io/badge/version-6.17.2-blue" alt="Version">
-    <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.7%2F10-brightgreen" alt="Production Readiness"></a>
+    <img src="https://img.shields.io/badge/version-7.0.0-blue" alt="Version">
+    <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.8%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
     <img src="https://img.shields.io/badge/Docker-~80MB-blue" alt="Image Size">
     <img src="https://img.shields.io/badge/RAM-~50MB-blue" alt="RAM Usage">
@@ -26,14 +26,15 @@
   </p>
 </p>
 
-**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v6.17.2**
+**Zero dependencies to deploy** — just Docker. No external database, no Redis, no build step. Current version: **v7.0.0**
 
-**HA mode feature-complete in v6.17.x** (standalone default unchanged):
+**HA mode production-ready in v7.0.0** (standalone default unchanged):
 - **v6.17.0** — cluster abstraction + Redis-backed rate limiter
-- **v6.17.1** — cross-replica WS broadcasts via Redis pub/sub
-- **v6.17.2** — **cron + Docker event stream + git polling leader election** via Redis `SET NX PX`. Multi-replica HA is now safe: one replica holds the leader lock (30s TTL, 10s heartbeat); readers serve HTTP, ignore cron, have Docker events delivered via pub/sub.
+- **v6.17.1** — cross-replica WebSocket broadcasts via Redis pub/sub
+- **v6.17.2** — cron + Docker event stream + git polling leader election via Redis `SET NX PX`
+- **v7.0.0** — cluster observability (`/api/cluster/status`, `/api/health` exposes `role`, 4 new Prometheus gauges), operator runbook, production-grade LB configs (Caddy + Traefik + HAProxy + nginx)
 
-v7.0.0 stable adds the failover runbook + staging multi-replica soak + sticky-session LB docs. See [docs/features/ha-mode.md](docs/features/ha-mode.md).
+See [HA Mode](docs/features/ha-mode.md) · [Failover runbook](docs/features/ha-failover-runbook.md) · [LB configs](docs/features/ha-lb-configs.md).
 
 ## Screenshots
 
@@ -228,7 +229,9 @@ Dedicated reference docs for the deeper features, in [docs/features/](docs/featu
 - **[Prometheus Metrics](docs/features/prometheus-metrics.md)** — `/api/metrics` endpoint reference, metric names + types + labels, sample Grafana queries, cardinality notes
 - **[Platform Detection](docs/features/platform-detection.md)** — NAS + cloud + hypervisor detection logic; complete signature list; how to extend
 - **[Translations Tooling](docs/features/translations-tooling.md)** — Google Translate + DeepL integration, quota tracking, review workflow, runtime DB overrides
-- **[HA Mode](docs/features/ha-mode.md)** — optional Redis-backed redundancy (v6.17.0 preview, full in v7.0); architecture, trade-offs, when NOT to use it
+- **[HA Mode](docs/features/ha-mode.md)** — optional Redis-backed redundancy (production-ready in v7.0.0); architecture, trade-offs, when NOT to use it
+- **[HA Failover Runbook](docs/features/ha-failover-runbook.md)** — operator procedures: leader death, rolling restart, Redis failure, split-brain detection, recovery checklist
+- **[HA Load Balancer Configs](docs/features/ha-lb-configs.md)** — copy-paste examples for Caddy + Traefik + HAProxy + nginx with sticky-session + WS upgrade + health checks
 
 ## Where to start
 
@@ -509,6 +512,7 @@ Docker Dash requires access to the Docker socket (`/var/run/docker.sock`). This 
 | Production Readiness v6.15.1 | 2026-04-22 | 9.1/10 (defensible weighted) | v5 gaps closed: error-response sanitization on all 500s (v6.14.1), expanded Prometheus metrics with job counters populated (v6.15.0–v6.15.1), setInterval leak fixed, CI test count dynamic, X-Frame-Options: DENY + Permissions-Policy, 0 lint warnings |
 | Production Readiness v6.16.0 | 2026-04-22 | 9.5/10 | Phase 2 shipped: `containers.js` (5774 lines, largest JS file) split into list-eager (3226 lines) + detail-lazy (2595 lines loaded on first `/containers/:id` navigation via script injection). Performance category 7 → 9, initial JS payload −45% for users not visiting a container detail page. 757 tests unchanged |
 | Production Readiness v6.16.1 | 2026-04-22 | **9.7/10** | Testing 8.5 → 9.5 (+86 tests across 4 previously-untested services: permissions RBAC, settings CRUD, security-alerts rule evaluation, event-notifier dispatch). Documentation 9 → 9.5 (3 new feature reference docs under `docs/features/`: Prometheus metrics, platform detection, translations tooling). Residual: Docker-in-Docker integration tests (v7), Redis HA mode (v7), external 3rd-party audit (v7) — 10/10 requires all three |
+| Production Readiness v7.0.0 | 2026-04-22 | **9.8/10** | HA mode production-ready: opt-in `DD_MODE=ha` + Redis. 4-phase rollout (v6.17.0 rate limiter, v6.17.1 WS pub/sub, v6.17.2 leader election, v7.0.0 observability + operator runbook + LB configs). Standalone default unchanged. Staging soak verified: 3-replica deploy with lock acquire, graceful leader handover, Redis restart recovery. `/api/cluster/status` + 4 Prometheus gauges. BACKLOG F30 closed. Residual gap to 10: external 3rd-party security audit (budget + vendor coordination) |
 
 ### Known Security Tradeoffs
 

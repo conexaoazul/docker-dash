@@ -22,10 +22,35 @@ const _pkgVersion = require('../version');
 router.get('/health', (req, res) => {
   try {
     getDb().prepare('SELECT 1').get();
-    res.json({ status: 'ok', version: _pkgVersion, timestamp: new Date().toISOString() });
+    // v7.0.0: expose cluster role so load balancers can route writes
+    // to the leader (sticky-session LBs use this via health-check-conditional
+    // routing; e.g. Caddy `health_uri` + `health_headers` matchers).
+    const cluster = require('../services/cluster');
+    const status = cluster.getStatus();
+    res.json({
+      status: 'ok',
+      version: _pkgVersion,
+      timestamp: new Date().toISOString(),
+      mode: status.mode,
+      role: status.role,
+      nodeId: status.nodeId,
+    });
   } catch {
     res.status(503).json({ status: 'error', message: 'Database unavailable' });
   }
+});
+
+// ─── Cluster Status (v7.0.0) ─────────────────────────────────
+//
+// Returns the full cluster state snapshot — useful for:
+//   - Operator dashboards / Grafana (`docker_dash_cluster_*` gauges below
+//     cover the time-series view; this endpoint is the JSON snapshot)
+//   - Load-balancer health check scripts that need more than `role`
+//   - Failover troubleshooting (heartbeatAgeMs surfaces a stalled leader)
+
+router.get('/cluster/status', optionalAuth, (req, res) => {
+  const cluster = require('../services/cluster');
+  res.json(cluster.getStatus());
 });
 
 // ─── Prometheus Metrics ─────────────────────────────────────
@@ -57,7 +82,26 @@ router.get('/metrics', optionalAuth, (req, res) => {
     // Appended to the existing stats-derived container gauges above.
     const appMetrics = metricsService.renderPrometheus();
 
-    res.type('text/plain').send(lines.join('\n') + '\n' + appMetrics);
+    // v7.0.0: cluster metrics (standalone: role=0; HA: role=1 leader / 2 reader)
+    const cluster = require('../services/cluster');
+    const cs = cluster.getStatus();
+    const roleCode = cs.role === 'standalone' ? 0 : cs.role === 'leader' ? 1 : cs.role === 'reader' ? 2 : -1;
+    const clusterLines = [
+      '# HELP docker_dash_cluster_role Cluster role (0=standalone, 1=leader, 2=reader, -1=unknown)',
+      '# TYPE docker_dash_cluster_role gauge',
+      `docker_dash_cluster_role{mode="${cs.mode}",nodeId="${cs.nodeId}"} ${roleCode}`,
+      '# HELP docker_dash_cluster_leader_age_seconds Seconds since this node became leader (0 if not leader)',
+      '# TYPE docker_dash_cluster_leader_age_seconds gauge',
+      `docker_dash_cluster_leader_age_seconds ${cs.leaderSinceMs != null ? Math.floor(cs.leaderSinceMs / 1000) : 0}`,
+      '# HELP docker_dash_cluster_heartbeat_age_seconds Seconds since last successful leader heartbeat / election poll (0 in standalone)',
+      '# TYPE docker_dash_cluster_heartbeat_age_seconds gauge',
+      `docker_dash_cluster_heartbeat_age_seconds ${cs.heartbeatAgeMs != null ? Math.floor(cs.heartbeatAgeMs / 1000) : 0}`,
+      '# HELP docker_dash_cluster_redis_connected Whether the Redis connection is up (1=yes, 0=no, only meaningful when mode=ha)',
+      '# TYPE docker_dash_cluster_redis_connected gauge',
+      `docker_dash_cluster_redis_connected ${cs.redisConnected === true ? 1 : 0}`,
+    ];
+
+    res.type('text/plain').send(lines.join('\n') + '\n' + appMetrics + clusterLines.join('\n') + '\n');
   } catch (err) {
     res.status(500).send('# Error generating metrics\n');
   }

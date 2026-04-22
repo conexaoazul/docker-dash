@@ -200,6 +200,8 @@ Single-commit revert on the v6.17.0 release tag. `ioredis` becomes an unused `op
 
 ## See also
 
+- **[Failover runbook](ha-failover-runbook.md)** — operator procedures for leader death, rolling restart, Redis failure, split-brain detection
+- **[Load balancer configs](ha-lb-configs.md)** — copy-paste ready examples for Caddy, Traefik, HAProxy, nginx
 - Research: [`plans/research-ha-mode-optional.md`](../../plans/research-ha-mode-optional.md) — background on why this is opt-in, trade-offs, positioning
 - Deep-spec: [`plans/deep-spec-ha-mode.md`](../../plans/deep-spec-ha-mode.md) — architecture, release phasing, code details
 - Source: [`src/services/cluster.js`](../../src/services/cluster.js), [`src/services/rate-limiter-memory.js`](../../src/services/rate-limiter-memory.js), [`src/middleware/rateLimit.js`](../../src/middleware/rateLimit.js)
