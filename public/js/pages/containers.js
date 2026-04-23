@@ -2932,7 +2932,7 @@ const ContainersPage = {
     clearInterval(this._refreshTimer);
     clearInterval(this._statsTimer);
     if (this._logStream) this._logStream();
-    this._stopLogFollow();
+    if (typeof this._stopLogFollow === 'function') this._stopLogFollow();
     if (this._boundKbHandler) { document.removeEventListener('keydown', this._boundKbHandler); this._boundKbHandler = null; }
     if (this._sandboxExpiredHandler) { this._sandboxExpiredHandler(); this._sandboxExpiredHandler = null; }
     if (this._execUnsub) this._execUnsub.forEach(fn => fn());

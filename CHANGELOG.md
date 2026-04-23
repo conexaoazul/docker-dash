@@ -2,6 +2,13 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.2.1] - 2026-04-23 — Bug fixes
+
+### Fixed
+
+- **Containers page — `TypeError: this._stopLogFollow is not a function`** on every navigation away from the containers list. Regression from the v6.16.0 lazy-load split: `_stopLogFollow` lives in `container-detail.js`, which is only loaded on first detail view, but `destroy()` (eager) called it unconditionally. Guarded the call with a `typeof === 'function'` check — harmless no-op when the detail module was never loaded. [`public/js/pages/containers.js:2935`](public/js/pages/containers.js#L2935)
+- **`nav.observability` raw i18n key** rendered in the sidebar. Added `observability` key to the `nav:` block in [`public/js/i18n/en.js`](public/js/i18n/en.js) + [`ro.js`](public/js/i18n/ro.js); other 9 languages fall back to EN via `_fallback`.
+
 ## [7.2.0] - 2026-04-22 — "In-app Observability Wizard"
 
 Turns the v7.1.0 observability primitives (compose profile + dashboard JSON + docs) into an admin UI wizard at **System → Observability**. Detects existing Prometheus / Grafana running on the host and offers the right path — integrate, deploy, or hybrid — without operators needing to read the full doc first.
