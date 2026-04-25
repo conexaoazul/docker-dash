@@ -2,6 +2,16 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.3.3] - 2026-04-25 — System → Updates surfaces app updates too
+
+The v7.3.0 update notifier was reachable from the sidebar badge and System Settings → General — but **not** from System → Updates, which is the page users naturally reach for "is there an update for X?" That page only checked Docker Engine + OS updates, with the Docker Dash row showing only the running version (no comparison to GitHub latest).
+
+### Fixed
+
+- **`GET /api/system/check-updates`** — the existing endpoint now also surfaces the Docker Dash app update status (current, latest, updateAvailable, releaseUrl, publishedAt, lastChecked, enabled). Calls `updateCheck.refresh({ force: true })` first so the user sees fresh data after clicking the *Check Updates* button. Refresh is internally throttled per-instance, so spamming the button is safe. ([src/routes/system.js:354-407](src/routes/system.js#L354-L407))
+
+- **System → Updates page** — the Docker Dash app row now shows the same badge logic the sidebar uses: **Update available** when `updateAvailable=true`, **Up to date** when caught up, **Disabled** when the operator has turned the feature off in System Settings. The "Update available" badge is a clickable link that opens the update notifier modal (release notes + admin upgrade command). UpdateNotifier re-fetches before opening so the modal reflects the freshly-checked cache. ([public/js/pages/system.js:295-314](public/js/pages/system.js#L295-L314))
+
 ## [7.3.1] - 2026-04-25 — Smoother session-expiry recovery
 
 When a session expired, the UX collapsed: every parallel in-flight API call (containers list, stats, alerts, notifications, host overview…) returned 401 and each one independently:

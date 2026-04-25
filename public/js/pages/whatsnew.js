@@ -10,6 +10,15 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '7.3.3',
+      date: '2026-04-25',
+      title: 'System → Updates surfaces app updates too',
+      changes: [
+        { type: 'fix', text: 'The v7.3.0 update notifier was reachable from the sidebar badge + System Settings → General, but not from System → Updates — which is the page users naturally reach for "is there an update for X?". Fixed by extending GET /api/system/check-updates to include the same data the sidebar uses (current, latest, updateAvailable, releaseUrl, publishedAt, lastChecked, enabled). The endpoint also forces a live refresh so the user sees fresh data after clicking *Check Updates*.' },
+        { type: 'fix', text: 'System → Updates page now shows a clickable "Update available" badge on the Docker Dash app row. Click → opens the same update modal as the sidebar badge (release notes + admin-only upgrade command). When the feature is disabled in Settings, the row shows a "Disabled" badge instead.' },
+      ],
+    },
+    {
       version: '7.3.1',
       date: '2026-04-25',
       title: 'Smoother session-expiry recovery',

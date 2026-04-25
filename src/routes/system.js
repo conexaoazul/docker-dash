@@ -398,7 +398,27 @@ router.get('/check-updates', requireAuth, async (req, res) => {
     }
 
     // ── Docker Dash app version ──
-    result.app = { version: require('../version') };
+    // v7.3.2: surface the same data the sidebar badge uses, so System →
+    // Updates and System Settings → General agree.
+    try {
+      const updateCheck = require('../services/update-check');
+      // Best-effort live refresh so the user sees fresh data after clicking
+      // "Check Updates"; throttled internally so spamming the button is safe.
+      await updateCheck.refresh({ force: true });
+      const status = updateCheck.getStatus();
+      result.app = {
+        version: status.current,
+        current: status.current,
+        latest: status.latest,
+        updateAvailable: status.hasUpdate,
+        releaseUrl: status.releaseUrl,
+        publishedAt: status.publishedAt,
+        lastChecked: status.lastChecked,
+        enabled: status.enabled,
+      };
+    } catch {
+      result.app = { version: require('../version') };
+    }
 
     res.json(result);
   } catch (err) {

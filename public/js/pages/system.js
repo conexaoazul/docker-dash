@@ -293,11 +293,30 @@ const SystemPage = {
           </tr>
           <tr>
             <td><i class="fas fa-code-branch" style="margin-right:6px"></i> ${i18n.t('pages.system.appVersionLabel')}</td>
-            <td><span class="mono">v${Utils.escapeHtml(app.version || '?')}</span></td>
+            <td>
+              <span class="mono">v${Utils.escapeHtml(app.current || app.version || '?')}</span>
+              ${app.latest ? `<span class="text-dim text-sm" style="margin-left:8px">(${i18n.t('pages.system.latest')}: ${Utils.escapeHtml(app.latest)})</span>` : ''}
+              <span style="margin-left:8px">${
+                app.updateAvailable
+                  ? `<a href="#" id="app-update-modal-link" class="badge badge-warning" style="text-decoration:none"><i class="fas fa-arrow-up"></i> ${i18n.t('pages.system.updateAvailable')}</a>`
+                  : (app.enabled === false
+                      ? `<span class="badge" style="background:var(--surface2);color:var(--text-dim)"><i class="fas fa-pause"></i> ${i18n.t('common.disabled')}</span>`
+                      : `<span class="badge badge-running"><i class="fas fa-check"></i> ${i18n.t('pages.system.upToDate')}</span>`)
+              }</span>
+            </td>
           </tr>
         </table>
         ${osPackageList}
       `;
+
+      // Open the update-notifier modal when the user clicks the "Update available" badge.
+      // Re-init() first so the modal reflects the freshly-fetched cache (the
+      // /check-updates endpoint just forced a refresh).
+      el.querySelector('#app-update-modal-link')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { await window.UpdateNotifier?.init(); } catch { /* fall through to openModal anyway */ }
+        window.UpdateNotifier?.openModal();
+      });
     } catch (err) {
       el.innerHTML = `<div class="text-muted text-sm"><i class="fas fa-exclamation-triangle" style="color:var(--yellow)"></i> ${i18n.t('pages.system.updatesError', { message: err.message })}</div>`;
     }
