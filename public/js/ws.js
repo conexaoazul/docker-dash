@@ -12,15 +12,20 @@ const WS = {
   _subscriptions: new Set(),
   _connected: false,
   _intentionalClose: false,
+  _useTokenFallback: false,  // v7.3.5: only true after a cookie-only attempt failed with 4001
 
   connect() {
     if (this._ws && this._ws.readyState <= 1) return;
     this._intentionalClose = false;
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Pass Bearer token as query param for when cookies are blocked
+    // v7.3.5: prefer cookie auth (the session cookie is httpOnly so JS can't
+    // probe it — browser attaches it automatically on the WS handshake).
+    // The server rejects ?token= unless WS_QUERY_TOKEN_ENABLED=true is set,
+    // and that's off by default for security (tokens can leak via logs/refer).
+    // Only fall back to token-in-query after a cookie attempt closes 4001.
     const token = Api?._bearerToken || '';
-    const url = token
+    const url = (this._useTokenFallback && token)
       ? `${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`
       : `${proto}//${location.host}/ws`;
 
@@ -44,6 +49,9 @@ const WS = {
       clearTimeout(connectTimeout);
       this._connected = true;
       this._reconnectDelay = 1000;
+      // v7.3.5: cookie auth worked — clear the fallback flag so future
+      // reconnects also try cookie-first (in case token rotated).
+      this._useTokenFallback = false;
       if (window._ddDebug) console.log('[WS] Connected');
       this._emit('_connected');
       // Re-subscribe channels
@@ -67,12 +75,25 @@ const WS = {
       this._connected = false;
       if (window._ddDebug) console.log('[WS] Disconnected', evt.code);
       this._emit('_disconnected');
-      if (!this._intentionalClose && evt.code !== 4001) {
-        this._scheduleReconnect();
-      }
       if (evt.code === 4001) {
-        // Auth failure
+        // v7.3.5: cookie auth failed. If we haven't tried token-in-query yet
+        // and we have a Bearer token, retry once with the fallback. This
+        // handles browsers that block the session cookie (e.g. strict
+        // tracking prevention). Only flip + retry if the user is still
+        // authenticated as far as the API is concerned.
+        if (!this._useTokenFallback && Api?._bearerToken && !this._intentionalClose) {
+          this._useTokenFallback = true;
+          if (window._ddDebug) console.log('[WS] Cookie auth rejected, retrying with token fallback');
+          this._scheduleReconnect();
+          return;
+        }
+        // Either we already tried both modes, or we have no token to try.
+        // Real auth failure — bounce to login (idempotent in v7.3.1+).
         if (typeof App !== 'undefined') App.handleUnauthorized();
+        return;
+      }
+      if (!this._intentionalClose) {
+        this._scheduleReconnect();
       }
     };
 

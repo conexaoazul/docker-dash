@@ -2,6 +2,18 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.3.5] - 2026-04-25 — WS cookie-first auth + What's New update banner
+
+### Fixed
+
+- **WebSocket connection failures** (rejected by server with `WS rejected: query token auth disabled`). The client always appended `?token=<bearer>` to the WS URL, but the server rejects query-token auth by default for security (set `WS_QUERY_TOKEN_ENABLED=true` to allow). The session cookie (httpOnly `dd_sid`) was already attached to the WS handshake by the browser, so cookie auth would have worked — the client just never gave it a chance.
+
+  Now the client tries **cookie-only first**. Only if that closes with code 4001 (auth failed) AND a Bearer token is in `sessionStorage` does it fall back to token-in-query for one retry. This keeps the security default intact for everyone using cookies, while preserving the fallback for browsers that block them (Edge Tracking Prevention etc.). Reset to cookie-first on every successful open so a rotated token gets re-tried correctly. ([public/js/ws.js:6-25, 44-56, 68-91](public/js/ws.js))
+
+### Added
+
+- **Inline "Update available" banner** in the What's New page header. When `UpdateNotifier._state.hasUpdate === true`, a small accent-colored chip appears between the H2 and the version+GitHub controls — same row, no header growth. Click → opens the same release-notes modal as the sidebar badge. Hidden when up-to-date or feature disabled. ([public/js/pages/whatsnew.js:1369-1418](public/js/pages/whatsnew.js))
+
 ## [7.3.3] - 2026-04-25 — System → Updates surfaces app updates too
 
 The v7.3.0 update notifier was reachable from the sidebar badge and System Settings → General — but **not** from System → Updates, which is the page users naturally reach for "is there an update for X?" That page only checked Docker Engine + OS updates, with the Docker Dash row showing only the running version (no comparison to GitHub latest).

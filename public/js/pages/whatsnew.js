@@ -10,6 +10,15 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '7.3.5',
+      date: '2026-04-25',
+      title: 'WS cookie-first auth + What\'s New update banner',
+      changes: [
+        { type: 'fix', text: 'WebSocket failed to connect ("WS rejected: query token auth disabled" in server logs). The client always appended ?token=<bearer> to the WS URL, but the server rejects query-token auth by default for security. The session cookie (httpOnly dd_sid) was already attached to the WS handshake by the browser — cookie auth would have worked, the client just never tried it that way. Now: cookie-only first, fall back to token-in-query only after 4001. Reset on every successful open so token rotations get re-tried.' },
+        { type: 'feature', text: 'When a newer release is available on GitHub, the What\'s New page header shows a small accent-colored "Update available: vX.Y.Z" chip between the title and the version/GitHub controls. Same row, no header growth. Click → opens the release-notes modal.' },
+      ],
+    },
+    {
       version: '7.3.3',
       date: '2026-04-25',
       title: 'System → Updates surfaces app updates too',
@@ -1372,7 +1381,8 @@ const WhatsNewPage = {
     container.innerHTML = `
       <div class="page-header">
         <h2><i class="fas fa-bullhorn"></i> What's New</h2>
-        <div class="page-actions">
+        <span id="whatsnew-update-banner" style="display:none;margin:0 12px;flex:0 0 auto"></span>
+        <div class="page-actions" style="margin-left:auto">
           <span class="badge badge-info" style="font-size:12px">v${Utils.escapeHtml(current)}</span>
           <a href="https://github.com/bogdanpricop/docker-dash" target="_blank" rel="noopener" class="btn btn-sm btn-secondary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">
             <i class="fab fa-github"></i> GitHub
@@ -1381,6 +1391,38 @@ const WhatsNewPage = {
       </div>
       <div id="whatsnew-content">${this._renderReleases()}</div>
     `;
+
+    // v7.3.5: render an inline "Update available" banner in the header when
+    // a newer release exists on GitHub. Sized to fit on the same row as the
+    // existing controls so the header height doesn't grow.
+    this._renderUpdateBanner();
+  },
+
+  async _renderUpdateBanner() {
+    const slot = document.getElementById('whatsnew-update-banner');
+    if (!slot) return;
+    let state = window.UpdateNotifier?._state;
+    // If notifier hasn't run yet (rare, since app.js inits it on startup),
+    // fetch on-demand so the banner doesn't stay empty.
+    if (!state) {
+      try { await window.UpdateNotifier?.init(); state = window.UpdateNotifier?._state; }
+      catch { return; }
+    }
+    if (!state || !state.hasUpdate) return;
+    slot.style.display = 'inline-flex';
+    slot.style.alignItems = 'center';
+    slot.style.gap = '6px';
+    slot.style.padding = '4px 10px';
+    slot.style.borderRadius = 'var(--radius-sm)';
+    slot.style.background = 'rgba(56,139,253,0.12)';
+    slot.style.color = 'var(--accent)';
+    slot.style.fontSize = '12px';
+    slot.style.fontWeight = '600';
+    slot.style.cursor = 'pointer';
+    slot.style.lineHeight = '1';
+    slot.title = i18n.t('updates.badgeTooltip', { version: state.latest });
+    slot.innerHTML = `<i class="fas fa-arrow-up" style="font-size:10px"></i> ${i18n.t('updates.modalTitle')}: ${Utils.escapeHtml(state.latest)}`;
+    slot.addEventListener('click', () => window.UpdateNotifier?.openModal());
   },
 
   _renderReleases() {
