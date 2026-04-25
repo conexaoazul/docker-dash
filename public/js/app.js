@@ -39,6 +39,7 @@ const App = {
     'timeline':       () => TimelinePage,
     'howto':          () => HowToPage,
     'observability':  () => ObservabilityWizardPage,
+    'sample-feature': () => SampleFeaturePage,
   },
 
   async init() {

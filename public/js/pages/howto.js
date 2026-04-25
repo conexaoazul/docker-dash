@@ -41,6 +41,14 @@ const HowToPage = {
             <span style="font-size:11px;opacity:.85">${isRo ? 'Punte mentală git → Docker, plus comparații' : 'git → Docker bridge, plus comparisons'}</span>
           </span>
         </button>
+        <a href="https://github.com/bogdanpricop/docker-dash/blob/main/docs/CONTRIBUTING.md" target="_blank" rel="noopener" class="btn btn-secondary"
+          style="display:flex;align-items:center;gap:10px;padding:12px 16px;font-size:13px;text-align:left;flex:1;min-width:280px;text-decoration:none">
+          <i class="fas fa-code-branch" style="font-size:18px"></i>
+          <span style="display:flex;flex-direction:column;line-height:1.3">
+            <strong>${Utils.escapeHtml(isRo ? 'Contribuie la Docker Dash' : 'Contribute to Docker Dash')}</strong>
+            <span style="font-size:11px;opacity:.85">${isRo ? 'Setup local + checklist 12-pași + sample plugin' : 'Local setup + 12-step checklist + sample plugin'}</span>
+          </span>
+        </a>
       </div>
       <div id="howto-categories" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px"></div>
       <div id="howto-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px"></div>

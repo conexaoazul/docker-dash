@@ -446,6 +446,16 @@ function startAll() {
     catch (e) { log.error('Git polling stop failed', e.message); }
   });
 
+  // v7.4.0 — Sample feature cron tick (CONTRIBUTOR DEMO). Auto-increments
+  // the demo counter every minute so contributors see the cron pattern fire
+  // without external triggers. Leader-only via _m() default; skipped entirely
+  // when the sample is hidden via env.
+  if (process.env.DD_SHOW_SAMPLE_PLUGIN !== 'false') {
+    jobs.push(cron.schedule('* * * * *', _m('sample-feature-tick', () => {
+      require('../services/sample-feature').tick();
+    })));
+  }
+
   // Update-check (v7.3.0) — every 12h on the leader. Default ON, opt-out via
   // System Settings. Service short-circuits when disabled, so the cron tick
   // is a cheap settings.get when the user has turned this off.

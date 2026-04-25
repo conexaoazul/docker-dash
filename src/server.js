@@ -181,6 +181,14 @@ app.use('/api/remediate', apiLimiter, require('./routes/remediate'));
 app.use('/api/log-forwarders', apiLimiter, require('./routes/log-forwarders'));
 app.use('/api/observability', apiLimiter, require('./routes/observability'));
 app.use('/api/swarm', apiLimiter, require('./routes/swarm'));
+
+// v7.4.0 — Sample feature for contributors (gated by env so it can be
+// hidden from production deployments). See examples/sample-feature/README.md
+// and docs/CONTRIBUTING.md for the full walkthrough.
+if (process.env.DD_SHOW_SAMPLE_PLUGIN !== 'false') {
+  app.use('/api/sample-feature', apiLimiter, require('./routes/sample-feature'));
+}
+
 app.use('/api', apiLimiter, require('./routes/misc'));
 
 // ─── Static Files ───────────────────────────────────────────
@@ -318,6 +326,16 @@ async function start() {
   // Attach WebSocket server
   const wsServer = require('./ws');
   wsServer.attach(server);
+
+  // v7.4.0 — Wire the sample-feature broadcaster (contributor demo).
+  // Demonstrates the standard "service emits event → ws broadcasts →
+  // page subscribes" pattern. Skip when the sample is disabled in env.
+  if (process.env.DD_SHOW_SAMPLE_PLUGIN !== 'false') {
+    const sampleFeature = require('./services/sample-feature');
+    sampleFeature.setWsBroadcaster(
+      (type, data, channel) => wsServer.broadcast(type, data, channel)
+    );
+  }
 
   // Wire WS broadcaster into services that publish job progress
   const acmeService = require('./services/acme');

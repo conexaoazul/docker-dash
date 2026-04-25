@@ -2,6 +2,62 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.4.0] - 2026-04-25 — "Contributor Demo" — sample plugin + CONTRIBUTING.md
+
+A working reference implementation that contributors can copy as a starting point for new features, plus a complete contributor onboarding guide. Lives at `/sample-feature` in the running app (admin-only, hidden from production via `DD_SHOW_SAMPLE_PLUGIN=false`).
+
+### Added — Sample feature (live demo at `/sample-feature`)
+
+A counter that exercises **every layer of the Docker Dash stack** in ~400 LOC across 4 source files:
+
+- **[`src/services/sample-feature.js`](src/services/sample-feature.js)** — pure business logic, persists to `settings` table, broadcasts WS events on every change. Demonstrates the standard service shape: pure functions, optional WS broadcaster wired at startup, exported `_internals` for tests.
+- **[`src/routes/sample-feature.js`](src/routes/sample-feature.js)** — REST surface. Demonstrates `requireAuth` + `requireRole(...)` per route (viewer reads, operator+admin mutates, admin-only resets) and `auditService.log()` on destructive actions.
+- **[`public/js/pages/sample-feature.js`](public/js/pages/sample-feature.js)** — vanilla-JS page module. Live counter + WS subscription + "How this works" panel with 7 collapsible cards (one per layer). Each card has "View on GitHub" + "View source" (modal with the actual local file).
+- **[`src/__tests__/sample-feature.test.js`](src/__tests__/sample-feature.test.js)** — 13 unit tests. Mirrors the standard test pattern: in-memory SQLite, `beforeEach` reset, tests for the service in isolation.
+- **Cron tick** in `src/jobs/index.js` (1/min, leader-only via `_m()`) auto-increments the counter so contributors see the cron pattern fire without external triggers.
+
+The page header has 3 buttons: link to **CONTRIBUTING.md** (opens GitHub), link to the in-app **How-To: Contributing** entry, and link to the **example folder README** on GitHub. Sub-banner shows live status pills (✓ Service ✓ Route ✓ Page ✓ WebSocket ✓ Cron ✓ Audit ✓ Tests) — click any pill to scroll to + highlight that layer's card.
+
+Visibility flag: `DD_SHOW_SAMPLE_PLUGIN=false` in `.env` hides the route, sidebar entry, and cron entirely. Default: visible to admins.
+
+### Added — Contributor onboarding
+
+- **[`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)** (~400 lines): local setup, project layout 1-pager, the **12-step checklist** for adding a new page (cross-references the sample feature), conventions section (security/RBAC/audit/i18n/error handling/logging), tests + lint, versioning + release flow, PR template, "what we won't merge" list, where to get help.
+- **[`examples/sample-feature/README.md`](examples/sample-feature/README.md)**: file-tree map + step-by-step walkthrough specific to the sample. Includes rationale for each pattern (why pure-function services, why per-route RBAC, why leader-gated cron, why no frontend build step).
+- **In-app How-To page**: new "Contribute to Docker Dash" CTA card (3rd primary button) that opens `docs/CONTRIBUTING.md` on GitHub.
+
+### Why these patterns?
+
+The sample feature is deliberately a trivial domain (a counter) so contributors can focus on **scaffolding** rather than business logic. Every choice in the example reflects an actual codebase convention with a real reason:
+
+- Pure-function services → trivial unit tests with `:memory:` SQLite, no Express mocking.
+- `requireAuth + requireRole` per route → security posture readable from a single grep.
+- Audit log on destructive actions → non-negotiable for operator-facing features.
+- Cron jobs leader-gated → prevents N× duplication in HA mode.
+- WebSocket pub/sub → click on replica A propagates to subscribers on replica B in milliseconds (via Redis in HA, in-process in standalone).
+- i18n EN as source-of-truth + `_fallback` → contributors don't need to translate to all 11 languages.
+- No frontend build step → vanilla JS, hot-reloadable, approachable to operators who know JS but not "the modern frontend stack".
+
+### Tests
+
+- 907 → **944 passing / 61 suites** (+13 new tests for sample-feature, +1 new suite).
+- Lint: 0 warnings / 0 errors.
+
+### Files touched
+
+- `src/services/sample-feature.js` (new)
+- `src/routes/sample-feature.js` (new)
+- `src/__tests__/sample-feature.test.js` (new, 13 tests)
+- `public/js/pages/sample-feature.js` (new)
+- `examples/sample-feature/README.md` (new)
+- `docs/CONTRIBUTING.md` (new)
+- `src/server.js` — gated route mount + WS broadcaster wire
+- `src/jobs/index.js` — gated cron tick (leader-only)
+- `public/index.html` — sidebar nav-item + script tag
+- `public/js/app.js` — page registry entry
+- `public/js/i18n/en.js` + `ro.js` — `nav.sample-feature` + `pages.sampleFeature.*` (~30 keys each)
+- `public/js/pages/howto.js` — third primary CTA: "Contribute to Docker Dash"
+
 ## [7.3.7] - 2026-04-25 — Browser console hygiene
 
 A user-driven cleanup pass on the dev-tools console output. Three real issues, three drive-by warnings I left alone (and explain why).

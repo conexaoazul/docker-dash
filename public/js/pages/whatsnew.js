@@ -10,6 +10,20 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '7.4.0',
+      date: '2026-04-25',
+      title: '"Contributor Demo" — sample plugin + CONTRIBUTING.md',
+      changes: [
+        { type: 'feature', text: 'New admin-only page at /sample-feature — a working "Hello, contributor!" reference that exercises every layer of the codebase: service (DB-persisted counter), REST routes (RBAC + audit), frontend page (live WebSocket updates), background cron job (leader-only), unit tests. Total ~400 LOC across 4 source files. Deliberately trivial as a domain so contributors focus on scaffolding, not business logic.' },
+        { type: 'feature', text: 'The page itself is self-documenting: live counter + manual increment + admin-only reset, plus a "How this works" panel with 7 collapsible cards (one per layer). Each card has "View on GitHub" and "View source" (modal with the actual file). Header has 3 buttons linking to CONTRIBUTING.md, the in-app How-To, and the example folder.' },
+        { type: 'feature', text: 'New docs/CONTRIBUTING.md (~400 lines): local setup (clone → npm install → npm run dev in 5 min), 1-page project layout map, 12-step checklist for adding a new page (cross-referenced to the sample), conventions (security/RBAC/audit/i18n/error/logging), tests + lint, versioning + release flow, PR template, "what we won\'t merge" list.' },
+        { type: 'feature', text: 'New examples/sample-feature/README.md with file-tree map and the rationale behind each pattern (why pure-function services, why per-route RBAC, why leader-gated cron, why no frontend build step).' },
+        { type: 'feature', text: 'New "Contribute to Docker Dash" CTA on the How-To page (3rd primary button) that opens CONTRIBUTING.md on GitHub.' },
+        { type: 'improvement', text: 'Visibility flag DD_SHOW_SAMPLE_PLUGIN=false in .env hides the sample entirely (route returns 404, sidebar entry gone, cron skips). Default visible to admins so contributors see it out of the box.' },
+        { type: 'improvement', text: '13 new unit tests for the sample feature. Suite: 931 → 944 / 61 suites. Lint clean, npm audit clean.' },
+      ],
+    },
+    {
       version: '7.3.7',
       date: '2026-04-25',
       title: 'Browser console hygiene',
