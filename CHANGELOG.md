@@ -2,6 +2,62 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.3.0] - 2026-04-25 — "Update Notifications"
+
+Periodic, opt-out check for new Docker Dash releases on GitHub. Solves the "user cloned the repo a week ago and has no idea v7.3.0 shipped" gap. Designed to be **quiet**: a tiny pulsing ↑ badge next to the sidebar version, click-to-open modal with the full release notes (rendered from the GitHub Release `body`), and a one-click "show upgrade command" for admins.
+
+### Added — Backend
+
+- **`src/services/update-check.js`** (~165 LOC) — polls `https://api.github.com/repos/<owner>/<repo>/releases/latest`, semver-compares against `src/version.js`, caches the result in the `settings` table. Configurable owner/repo via `DD_UPDATE_CHECK_OWNER` / `DD_UPDATE_CHECK_REPO` env vars (defaults: `bogdanpricop/docker-dash`). 5s timeout, no redirects, custom User-Agent. Network failures are caught + logged + leave the existing cache untouched.
+
+- **`src/routes/update-check.js`** mounted at `/api/system/update-check` (before `/api/system` so it bypasses that router's host-extraction middleware):
+  - `GET /` — read current status. Returns `{ current, latest, hasUpdate, releaseNotes, releaseUrl, publishedAt, lastChecked, enabled }`. Auth required, no role gate (sidebar badge needs to work for operators + viewers).
+  - `POST /refresh` — admin-only force refresh. Service has a 60s anti-abuse throttle.
+  - `POST /setting` — admin-only enable/disable toggle. Audited.
+
+- **Background job** in `src/jobs/index.js` — cron `17 */12 * * *` (every 12h) + a one-shot 60s post-boot run so the badge can light up on first login without waiting half a day. Both gated on `cluster.isLeader()` so HA replicas don't N× the GitHub call. Service short-circuits when disabled (cheap settings.get on each tick).
+
+### Added — Frontend
+
+- **`public/js/update-notifier.js`** (~190 LOC) — self-contained module. Fetches status at app start, renders a 14×14 pulsing ↑ badge inside `#sidebar-version` when an update is available. Click → modal with:
+  - Header: `current → latest` with publish date + last-checked timestamp.
+  - Release notes: minimal markdown→HTML renderer (no external deps) handling headings, **bold**, *italic*, `inline code`, fenced code blocks, lists, links. All inputs HTML-escaped first.
+  - Admin-only `<details>`: copy-pasteable `git pull && APP_VERSION=X.Y.Z docker compose up -d --build app` with a "back up /data first" warning.
+  - Footer: link to the release page on GitHub + Close.
+
+- **System Settings → General** — new card with the toggle, last-checked status, and a "Check now" button (forwards to `POST /refresh`).
+
+- **CSS** in `public/css/app.css` — `.update-badge` with subtle pulse animation. Hidden when sidebar is collapsed (inherits from existing `.sidebar.collapsed .sidebar-version` rule).
+
+- **i18n** — new `updates:` block in EN + RO with 18 keys covering badge tooltip, modal labels, settings card, status messages. Other 9 languages fall back to EN via `_fallback`.
+
+### Privacy + air-gap
+
+- One outbound HTTPS call every 12h, total — not per user. Configurable poll interval is fixed at 12h (no operator footgun).
+- `User-Agent: docker-dash/<version>` — no IP/hostname/install ID leaked beyond what the TCP connection inherently exposes.
+- **Disable in System Settings → General** for fully air-gapped deployments. When disabled: zero outbound calls, badge never appears, modal still opens manually if cached data exists (so operators can still read the last release notes they fetched before air-gapping).
+- Audit log: `update_check_enabled` / `update_check_disabled` on toggle.
+
+### Tests
+
+- **`src/__tests__/update-check.test.js`** — 24 tests covering semver parse/compare, enable/disable round-trip, getStatus state machine (empty cache, equal version, newer version, disabled bypass, corrupt JSON), refresh HTTP behavior (success path, disabled short-circuit, network error preserves cache, non-200, force bypass, missing body field).
+
+- **Suite: 907 → 931 passing / 60 suites.** Lint clean, npm audit clean.
+
+### Files touched
+
+- `src/services/update-check.js` (new)
+- `src/routes/update-check.js` (new)
+- `src/server.js` — mount route before `/api/system`
+- `src/jobs/index.js` — 12h cron + one-shot post-boot refresh (leader-gated)
+- `public/js/update-notifier.js` (new)
+- `public/index.html` — script tag for `update-notifier.js`
+- `public/js/app.js` — `UpdateNotifier.init()` after auth
+- `public/js/pages/settings.js` — General tab gets the toggle card
+- `public/css/app.css` — badge styling + pulse animation
+- `public/js/i18n/en.js` + `ro.js` — `updates:` block
+- `src/__tests__/update-check.test.js` (new)
+
 ## [7.2.1] - 2026-04-23 — Bug fixes
 
 ### Fixed

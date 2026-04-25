@@ -446,6 +446,23 @@ function startAll() {
     catch (e) { log.error('Git polling stop failed', e.message); }
   });
 
+  // Update-check (v7.3.0) — every 12h on the leader. Default ON, opt-out via
+  // System Settings. Service short-circuits when disabled, so the cron tick
+  // is a cheap settings.get when the user has turned this off.
+  jobs.push(cron.schedule('17 */12 * * *', _m('update-check', () => {
+    return require('../services/update-check').refresh();
+  })));
+
+  // Initial update-check 60s after boot so the sidebar badge can light up
+  // on first load without waiting 12h. Throttled inside the service.
+  // Leader-only in HA mode (per-process throttle wouldn't dedupe across replicas).
+  setTimeout(async () => {
+    try {
+      if (!(await cluster.isLeader())) return;
+      await require('../services/update-check').refresh();
+    } catch { /* logged inside the service */ }
+  }, 60000);
+
   // Run initial purge on startup (in case the app was down for a while)
   setTimeout(purgeAllOldData, 30000);
 

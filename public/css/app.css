@@ -205,7 +205,21 @@ textarea { resize: vertical; min-height: 80px; }
 .sidebar-logo { font-size: 26px; flex-shrink: 0; filter: drop-shadow(0 0 8px rgba(56,139,253,0.3)); }
 .sidebar-title-group { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .sidebar-title { font-weight: 700; font-size: 16px; color: var(--text-white); white-space: nowrap; }
-.sidebar-version { font-size: 10px; color: var(--text-dim); font-family: var(--mono); letter-spacing: 0.5px; margin-top: -2px; }
+.sidebar-version { font-size: 10px; color: var(--text-dim); font-family: var(--mono); letter-spacing: 0.5px; margin-top: -2px; display: inline-flex; align-items: center; gap: 5px; }
+.sidebar-version .update-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent); color: var(--text-white);
+  font-size: 8px; cursor: pointer;
+  box-shadow: 0 0 6px rgba(56,139,253,0.5);
+  animation: update-badge-pulse 2.5s ease-in-out infinite;
+  transition: transform var(--transition);
+}
+.sidebar-version .update-badge:hover { transform: scale(1.15); }
+@keyframes update-badge-pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(56,139,253,0.5); }
+  50%      { box-shadow: 0 0 10px rgba(56,139,253,0.85); }
+}
 .sidebar-toggle {
   background: none; border: none; color: var(--text-dim); cursor: pointer;
   padding: 6px; font-size: 14px; border-radius: var(--radius-xs);

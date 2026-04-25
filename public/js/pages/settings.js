@@ -1560,6 +1560,21 @@ const SettingsPage = {
           </table>
         </div>
       </div>
+
+      <div class="card" style="max-width:600px;margin-top:16px">
+        <div class="card-header"><h3><i class="fas fa-arrow-up" style="color:var(--accent);margin-right:8px"></i>${i18n.t('updates.settingTitle')}</h3></div>
+        <div class="card-body">
+          <p class="text-muted text-sm" style="margin-bottom:14px">${i18n.t('updates.settingDesc')}</p>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:14px">
+            <input type="checkbox" id="upd-enabled">
+            <span>${i18n.t('updates.settingEnabled')}</span>
+          </label>
+          <div id="upd-status-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--text-dim)">
+            <span id="upd-status-text">…</span>
+            <button class="btn btn-sm" id="upd-check-now"><i class="fas fa-sync"></i> ${i18n.t('updates.checkNow')}</button>
+          </div>
+        </div>
+      </div>
     `;
 
     // Fetch version dynamically
@@ -1567,6 +1582,59 @@ const SettingsPage = {
       const vEl = el.querySelector('#settings-version');
       if (vEl && h.version) vEl.innerHTML = `v${h.version} <i class="fas fa-bullhorn" style="font-size:10px"></i>`;
     }).catch(() => {});
+
+    // Update-check section (v7.3.0)
+    const renderUpdStatus = (status) => {
+      const text = el.querySelector('#upd-status-text');
+      if (!text || !status) return;
+      const last = status.lastChecked
+        ? new Date(status.lastChecked).toLocaleString()
+        : i18n.t('updates.never');
+      if (status.hasUpdate) {
+        text.innerHTML = `<a href="#" id="upd-open-modal" style="color:var(--accent)"><i class="fas fa-arrow-up"></i> ${i18n.t('updates.modalTitle')}: ${Utils.escapeHtml(status.latest)}</a> · ${i18n.t('updates.lastChecked')}: ${Utils.escapeHtml(last)}`;
+        text.querySelector('#upd-open-modal')?.addEventListener('click', (e) => {
+          e.preventDefault();
+          window.UpdateNotifier?.openModal();
+        });
+      } else if (status.enabled) {
+        text.innerHTML = `<i class="fas fa-check" style="color:var(--green)"></i> ${i18n.t('updates.upToDate')} · ${i18n.t('updates.lastChecked')}: ${Utils.escapeHtml(last)}`;
+      } else {
+        text.innerHTML = `<i class="fas fa-pause" style="color:var(--text-dim)"></i> ${i18n.t('common.disabled')}`;
+      }
+    };
+
+    try {
+      const status = await Api.get('/system/update-check');
+      el.querySelector('#upd-enabled').checked = !!status.enabled;
+      renderUpdStatus(status);
+    } catch { /* anonymous-only? unlikely on a settings page */ }
+
+    el.querySelector('#upd-enabled').addEventListener('change', async (e) => {
+      const enabled = e.target.checked;
+      try {
+        await window.UpdateNotifier.setEnabled(enabled);
+        Toast.success(enabled ? i18n.t('common.enabled') : i18n.t('common.disabled'));
+        const status = await Api.get('/system/update-check');
+        renderUpdStatus(status);
+      } catch (err) { Toast.error(err.message); }
+    });
+
+    el.querySelector('#upd-check-now').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const original = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${i18n.t('updates.checking')}`;
+      try {
+        const result = await window.UpdateNotifier.forceRefresh();
+        renderUpdStatus(result.status);
+        Toast.success(i18n.t('updates.refreshed'));
+      } catch (err) {
+        Toast.error(`${i18n.t('updates.checkFailed')}: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
+    });
   },
 
   _showHelp() {

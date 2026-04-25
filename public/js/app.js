@@ -379,6 +379,13 @@ const App = {
       versionEl.addEventListener('click', () => this.navigate('/whatsnew'));
     }
 
+    // v7.3.0: check GitHub for newer version (cached server-side, ~1 call/12h
+    // total across all users). Adds an unobtrusive ↑ badge next to the
+    // sidebar version when an update is available.
+    if (window.UpdateNotifier) {
+      window.UpdateNotifier.init().catch(() => { /* silent */ });
+    }
+
     // Restore host context
     Api.restoreHost();
 

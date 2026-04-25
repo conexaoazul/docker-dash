@@ -134,6 +134,9 @@ app.use('/api/containers', apiLimiter, require('./routes/containers'));
 app.use('/api/images', apiLimiter, require('./routes/images'));
 app.use('/api/volumes', apiLimiter, require('./routes/volumes'));
 app.use('/api/networks', apiLimiter, require('./routes/networks'));
+// Mount /api/system/update-check BEFORE /api/system so its specific routes
+// win and we skip the system router's extractHostId middleware (no host needed).
+app.use('/api/system/update-check', apiLimiter, require('./routes/update-check'));
 app.use('/api/system', apiLimiter, require('./routes/system'));
 app.use('/api/stats', apiLimiter, require('./routes/stats'));
 app.use('/api/alerts', apiLimiter, require('./routes/alerts'));
