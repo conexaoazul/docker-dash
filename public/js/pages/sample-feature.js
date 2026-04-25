@@ -95,9 +95,6 @@ const SampleFeaturePage = {
             <i class="fas fa-book"></i> ${i18n.t('pages.sampleFeature.contributingGuide')}
             <i class="fas fa-external-link-alt" style="font-size:10px"></i>
           </a>
-          <a href="#/howto/contributing" class="btn btn-sm btn-secondary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">
-            <i class="fas fa-graduation-cap"></i> ${i18n.t('pages.sampleFeature.howtoContributing')}
-          </a>
           <a href="${this._ghBase}examples/sample-feature/README.md" target="_blank" rel="noopener" class="btn btn-sm btn-secondary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">
             <i class="fab fa-github"></i> ${i18n.t('pages.sampleFeature.viewExample')}
             <i class="fas fa-external-link-alt" style="font-size:10px"></i>

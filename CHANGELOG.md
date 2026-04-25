@@ -2,6 +2,12 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.5.1] - 2026-04-26 — Bug fix
+
+### Fixed
+
+- **Broken `#/howto/contributing` button** in the Sample Plugin page header. The link pointed to an in-app How-To guide that doesn't exist (the actual How-To page has a "Contribute to Docker Dash" button that opens GitHub directly). Removed the duplicate button — the "Contributing Guide" button still opens `docs/CONTRIBUTING.md` on GitHub. ([public/js/pages/sample-feature.js:94-104](public/js/pages/sample-feature.js))
+
 ## [7.5.0] - 2026-04-26 — Image Registry — push, browse, deploy template
 
 Three coordinated additions that turn the existing read-only "Registries" credential store into a first-class registry workflow: deploy your own private registry from a template, push local images to any configured registry with live progress, and browse remote registry contents with manifest inspection.
