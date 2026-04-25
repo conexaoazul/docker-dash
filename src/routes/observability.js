@@ -29,8 +29,14 @@ router.use(requireAuth, requireRole('admin'));
 // any manual "Rescan" click.
 router.get('/detect', asyncHandler(async (req, res) => {
   const result = await detect.detect(dockerService);
+  // v7.6.0 — also probe reachability for any detected service. Catches the
+  // "container running but inside-process crashed" + "wrong network" cases
+  // that pure image-prefix detection misses. Best-effort; never blocks
+  // the response longer than ~2s per service.
+  const probes = await detect.probe(result);
   res.json({
     ...result,
+    probes,
     // Ship the scrape-config snippet alongside so the frontend doesn't
     // need to know the API port or target name conventions.
     scrapeConfigSnippet: importer.scrapeConfigSnippet(

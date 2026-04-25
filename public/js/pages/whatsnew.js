@@ -10,6 +10,28 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '7.6.0',
+      date: '2026-04-26',
+      title: 'Registry delete + observability extras',
+      changes: [
+        { type: 'feature', text: 'Delete-from-registry (closes the v7.5.0 commitment). Browse page Delete button is admin-only with a two-step confirmation gate (you must type the full repo:tag string). Backend resolves tag → digest via HEAD then DELETEs by digest. Audited. Modal explains that layer blobs are reclaimed only when the operator runs registry garbage-collect on the host.' },
+        { type: 'feature', text: 'Observability wizard now probes reachability — not just image-prefix detection. Hits /-/healthy on Prometheus and /api/health on Grafana with a 2s timeout, then renders green "reachable" or red "unreachable" pills next to each detected service in the wizard banner. Catches "container running but inner process crashed" and "wrong network" cases.' },
+        { type: 'feature', text: 'New "Top Containers" Grafana dashboard (auto-provisioned by the observability profile). Three panels: Top 10 by CPU, Top 10 by memory, sortable table of all containers. Refresh 30s. Lives in the auto-imported "Docker Dash" folder alongside the v7.1.0 Overview.' },
+        { type: 'feature', text: '5 recommended Prometheus alert rules in docker/observability/alerts/docker-dash.yml, auto-loaded by Prometheus when the observability profile starts. Page-level: DockerDashDown (process not scrapable for 1m), ClusterNoSingleLeader (HA split-brain or no leader), ClusterRedisDown, HighErrorRate (5xx > 0.1/s for 5m). Warning-level: HighRequestLatency, BackgroundJobErrors. HA rules guarded by mode="ha" label so they don\'t fire on standalone.' },
+        { type: 'improvement', text: 'Closed the loop on the four v7.3.0 update-check soak verifications — moved from in-Claude session-only crons (which wouldn\'t survive a restart) to GitHub Issues #7-#10 (2-week/1-month/2-month/3-month) with runnable checklists.' },
+        { type: 'improvement', text: '9 new unit tests (3 for deleteTag arg validation + 6 for the reachability probe). Suite: 952 → 961 / 62 suites.' },
+        { type: 'fix', text: 'Removed broken in-app /howto/contributing button from the Sample Plugin page (was duplicate with the GitHub-link Contributing Guide button anyway). Shipped as v7.5.1.' },
+      ],
+    },
+    {
+      version: '7.5.1',
+      date: '2026-04-26',
+      title: 'Bug fix: broken howto link in Sample Plugin',
+      changes: [
+        { type: 'fix', text: 'Removed a broken /howto/contributing button from the Sample Plugin page header. The link pointed to an in-app guide that was never built. The "Contributing Guide" button still works and opens docs/CONTRIBUTING.md on GitHub.' },
+      ],
+    },
+    {
       version: '7.5.0',
       date: '2026-04-26',
       title: 'Image Registry — push, browse, deploy template',

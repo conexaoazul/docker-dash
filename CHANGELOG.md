@@ -2,6 +2,85 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.6.0] - 2026-04-26 — Registry delete + observability extras
+
+Closes the explicit v7.6 commitments from v7.5.0 and a few v7.2.0/v7.3.0 roadmap items that were "may add later". Three coordinated additions, all real backend + UI + tests.
+
+### Added — Delete from registry
+
+Promised in v7.5.0 release notes. Distribution exposes delete by digest only (not by tag), and deleting a prod tag accidentally is a footgun — both addressed:
+
+- **`DELETE /api/registries/:id/tag/*ref`** — admin-only, audited. Resolves the tag → digest via `HEAD /v2/<repo>/manifests/<tag>` (cheap), then `DELETE /v2/<repo>/manifests/<digest>`. Idempotent: 404 from the delete is treated as success (already gone). Surfaces a clear error when the registry has deletion disabled (`REGISTRY_STORAGE_DELETE_ENABLED=false` → HTTP 405/501). ([src/services/registry.js](src/services/registry.js), [src/routes/registries.js](src/routes/registries.js))
+
+- **Browse page Delete button** — admin-only, behind a **two-step confirmation gate**: type the full `repo:tag` string before the Delete button enables. Modal explains that the manifest is removed immediately but layer blobs are reclaimed only when the operator runs `registry garbage-collect` on the host (Distribution doesn't auto-GC, by design). Audit log: `registry_tag_delete` on success, `registry_tag_delete_failed` on either resolve or delete failure. ([public/js/pages/registry-browse.js](public/js/pages/registry-browse.js))
+
+### Added — Observability wizard reachability probe
+
+The v7.2.0 wizard detected Prometheus + Grafana by image-prefix only. Two failure modes that detection can't catch: (a) container running but the inner process crashed; (b) container running but on a different Docker network so we can't reach it. Now the wizard probes:
+
+- **`GET /-/healthy`** on detected Prometheus
+- **`GET /api/health`** on detected Grafana
+- 2-second timeout per probe; failure messages explain (`ECONNREFUSED`, `timeout`, etc.)
+- Reachability pills render next to each detected service in the wizard banner: green "reachable (HTTP 200)" or red "unreachable (`<error>`)". The banner stays the right color (green/yellow/grey) based on detection so the status pill is additive context, not a layout shift.
+
+Implementation: pure-function `_probe(url)` + `probe(detection)` in [`src/services/observability-detect.js`](src/services/observability-detect.js); wired into the existing `GET /api/observability/detect` endpoint. ~60 LOC service + ~6 LOC route + ~8 LOC UI.
+
+### Added — "Top Containers" Grafana dashboard
+
+Second dashboard JSON that ships with the observability profile (auto-provisioned by Grafana on container start). Three panels using the existing `docker_dash_container_cpu` + `docker_dash_container_memory_bytes` metrics from `/api/metrics`:
+
+- Top 10 by CPU (timeseries)
+- Top 10 by memory (timeseries)
+- Sortable table of all containers with gauge-style CPU column
+
+Refresh 30s. UID: `docker-dash-top-containers`. Lives in the auto-imported "Docker Dash" folder alongside the v7.1.0 Overview dashboard. No config required. ([docker/observability/grafana/dashboards/docker-dash-top-containers.json](docker/observability/grafana/dashboards/docker-dash-top-containers.json))
+
+### Added — Prometheus alert rules
+
+5 recommended rules in [`docker/observability/alerts/docker-dash.yml`](docker/observability/alerts/docker-dash.yml), auto-loaded by Prometheus when the observability profile starts (compose now bind-mounts the alerts dir). Wire an Alertmanager to forward fires to Slack/PagerDuty/etc — Prometheus by itself only evaluates and shows them in `/alerts`.
+
+| Rule | Severity | Expression |
+|---|---|---|
+| `DockerDashDown` | page | `up{job="docker-dash"} == 0` for 1m |
+| `ClusterNoSingleLeader` | page | HA mode + count of leaders ≠ 1 for 2m (split-brain or no leader) |
+| `ClusterRedisDown` | page | HA mode + `cluster_redis_connected == 0` for 2m |
+| `HighErrorRate` | page | 5xx rate > 0.1/s for 5m |
+| `HighRequestLatency` | warning | avg request duration > 1000ms for 5m |
+| `BackgroundJobErrors` | warning | any background job throwing for 15m |
+
+The HA-mode rules (`ClusterNoSingleLeader`, `ClusterRedisDown`) are guarded by the `mode="ha"` label so they don't fire spuriously on standalone deployments.
+
+### Tests
+
+- 3 new tests for `deleteTag` argument validation (the HTTP path is exercised manually on staging — mocking `_apiCall` cleanly would require a service restructure for one test).
+- 6 new tests for `_probe` + `probe` (invalid URL, unsupported protocol, connection refused, null detection, no internalUrl, URL attachment).
+- Suite: 952 → **961 passing / 62 suites**. Lint clean, npm audit clean.
+
+### Process
+
+Closes the loop on the four scheduled "soak check" tasks for v7.3.0 update-check: opened as **GitHub Issues #7-#10** (2-week / 1-month / 2-month / 3-month) with checklists you can run through and check off. Replaces the in-Claude session-only crons that wouldn't have survived a session restart.
+
+### Files touched
+
+- `src/services/registry.js` — `deleteTag()` + `_apiCall()` extended with `method` option
+- `src/routes/registries.js` — `DELETE /:id/tag/*ref`
+- `public/js/pages/registry-browse.js` — Delete button + `_confirmDeleteTag()`
+- `src/services/observability-detect.js` — `probe()` + `_probe()`
+- `src/routes/observability.js` — wires `probe()` into `/detect`
+- `public/js/pages/observability-wizard.js` — reachability pills in branch banners
+- `docker/observability/grafana/dashboards/docker-dash-top-containers.json` (new)
+- `docker/observability/alerts/docker-dash.yml` (new)
+- `docker/observability/prometheus.yml` — `rule_files` block
+- `docker-compose.yml` — bind-mount `alerts/` into prometheus container
+- `src/__tests__/registry-push.test.js` — 3 new tests
+- `src/__tests__/observability-detect.test.js` — 6 new tests
+
+### What's still NOT done (intentionally)
+
+- **Auto-deploy Prometheus+Grafana via dockerode** — significant refactor (we'd replicate compose's parser in Node) for a marginal UX gain (one click vs one CLI command). Original v7.2.0 rationale for deferral still holds. If you want it, open a discussion.
+- **Self-host Chart.js + FontAwesome + fonts** to silence Edge tracking-prevention warnings — large refactor for cosmetic warnings on one specific browser.
+- **HTTPS for COOP warning** — already supported via Caddy `--profile tls`; operator decision.
+
 ## [7.5.1] - 2026-04-26 — Bug fix
 
 ### Fixed

@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        APP_VERSION: "${APP_VERSION:-7.5.1}"
-    image: docker-dash:${APP_VERSION:-7.5.1}
+        APP_VERSION: "${APP_VERSION:-7.6.0}"
+    image: docker-dash:${APP_VERSION:-7.6.0}
     container_name: docker-dash
     restart: unless-stopped
     env_file:
@@ -54,7 +54,7 @@ services:
   dd-egress-filter:
     build:
       context: ./docker/egress-filter
-    image: docker-dash-egress-filter:${APP_VERSION:-7.5.1}
+    image: docker-dash-egress-filter:${APP_VERSION:-7.6.0}
     container_name: dd-egress-filter
     restart: unless-stopped
     # Uses the default bridge so target containers on the default bridge can
@@ -131,6 +131,8 @@ services:
       - --web.enable-lifecycle
     volumes:
       - ./docker/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # v7.6.0 — bind alert rules dir so prometheus.yml `rule_files: alerts/*.yml` resolves
+      - ./docker/observability/alerts:/etc/prometheus/alerts:ro
       - prometheus-data:/prometheus
     # Not exposed to host by default — Grafana reaches it on the internal
     # network. Uncomment to expose for external scraping.

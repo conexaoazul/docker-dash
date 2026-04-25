@@ -12,6 +12,12 @@ global:
   external_labels:
     deployment: docker-dash
 
+# v7.6.0 — Alert rule files. Loaded relative to this file; the docker-compose
+# observability profile bind-mounts the alerts/ directory into the container.
+# Wire an Alertmanager via `alerting:` block to route fires to Slack/PagerDuty/etc.
+rule_files:
+  - alerts/*.yml
+
 scrape_configs:
   # Docker Dash app metrics. Works in both standalone and HA mode.
   # In HA mode, each replica exposes its own /api/metrics; if you scale

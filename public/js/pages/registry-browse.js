@@ -253,6 +253,11 @@ const RegistryBrowsePage = {
         <button class="btn btn-sm" id="rb-copy-pull">
           <i class="fas fa-clipboard"></i> Copy pull command
         </button>
+        ${window.App?.user?.role === 'admin' ? `
+          <button class="btn btn-sm btn-danger" id="rb-delete-tag">
+            <i class="fas fa-trash"></i> Delete this tag
+          </button>
+        ` : ''}
       </div>
     `;
     document.getElementById('rb-copy-pull')?.addEventListener('click', () => {
@@ -264,6 +269,68 @@ const RegistryBrowsePage = {
         () => Toast.error('Copy failed')
       );
     });
+    document.getElementById('rb-delete-tag')?.addEventListener('click', () => {
+      this._confirmDeleteTag(repo, tag, data.digest);
+    });
+  },
+
+  // v7.6.0 — Delete-tag confirmation. Two-step: type the full repo:tag
+  // string to confirm. Tag deletion is by-digest under the hood; the
+  // server resolves it. Garbage collection of orphaned blobs is operator
+  // responsibility (documented in modal footnote).
+  _confirmDeleteTag(repo, tag, digest) {
+    const fullRef = `${repo}:${tag}`;
+    Modal.open(`
+      <div class="modal-header">
+        <h3 style="color:var(--red)"><i class="fas fa-exclamation-triangle" style="margin-right:10px"></i> Delete tag</h3>
+        <button class="modal-close-btn" id="modal-x"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p>You are about to permanently delete the tag:</p>
+        <div style="background:var(--bg-dim);padding:10px 12px;border-radius:var(--radius-sm);margin:10px 0;font-family:'JetBrains Mono',monospace;font-size:13px">
+          <div>${Utils.escapeHtml(fullRef)}</div>
+          <div class="text-muted text-sm" style="margin-top:4px;font-size:11px">${Utils.escapeHtml(digest || 'unknown digest')}</div>
+        </div>
+        <p class="text-sm text-muted">
+          Anyone (or any CI job) currently pulling <code>${Utils.escapeHtml(fullRef)}</code> will fail until the tag is re-pushed.
+          This action is audited.
+        </p>
+        <p class="text-sm" style="margin-top:14px">Type <code style="background:var(--bg-dim);padding:2px 6px;border-radius:3px;font-family:'JetBrains Mono',monospace">${Utils.escapeHtml(fullRef)}</code> to confirm:</p>
+        <input type="text" id="rb-delete-confirm" class="form-control" autocomplete="off" placeholder="${Utils.escapeHtml(fullRef)}">
+        <p class="text-sm text-muted" style="margin-top:14px;font-size:11px">
+          <i class="fas fa-info-circle" style="margin-right:4px"></i>
+          Manifest is removed immediately. Layer blobs are reclaimed when the operator runs <code>registry garbage-collect</code> on the host (Distribution doesn't auto-GC).
+        </p>
+      </div>
+      <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-sm" id="rb-delete-cancel">Cancel</button>
+        <button class="btn btn-sm btn-danger" id="rb-delete-go" disabled><i class="fas fa-trash"></i> Delete tag</button>
+      </div>
+    `, { size: 'md' });
+
+    const input = document.getElementById('rb-delete-confirm');
+    const goBtn = document.getElementById('rb-delete-go');
+    input.addEventListener('input', () => {
+      goBtn.disabled = input.value.trim() !== fullRef;
+    });
+    document.getElementById('rb-delete-cancel').addEventListener('click', () => Modal.close());
+    document.getElementById('modal-x').addEventListener('click', () => Modal.close());
+    goBtn.addEventListener('click', async () => {
+      goBtn.disabled = true;
+      goBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting…';
+      try {
+        await Api.delete(`/registries/${this._selectedId}/tag/${fullRef}`);
+        Modal.close();
+        Toast.success(`Deleted ${fullRef}`);
+        // Refresh the tag list — the deleted tag is gone, the manifest panel hides
+        await this._selectRepo(repo);
+      } catch (err) {
+        Toast.error(err.message);
+        goBtn.disabled = false;
+        goBtn.innerHTML = '<i class="fas fa-trash"></i> Delete tag';
+      }
+    });
+    setTimeout(() => input.focus(), 50);
   },
 
   destroy() {

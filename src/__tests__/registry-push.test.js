@@ -162,4 +162,25 @@ describe('registry service — push + manifest (v7.5.0)', () => {
       expect(reg.last_used_at).toBeTruthy();
     });
   });
+
+  // v7.6.0 — deleteTag uses _apiCall under the hood. We can't easily mock
+  // _apiCall without restructuring the service, so these tests cover the
+  // input-validation paths only (the HTTP path is exercised manually on
+  // staging with the deployed Distribution registry).
+  describe('deleteTag — argument validation (v7.6.0)', () => {
+    it('throws when registry id is unknown', async () => {
+      await expect(registryService.deleteTag(99999, 'repo', 'tag'))
+        .rejects.toThrow(/Registry not found/);
+    });
+
+    it('throws when repo missing', async () => {
+      const id = registryService.create({ name: 'r', url: 'http://r:5000', createdBy: 1 });
+      await expect(registryService.deleteTag(id, '', 'tag')).rejects.toThrow(/repo required/);
+    });
+
+    it('throws when tag missing', async () => {
+      const id = registryService.create({ name: 'r', url: 'http://r:5000', createdBy: 1 });
+      await expect(registryService.deleteTag(id, 'repo', '')).rejects.toThrow(/tag required/);
+    });
+  });
 });

@@ -65,19 +65,35 @@ const ObservabilityWizardPage = {
   },
 
   _renderBranch(branch, state) {
+    // v7.6.0 — reachability pills next to detected services
+    const probe = state.probes || {};
+    const _pill = (svc, label) => {
+      const p = probe[svc];
+      if (!p) return '';
+      if (p.ok) return ` <span class="badge" style="background:rgba(46,160,67,0.15);color:var(--green);font-size:10px;padding:2px 6px;border-radius:8px;margin-left:4px"><i class="fas fa-check" style="font-size:8px"></i> reachable (HTTP ${p.status})</span>`;
+      return ` <span class="badge" style="background:rgba(248,113,113,0.15);color:var(--red);font-size:10px;padding:2px 6px;border-radius:8px;margin-left:4px" title="${Utils.escapeHtml(p.url || '')}"><i class="fas fa-times" style="font-size:8px"></i> unreachable (${Utils.escapeHtml(p.error || ('HTTP ' + p.status))})</span>`;
+    };
+
     const banner = (() => {
       if (branch === 'both') return `<div class="card" style="border-left:4px solid var(--green);padding:12px 16px;margin-bottom:20px">
         <i class="fas fa-check-circle" style="color:var(--green);margin-right:8px"></i>
         <strong>${i18n.t('pages.observability.stateA.banner')}</strong>
         <div class="text-sm text-muted" style="margin-top:6px">
-          Prometheus: <code>${Utils.escapeHtml(state.prometheus.name)}</code> ·
-          Grafana: <code>${Utils.escapeHtml(state.grafana.name)}</code>
+          Prometheus: <code>${Utils.escapeHtml(state.prometheus.name)}</code>${_pill('prometheus', 'Prometheus')} ·
+          Grafana: <code>${Utils.escapeHtml(state.grafana.name)}</code>${_pill('grafana', 'Grafana')}
         </div>
       </div>`;
-      if (branch === 'partial') return `<div class="card" style="border-left:4px solid var(--yellow);padding:12px 16px;margin-bottom:20px">
-        <i class="fas fa-exclamation-triangle" style="color:var(--yellow);margin-right:8px"></i>
-        <strong>${i18n.t('pages.observability.stateB.banner', { found: state.prometheus ? 'Prometheus' : 'Grafana', missing: state.prometheus ? 'Grafana' : 'Prometheus' })}</strong>
-      </div>`;
+      if (branch === 'partial') {
+        const foundSvc = state.prometheus ? 'prometheus' : 'grafana';
+        const foundName = state.prometheus ? state.prometheus.name : state.grafana.name;
+        return `<div class="card" style="border-left:4px solid var(--yellow);padding:12px 16px;margin-bottom:20px">
+          <i class="fas fa-exclamation-triangle" style="color:var(--yellow);margin-right:8px"></i>
+          <strong>${i18n.t('pages.observability.stateB.banner', { found: state.prometheus ? 'Prometheus' : 'Grafana', missing: state.prometheus ? 'Grafana' : 'Prometheus' })}</strong>
+          <div class="text-sm text-muted" style="margin-top:6px">
+            <code>${Utils.escapeHtml(foundName)}</code>${_pill(foundSvc, foundSvc)}
+          </div>
+        </div>`;
+      }
       return `<div class="card" style="border-left:4px solid var(--text-dim);padding:12px 16px;margin-bottom:20px">
         <i class="fas fa-info-circle" style="color:var(--text-dim);margin-right:8px"></i>
         <strong>${i18n.t('pages.observability.stateC.banner')}</strong>

@@ -160,3 +160,51 @@ describe('observability-detect', () => {
     expect(r.grafana).toBeNull();
   });
 });
+
+// v7.6.0 — Reachability probe tests. _probe is exposed via _internals for
+// unit testing without spinning up a real HTTP server.
+describe('observability-detect — probe (v7.6.0)', () => {
+  describe('_probe', () => {
+    const { _probe } = detect._internals;
+
+    it('returns ok:false on invalid URL', async () => {
+      const r = await _probe('not a url');
+      expect(r.ok).toBe(false);
+      expect(r.error).toBe('invalid URL');
+    });
+
+    it('returns ok:false on unsupported protocol', async () => {
+      const r = await _probe('ftp://example.com/');
+      expect(r.ok).toBe(false);
+      expect(r.error).toBe('unsupported protocol');
+    });
+
+    it('returns ok:false on connection error (port nobody is listening on)', async () => {
+      // Port 1 — privileged + nothing listens. Connection will be refused.
+      const r = await _probe('http://127.0.0.1:1/');
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/ECONNREFUSED|EADDRNOTAVAIL|EACCES/);
+    });
+  });
+
+  describe('probe (full)', () => {
+    it('returns nulls when nothing is detected', async () => {
+      const r = await detect.probe({ prometheus: null, grafana: null });
+      expect(r).toEqual({ prometheus: null, grafana: null });
+    });
+
+    it('does not probe a service that has no internalUrl', async () => {
+      const r = await detect.probe({ prometheus: { internalUrl: null }, grafana: null });
+      expect(r.prometheus).toBeNull();
+    });
+
+    it('attaches the URL to the result for unreachable probes', async () => {
+      const r = await detect.probe({
+        prometheus: { internalUrl: 'http://127.0.0.1:1' },
+        grafana: null,
+      });
+      expect(r.prometheus.url).toBe('http://127.0.0.1:1/-/healthy');
+      expect(r.prometheus.ok).toBe(false);
+    });
+  });
+});

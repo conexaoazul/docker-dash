@@ -95,6 +95,55 @@ class RegistryService {
   }
 
   /**
+   * Delete a tag from a remote registry.
+   *
+   * Distribution's V2 API only supports DELETE by digest, not by tag — so we
+   * first HEAD the manifest to resolve the tag → digest, then DELETE the
+   * digest. The registry must have `REGISTRY_STORAGE_DELETE_ENABLED=true`
+   * (our shipped template sets this); otherwise the DELETE returns 405.
+   *
+   * Note that this only deletes the manifest. The blobs (layers) are not
+   * reclaimed until the operator runs `registry garbage-collect`. We don't
+   * trigger GC automatically — it requires the registry to be read-only or
+   * risks data loss. Operators run it manually on a schedule.
+   *
+   * @param {number} id  registry id
+   * @param {string} repo  e.g. "team/myapp"
+   * @param {string} tag  e.g. "v1.2.3"
+   * @returns {Promise<{ok: true, digest: string}>}
+   */
+  async deleteTag(id, repo, tag) {
+    const reg = this.get(id);
+    if (!reg) throw new Error('Registry not found');
+    if (!repo) throw new Error('repo required');
+    if (!tag) throw new Error('tag required');
+
+    // Step 1: HEAD the manifest to resolve the digest. We use HEAD (not GET)
+    // because we don't need the body and HEAD is cheap; the registry returns
+    // the same Docker-Content-Digest header either way.
+    const head = await this._apiCall(reg, `/v2/${repo}/manifests/${tag}`, {
+      method: 'HEAD',
+      accept: 'application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json',
+    });
+    if (head.status === 404) throw new Error(`Tag not found: ${repo}:${tag}`);
+    if (head.status >= 400) throw new Error(`Manifest lookup failed (HTTP ${head.status})`);
+    const digest = head.headers?.['docker-content-digest'];
+    if (!digest) throw new Error('Registry did not return a digest — refusing to guess');
+
+    // Step 2: DELETE by digest.
+    const del = await this._apiCall(reg, `/v2/${repo}/manifests/${digest}`, { method: 'DELETE' });
+    if (del.status === 405 || del.status === 501) {
+      throw new Error('Registry has deletion disabled. Set REGISTRY_STORAGE_DELETE_ENABLED=true and restart it.');
+    }
+    if (del.status === 404) {
+      // Already gone — treat as success (idempotent delete)
+    } else if (del.status >= 400) {
+      throw new Error(`Delete failed (HTTP ${del.status})`);
+    }
+    return { ok: true, digest };
+  }
+
+  /**
    * Build the X-Registry-Auth header value for dockerode.push().
    * Returns the dockerode `authconfig` object (NOT the encoded header).
    * Dockerode handles the base64-of-JSON encoding internally.
@@ -257,6 +306,7 @@ class RegistryService {
     return new Promise((resolve, reject) => {
       const url = new URL(path, reg.url);
       const mod = url.protocol === 'https:' ? https : http;
+      const method = opts.method || 'GET';
       const headers = { 'Accept': opts.accept || 'application/json' };
 
       if (reg.username && reg.password_encrypted) {
@@ -264,13 +314,18 @@ class RegistryService {
         headers['Authorization'] = 'Basic ' + Buffer.from(`${reg.username}:${pass}`).toString('base64');
       }
 
-      const req = mod.get(url, { headers, timeout: 10000, rejectUnauthorized: false }, (res) => {
+      const req = mod.request(url, {
+        method,
+        headers,
+        timeout: 10000,
+        rejectUnauthorized: false,
+      }, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
           const result = { status: res.statusCode, headers: res.headers };
           try {
-            result.body = JSON.parse(data);
+            result.body = data ? JSON.parse(data) : null;
           } catch {
             result.body = data;
           }
@@ -279,6 +334,7 @@ class RegistryService {
       });
       req.on('error', reject);
       req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+      req.end();
     });
   }
 }

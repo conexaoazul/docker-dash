@@ -59,6 +59,42 @@ router.get('/:id/tags/*repo', requireAuth, asyncHandler(async (req, res) => {
   res.json(tags);
 }));
 
+// v7.6.0 — Delete a tag from a remote registry. Admin only, audited.
+// Resolves tag → digest first via HEAD, then DELETEs by digest. Errors with
+// a clear message when the registry has deletion disabled (REGISTRY_STORAGE_
+// DELETE_ENABLED=false). Idempotent: a 404 from the delete is treated as
+// success (already gone).
+router.delete('/:id/tag/*ref', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+  const raw = Array.isArray(req.params.ref) ? req.params.ref.join('/') : req.params.ref;
+  const lastColon = raw.lastIndexOf(':');
+  if (lastColon === -1) return res.status(400).json({ error: 'ref must be repo:tag' });
+  const repo = raw.substring(0, lastColon);
+  const tag = raw.substring(lastColon + 1);
+
+  let result;
+  try {
+    result = await registryService.deleteTag(parseInt(req.params.id), repo, tag);
+  } catch (err) {
+    auditService.log({
+      userId: req.user.id, username: req.user.username,
+      action: 'registry_tag_delete_failed', targetType: 'registry-tag',
+      targetId: `${req.params.id}/${repo}:${tag}`,
+      details: { error: err.message.substring(0, 300) },
+      ip: getClientIp(req),
+    });
+    return res.status(502).json({ error: err.message });
+  }
+
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'registry_tag_delete', targetType: 'registry-tag',
+    targetId: `${req.params.id}/${repo}:${tag}`,
+    details: { repo, tag, digest: result.digest },
+    ip: getClientIp(req),
+  });
+  res.json(result);
+}));
+
 // v7.5.0 — Manifest inspect for the Browse page. Returns the raw manifest
 // (so the UI can show layer count + sizes), digest, and content type.
 router.get('/:id/manifest/*ref', requireAuth, asyncHandler(async (req, res) => {

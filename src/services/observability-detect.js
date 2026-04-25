@@ -1,6 +1,6 @@
 'use strict';
 
-// Observability stack detection — v7.2.0
+// Observability stack detection — v7.2.0 (probe added v7.6.0)
 //
 // Scans the local Docker daemon for running Prometheus / Grafana
 // containers. Used by the in-app wizard at /system/observability to
@@ -9,10 +9,18 @@
 //   (B) one found  → partial-stack guidance
 //   (C) none found → deploy-ours guidance
 //
+// v7.6.0 adds reachability probing — once the wizard has a containerId,
+// it can ask "is this Prometheus actually responding to /-/healthy and is
+// this Grafana responding to /api/health?". Two failure modes the original
+// image-prefix-only detection couldn't catch: (1) container running but
+// the process inside it crashed; (2) container running but on a different
+// network so we can't actually reach it.
+//
 // Pure detection — never modifies Docker state, never throws, logs a
 // warn on unexpected errors and returns null slots. Admin-gated at the
 // route layer so this runs only from the wizard page.
 
+const http = require('http');
 const log = require('../utils/logger')('obs-detect');
 
 // Image-name prefixes we recognize. Users who run renamed images (private
@@ -116,7 +124,68 @@ async function detect(dockerService) {
   return result;
 }
 
+/**
+ * v7.6.0 — Probe a single HTTP endpoint and return reachability.
+ * Used by the wizard to verify that detected containers are actually
+ * responding (not just running). 2-second timeout — we're probing
+ * containers on the same Docker network or localhost; anything slower
+ * than that is effectively unreachable for UX purposes.
+ *
+ * @param {string} urlString  e.g. "http://docker-dash-prometheus:9090/-/healthy"
+ * @returns {Promise<{ok: boolean, status?: number, error?: string}>}
+ */
+function _probe(urlString) {
+  return new Promise((resolve) => {
+    let url;
+    try { url = new URL(urlString); }
+    catch (err) { return resolve({ ok: false, error: 'invalid URL' }); }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return resolve({ ok: false, error: 'unsupported protocol' });
+    }
+    const lib = url.protocol === 'https:' ? require('https') : http;
+    const req = lib.request(url, {
+      method: 'GET',
+      timeout: 2000,
+      rejectUnauthorized: false,
+    }, (res) => {
+      // Drain to free the socket
+      res.on('data', () => {});
+      res.on('end', () => {
+        // Healthy = any 2xx. Some Grafana versions answer 401 to /api/health
+        // when auth is locked down — treat that as "reachable" with a note.
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode });
+      });
+    });
+    req.on('error', (err) => resolve({ ok: false, error: err.code || err.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }); });
+    req.end();
+  });
+}
+
+/**
+ * v7.6.0 — Probe both detected services (if present). Returns a map of
+ * { prometheus, grafana } each with { ok, status?, error?, url } so the
+ * wizard can render a status pill per service.
+ *
+ * @param {object} detection - the result of detect()
+ */
+async function probe(detection) {
+  const result = { prometheus: null, grafana: null };
+
+  if (detection.prometheus?.internalUrl) {
+    const url = `${detection.prometheus.internalUrl}/-/healthy`;
+    result.prometheus = { url, ...(await _probe(url)) };
+  }
+  if (detection.grafana?.internalUrl) {
+    const url = `${detection.grafana.internalUrl}/api/health`;
+    result.grafana = { url, ...(await _probe(url)) };
+  }
+
+  return result;
+}
+
 module.exports = {
   detect,
-  _internals: { PROMETHEUS_IMAGE_PATTERNS, GRAFANA_IMAGE_PATTERNS, _matchesAny, _cleanName, _containerPort },
+  probe,
+  _internals: { PROMETHEUS_IMAGE_PATTERNS, GRAFANA_IMAGE_PATTERNS, _matchesAny, _cleanName, _containerPort, _probe },
 };

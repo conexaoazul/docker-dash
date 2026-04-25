@@ -1,0 +1,94 @@
+# v7.6.0 — Recommended alert rules for Docker Dash.
+#
+# Loaded automatically by Prometheus when the observability profile is up
+# (see prometheus.yml `rule_files: alerts/*.yml`). Wire an Alertmanager
+# receiver to forward fires to Slack/PagerDuty/email — Prometheus by itself
+# only evaluates the rules and shows them in /alerts.
+#
+# All rules are tagged `severity: page` (call someone) or `warning` (look
+# at it within business hours). Tune the `for:` and threshold per your SLO.
+
+groups:
+  - name: docker-dash-availability
+    interval: 30s
+    rules:
+      # Hardest signal: Prometheus can't even scrape Docker Dash. Either the
+      # process is down, the host is unreachable, or the network is broken.
+      - alert: DockerDashDown
+        expr: up{job="docker-dash"} == 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "Docker Dash is not being scraped"
+          description: "Prometheus has not scraped Docker Dash for over 1 minute. Check `docker logs docker-dash` and the container state."
+
+      # In HA mode, exactly one node should be the leader. Less = no leader
+      # (cron jobs aren't running). More = split-brain (cron jobs running
+      # on multiple nodes — backup duplication, VACUUM contention).
+      # Standalone reports role=0 always, so the rule only fires when we
+      # have ≥1 node reporting cluster_role > 0 (i.e. running in HA).
+      - alert: ClusterNoSingleLeader
+        expr: |
+          (count(docker_dash_cluster_role{mode="ha"}) > 0)
+          and
+          (count(docker_dash_cluster_role{mode="ha"} == 1) != 1)
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "HA cluster has {{ $value }} leaders (expected 1)"
+          description: "Either no leader (cron jobs aren't running) or split-brain (jobs duplicating). See docs/features/ha-failover-runbook.md."
+
+      # Redis backs the rate limiter, WS pub/sub, and leader election. If it's
+      # down in HA mode, the rate limiter fails open (acceptable) but pub/sub
+      # + leader election break — cross-replica WS events stop, no failover.
+      - alert: ClusterRedisDown
+        expr: docker_dash_cluster_redis_connected == 0 and docker_dash_cluster_role > 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Redis is unreachable from {{ $labels.nodeId }}"
+          description: "WS pub/sub + leader election are broken. Check the redis container, the network between docker-dash and redis, and the REDIS_URL env."
+
+  - name: docker-dash-performance
+    interval: 30s
+    rules:
+      # Sustained 5xx error rate — something internal is broken. Tune
+      # threshold per your traffic; default is "more than 1 error per 10s".
+      - alert: HighErrorRate
+        expr: sum(rate(docker_dash_http_errors_total{status=~"5.."}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Docker Dash 5xx rate is {{ $value | printf \"%.2f\" }}/s"
+          description: "Sustained server errors. Check `docker logs docker-dash | grep \"Server error\"` for the underlying cause."
+
+      # Slow responses. Average request duration > 1s for 5 minutes.
+      # Warning, not page — slow doesn't mean broken, but worth investigating.
+      - alert: HighRequestLatency
+        expr: |
+          (
+            sum(rate(docker_dash_http_request_duration_ms[5m]))
+            /
+            sum(rate(docker_dash_http_requests_total[5m]))
+          ) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Avg request latency is {{ $value | printf \"%.0f\" }}ms"
+          description: "Most likely a slow Docker daemon (multi-host? remote SSH?) or a long-running query. Check the Slow request log lines."
+
+      # Background jobs failing repeatedly. Counter, so the rule fires when
+      # error rate is non-zero over the last 15 min.
+      - alert: BackgroundJobErrors
+        expr: sum by(job) (rate(docker_dash_background_job_errors_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Background job '{{ $labels.job }}' is failing"
+          description: "Job {{ $labels.job }} has been throwing for 15 minutes. Check `docker logs docker-dash | grep \"{{ $labels.job }} failed\"`."
