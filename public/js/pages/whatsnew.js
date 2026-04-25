@@ -10,6 +10,17 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '7.3.7',
+      date: '2026-04-25',
+      title: 'Browser console hygiene',
+      changes: [
+        { type: 'fix', text: 'CSP blocked an inline <script> on the login screen (the forgot-password reveal/submit handler). Extracted to public/js/login-reset.js so the existing script-src \'self\' directive accepts it. No \'unsafe-inline\' added.' },
+        { type: 'fix', text: 'Six "Unrecognized feature" warnings in the Permissions-Policy header — removed entries that current browsers no longer understand: ambient-light-sensor, battery, document-domain, execution-while-not-rendered, execution-while-out-of-viewport, navigation-override. All six are still safe at the platform level — listing them here was warning-noise, not protection.' },
+        { type: 'fix', text: 'Origin-Agent-Cluster mismatch warning ("could not be origin-keyed"). Helmet sends ?1 by default but our SPA doesn\'t opt every page in consistently. Disabled via helmet({ originAgentCluster: false }) since we don\'t need agent-cluster keying.' },
+        { type: 'improvement', text: 'Two warnings left intentionally: COOP-on-HTTP (browser refuses on insecure origin — goes away behind HTTPS) and Edge Tracking Prevention blocking 3rd-party CDN storage (browser feature, would need self-hosting Chart.js + FontAwesome + fonts to silence — deferred).' },
+      ],
+    },
+    {
       version: '7.3.5',
       date: '2026-04-25',
       title: 'WS cookie-first auth + What\'s New update banner',

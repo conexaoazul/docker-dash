@@ -2,6 +2,24 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.3.7] - 2026-04-25 — Browser console hygiene
+
+A user-driven cleanup pass on the dev-tools console output. Three real issues, three drive-by warnings I left alone (and explain why).
+
+### Fixed
+
+- **CSP blocked inline `<script>`** in the login screen (`Executing inline script violates the following Content Security Policy directive`). The forgot-password reveal/submit handler lived inline in `public/index.html`. Extracted to [`public/js/login-reset.js`](public/js/login-reset.js) and referenced via `<script src=…>` so the existing `script-src 'self'` directive accepts it. No `unsafe-inline` was added (would defeat the point of CSP).
+
+- **Permissions-Policy "Unrecognized feature" warnings** for six entries the current browsers no longer understand: `ambient-light-sensor` (early proposal, never standardized), `battery` (removed for privacy), `document-domain` (not a Permissions-Policy feature — lives in CSP/headers), `execution-while-not-rendered`, `execution-while-out-of-viewport`, `navigation-override` (all three Chrome-only, never standardized). Removed from the header in [`src/server.js`](src/server.js#L52-L74). All six are still safe at the platform level — listing them here was warning-noise, not protection.
+
+- **Origin-Agent-Cluster mismatch warning** ("could not be origin-keyed since the origin had previously been placed in a site-keyed agent cluster"). Helmet defaults to sending `Origin-Agent-Cluster: ?1`, which only takes effect if every page on the origin opts in consistently — our SPA doesn't, so the warning fires on every page load. Disabled via `helmet({ originAgentCluster: false })`. We don't need agent-cluster keying for our use case.
+
+### Not fixed (and why)
+
+- **`Cross-Origin-Opener-Policy header has been ignored, because the URL's origin was untrustworthy`** — fires on plain HTTP. The browser refuses COOP enforcement on insecure origins. Goes away in production behind HTTPS (Caddy `--profile tls` or any other TLS termination). No code fix needed.
+
+- **`Tracking Prevention blocked access to storage for <URL>`** — Edge's strict tracking prevention blocking 3rd-party storage for our CDN dependencies (jsDelivr, cdnjs, Google Fonts). Browser-side feature, can't be turned off from server. Could be eliminated by self-hosting Chart.js / FontAwesome / fonts — large refactor for a cosmetic warning. Deferred.
+
 ## [7.3.5] - 2026-04-25 — WS cookie-first auth + What's New update banner
 
 ### Fixed

@@ -46,18 +46,34 @@ app.use(helmet({
     },
   },
   frameguard: { action: 'deny' },
+  // v7.3.7: disable Origin-Agent-Cluster (Helmet default sends `?1`).
+  // Without explicitly opting in on every page, the header gets ignored
+  // with a console warning ("could not be origin-keyed since the origin
+  // had previously been placed in a site-keyed agent cluster"). We don't
+  // need agent-cluster keying for our SPA, so just stop sending it.
+  originAgentCluster: false,
 }));
 
 // Permissions-Policy — explicitly deny browser APIs we never use. Any future
 // feature that needs one of these (e.g. audio notifications) must opt-in here.
+// v7.3.7: dropped 6 features that current browsers don't recognize (Edge
+// console flagged each as "Unrecognized feature"):
+//   - ambient-light-sensor (early proposal, never standardized)
+//   - battery (removed from spec for privacy)
+//   - document-domain (not a Permissions-Policy feature; lives in CSP/headers)
+//   - execution-while-not-rendered, execution-while-out-of-viewport (Chrome-only,
+//     never standardized)
+//   - navigation-override (Chrome-only, never standardized)
+// All six are still safe defaults at the platform level — listing them
+// here was warning-noise, not protection.
 app.use((req, res, next) => {
   res.setHeader(
     'Permissions-Policy',
-    'accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), ' +
-    'cross-origin-isolated=(), display-capture=(), document-domain=(), encrypted-media=(), ' +
-    'execution-while-not-rendered=(), execution-while-out-of-viewport=(), fullscreen=(self), ' +
-    'geolocation=(), gyroscope=(), keyboard-map=(), magnetometer=(), microphone=(), ' +
-    'midi=(), navigation-override=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), ' +
+    'accelerometer=(), autoplay=(), camera=(), ' +
+    'cross-origin-isolated=(), display-capture=(), encrypted-media=(), ' +
+    'fullscreen=(self), geolocation=(), gyroscope=(), keyboard-map=(), ' +
+    'magnetometer=(), microphone=(), midi=(), payment=(), ' +
+    'picture-in-picture=(), publickey-credentials-get=(), ' +
     'screen-wake-lock=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()'
   );
   next();
