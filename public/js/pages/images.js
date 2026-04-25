@@ -54,6 +54,7 @@ const ImagesPage = {
             </div>
             <button class="action-btn" data-action="tag" data-id="${row.id}" title="Tag"><i class="fas fa-tag"></i></button>
             <button class="action-btn" data-action="export" data-id="${row.id}" title="Export"><i class="fas fa-file-export"></i></button>
+            <button class="action-btn" data-action="push" data-id="${row.id}" data-image="${Utils.escapeHtml((row._repo && row._tag) ? row._repo + ':' + row._tag : row.id)}" title="Push to Registry" style="color:var(--accent)"><i class="fas fa-cloud-upload-alt"></i></button>
             <button class="action-btn" data-action="sandbox" data-id="${row.id}" data-image="${Utils.escapeHtml((row._repo && row._tag) ? row._repo + ':' + row._tag : row.id)}" title="Run in Sandbox" style="color:var(--yellow)"><i class="fas fa-flask"></i></button>
             <button class="action-btn" data-action="layers" data-id="${row.id}" title="View layers"><i class="fas fa-layer-group"></i></button>
             <button class="action-btn" data-action="inspect" data-id="${row.id}" title="${i18n.t('pages.images.inspect')}"><i class="fas fa-info-circle"></i></button>
@@ -84,6 +85,7 @@ const ImagesPage = {
       if (btn.dataset.action === 'scan') this._showScanMenu(e, id, btn);
       else if (btn.dataset.action === 'tag') this._tagDialog(id);
       else if (btn.dataset.action === 'export') this._exportImage(id);
+      else if (btn.dataset.action === 'push') this._pushDialog(id, btn.dataset.image || id);
       else if (btn.dataset.action === 'sandbox') ContainersPage._sandboxDialog(btn.dataset.image || id);
       else if (btn.dataset.action === 'layers') this._showLayers(id);
       else if (btn.dataset.action === 'inspect') this._inspect(id);
@@ -107,6 +109,7 @@ const ImagesPage = {
         { type: 'separator' },
         { label: 'Tag', icon: 'fa-tag', action: () => this._tagDialog(id) },
         { label: 'Export', icon: 'fa-file-export', action: () => this._exportImage(id) },
+        { label: 'Push to Registry', icon: 'fa-cloud-upload-alt', action: () => this._pushDialog(id, fullName) },
         { type: 'separator' },
         { label: 'Remove', icon: 'fa-trash', action: () => this._remove(id), danger: true },
       ]);
@@ -610,6 +613,216 @@ const ImagesPage = {
 
   _exportImage(id) {
     window.open(`/api/images/${encodeURIComponent(id)}/export`, '_blank');
+  },
+
+  // v7.5.0 — Push to a configured private registry. Modal lets the user
+  // pick the registry, target repo and tag; on submit we open an EventSource
+  // to the SSE push endpoint and stream layer-by-layer progress into the
+  // modal so the user sees what's happening in real time.
+  async _pushDialog(imageId, sourceImage) {
+    let registries = [];
+    try { registries = await Api.get('/registries'); }
+    catch (err) { Toast.error('Could not list registries: ' + err.message); return; }
+    if (!Array.isArray(registries) || registries.length === 0) {
+      Toast.warning('No registries configured. Add one in Settings → Registries first.');
+      return;
+    }
+
+    // Pre-fill from the source image: if "myrepo/myimage:1.2.3" → repo=myrepo/myimage, tag=1.2.3
+    const colonIdx = sourceImage.lastIndexOf(':');
+    const sourceRepo = colonIdx > 0 ? sourceImage.substring(0, colonIdx) : sourceImage;
+    const sourceTag = colonIdx > 0 ? sourceImage.substring(colonIdx + 1) : 'latest';
+    // Strip any registry prefix from the suggested repo so the user sees a clean default
+    const cleanRepo = sourceRepo.includes('/') ? sourceRepo.split('/').slice(-1)[0] : sourceRepo;
+
+    Modal.open(`
+      <div class="modal-header">
+        <h3><i class="fas fa-cloud-upload-alt" style="color:var(--accent);margin-right:10px"></i> Push to Registry</h3>
+        <button class="modal-close-btn" id="modal-x"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" id="push-modal-body">
+        <div style="background:var(--bg-dim);padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:14px;font-size:12px;color:var(--text-dim)">
+          <i class="fas fa-info-circle" style="margin-right:6px"></i>
+          Source image: <code style="color:var(--text);font-family:'JetBrains Mono',monospace">${Utils.escapeHtml(sourceImage)}</code>
+        </div>
+        <div class="form-group">
+          <label>Target registry <span class="text-red">*</span></label>
+          <select id="push-registry-id" class="form-control">
+            ${registries.map(r => `<option value="${r.id}">${Utils.escapeHtml(r.name)} — <code>${Utils.escapeHtml(r.url)}</code></option>`).join('')}
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+          <div class="form-group">
+            <label>Target repository <span class="text-red">*</span></label>
+            <input type="text" id="push-repo" class="form-control" value="${Utils.escapeHtml(cleanRepo)}" placeholder="team/myapp">
+          </div>
+          <div class="form-group">
+            <label>Tag <span class="text-red">*</span></label>
+            <input type="text" id="push-tag" class="form-control" value="${Utils.escapeHtml(sourceTag === '<none>' ? 'latest' : sourceTag)}" placeholder="latest">
+          </div>
+        </div>
+        <p class="text-sm text-muted" style="margin:8px 0 0">
+          The image will be tagged as <code id="push-preview" style="color:var(--accent);font-family:'JetBrains Mono',monospace">…</code> on the registry host.
+        </p>
+        <p class="text-sm text-muted" style="margin:6px 0 0;font-size:11px">
+          <i class="fas fa-exclamation-triangle" style="color:var(--yellow);margin-right:4px"></i>
+          Multi-arch manifests cannot be pushed via the engine API — only the locally-tagged image (typically single-arch) is sent. For multi-arch use <code>docker buildx imagetools</code>.
+        </p>
+        <div id="push-progress" style="display:none;margin-top:14px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
+            <span><i class="fas fa-spinner fa-spin" style="color:var(--accent);margin-right:6px"></i> <span id="push-status-text">Starting…</span></span>
+            <span id="push-summary" class="text-muted"></span>
+          </div>
+          <div id="push-layers" style="background:var(--bg-dim);padding:10px;border-radius:var(--radius-sm);max-height:250px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.6"></div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-sm" id="push-cancel">${i18n.t('common.cancel')}</button>
+        <button class="btn btn-sm btn-primary" id="push-submit"><i class="fas fa-cloud-upload-alt"></i> Push</button>
+      </div>
+    `, { size: 'lg' });
+
+    const updatePreview = () => {
+      const sel = document.getElementById('push-registry-id');
+      const reg = registries.find(r => String(r.id) === String(sel.value));
+      const host = reg ? new URL(reg.url).host : '<host>';
+      const repo = document.getElementById('push-repo').value.trim() || '<repo>';
+      const tag = document.getElementById('push-tag').value.trim() || 'latest';
+      document.getElementById('push-preview').textContent = `${host}/${repo}:${tag}`;
+    };
+    document.getElementById('push-registry-id').addEventListener('change', updatePreview);
+    document.getElementById('push-repo').addEventListener('input', updatePreview);
+    document.getElementById('push-tag').addEventListener('input', updatePreview);
+    updatePreview();
+
+    document.getElementById('push-cancel').addEventListener('click', () => Modal.close());
+    document.getElementById('modal-x').addEventListener('click', () => Modal.close());
+
+    document.getElementById('push-submit').addEventListener('click', async () => {
+      const registryId = document.getElementById('push-registry-id').value;
+      const targetRepo = document.getElementById('push-repo').value.trim();
+      const targetTag = document.getElementById('push-tag').value.trim() || 'latest';
+      if (!targetRepo) { Toast.error('Target repository is required'); return; }
+
+      const submitBtn = document.getElementById('push-submit');
+      const cancelBtn = document.getElementById('push-cancel');
+      submitBtn.disabled = true; cancelBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Pushing…';
+      document.getElementById('push-progress').style.display = 'block';
+
+      this._streamPush(registryId, sourceImage, targetRepo, targetTag, () => {
+        submitBtn.disabled = false; cancelBtn.disabled = false;
+        cancelBtn.textContent = i18n.t('common.close');
+      });
+    });
+  },
+
+  // Stream push progress via fetch + ReadableStream (SSE-like — the server
+  // sends `data: ...\n\n` events). EventSource doesn't support POST, so we
+  // parse the stream manually here. Per-layer progress lines update in
+  // place; non-layer status lines append.
+  async _streamPush(registryId, sourceImage, targetRepo, targetTag, onDone) {
+    const layersEl = document.getElementById('push-layers');
+    const statusText = document.getElementById('push-status-text');
+    const summary = document.getElementById('push-summary');
+    const layerRows = new Map();   // id → DOM element
+    let bytesPushed = 0, layersDone = 0;
+
+    const renderLayer = (id, status, progressDetail) => {
+      let el = layerRows.get(id);
+      if (!el) {
+        el = document.createElement('div');
+        el.style.cssText = 'display:flex;justify-content:space-between;gap:10px;padding:2px 0';
+        el.dataset.id = id;
+        layersEl.appendChild(el);
+        layerRows.set(id, el);
+      }
+      const pct = (progressDetail && progressDetail.total)
+        ? Math.min(100, Math.round((progressDetail.current / progressDetail.total) * 100))
+        : null;
+      const color = status?.startsWith('Pushed') || status?.startsWith('Layer already') ? 'var(--green)'
+        : status?.startsWith('Pushing') ? 'var(--accent)'
+        : 'var(--text-dim)';
+      el.innerHTML = `
+        <span style="color:${color};flex:0 0 auto"><span style="display:inline-block;width:80px">${Utils.escapeHtml(id.substring(0, 12))}</span> ${Utils.escapeHtml(status || '')}</span>
+        <span class="text-muted" style="flex:0 0 auto">${pct !== null ? pct + '%' : ''}</span>
+      `;
+    };
+
+    let response;
+    try {
+      response = await fetch(`/api/registries/${registryId}/push`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': Api._readXsrfToken() },
+        credentials: 'same-origin',
+        body: JSON.stringify({ sourceImage, targetRepo, targetTag }),
+      });
+    } catch (err) {
+      statusText.textContent = `Network error: ${err.message}`;
+      onDone();
+      return;
+    }
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => 'unknown error');
+      statusText.innerHTML = `<span style="color:var(--red)"><i class="fas fa-times-circle"></i> ${Utils.escapeHtml(errText.substring(0, 200))}</span>`;
+      onDone();
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      let chunk;
+      try { chunk = await reader.read(); }
+      catch (err) {
+        statusText.innerHTML = `<span style="color:var(--red)">Stream error: ${Utils.escapeHtml(err.message)}</span>`;
+        onDone();
+        return;
+      }
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';   // keep incomplete trailing event in buffer
+
+      for (const evt of events) {
+        let eventType = 'message', dataLine = '';
+        for (const line of evt.split('\n')) {
+          if (line.startsWith('event:')) eventType = line.substring(6).trim();
+          else if (line.startsWith('data:')) dataLine = line.substring(5).trim();
+        }
+        if (!dataLine) continue;
+        let payload;
+        try { payload = JSON.parse(dataLine); } catch { continue; }
+
+        if (eventType === 'done') {
+          statusText.innerHTML = `<i class="fas fa-check-circle" style="color:var(--green);margin-right:6px"></i> Pushed <code>${Utils.escapeHtml(payload.image)}</code>`;
+          Toast.success(`Pushed ${payload.image}`);
+          onDone();
+          return;
+        }
+        if (eventType === 'error') {
+          statusText.innerHTML = `<span style="color:var(--red)"><i class="fas fa-times-circle"></i> ${Utils.escapeHtml(payload.error || 'Push failed')}</span>`;
+          Toast.error(payload.error || 'Push failed');
+          onDone();
+          return;
+        }
+
+        // Standard progress event from dockerode: { id, status, progressDetail }
+        if (payload.id) {
+          renderLayer(payload.id, payload.status, payload.progressDetail);
+          if (payload.status === 'Pushed' || payload.status?.startsWith('Layer already')) {
+            layersDone++;
+            if (payload.progressDetail?.total) bytesPushed += payload.progressDetail.total;
+          }
+        } else if (payload.status) {
+          statusText.textContent = payload.status;
+        }
+        summary.textContent = `${layersDone} layer${layersDone === 1 ? '' : 's'} · ${Utils.formatBytes(bytesPushed)}`;
+      }
+    }
   },
 
   async _importImage(e) {

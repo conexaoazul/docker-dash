@@ -59,6 +59,114 @@ router.get('/:id/tags/*repo', requireAuth, asyncHandler(async (req, res) => {
   res.json(tags);
 }));
 
+// v7.5.0 — Manifest inspect for the Browse page. Returns the raw manifest
+// (so the UI can show layer count + sizes), digest, and content type.
+router.get('/:id/manifest/*ref', requireAuth, asyncHandler(async (req, res) => {
+  // splat is "<repo>/...":<tag-or-digest>". Repo can have slashes; the LAST
+  // colon-separated chunk is the ref. Example: "library/nginx:latest" →
+  // repo="library/nginx", ref="latest". Digest refs include their own
+  // colon ("sha256:...") so we split from the right after a "@" or last ":".
+  const raw = Array.isArray(req.params.ref) ? req.params.ref.join('/') : req.params.ref;
+  let repo, ref;
+  if (raw.includes('@')) {
+    [repo, ref] = raw.split('@');
+  } else {
+    const lastColon = raw.lastIndexOf(':');
+    if (lastColon === -1) return res.status(400).json({ error: 'ref must be repo:tag or repo@digest' });
+    repo = raw.substring(0, lastColon);
+    ref = raw.substring(lastColon + 1);
+  }
+  const data = await registryService.manifest(parseInt(req.params.id), repo, ref);
+  res.json(data);
+}));
+
+// v7.5.0 — Push action. Tags + pushes a local image to the configured
+// registry; streams progress as SSE (text/event-stream) so the UI can show
+// per-layer progress in real time. Operator + admin only; admin-only would
+// be too strict (operators manage app deployments). Audited on success or
+// failure, with the size of the pushed image when known.
+router.post('/:id/push', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
+  const { sourceImage, targetRepo, targetTag } = req.body || {};
+  if (!sourceImage || !targetRepo || !targetTag) {
+    return res.status(400).json({ error: 'sourceImage, targetRepo, targetTag are all required' });
+  }
+
+  const dockerService = require('../services/docker');
+  const startedAt = Date.now();
+
+  let push;
+  try {
+    push = await registryService.pushImage(
+      dockerService, req.hostId, parseInt(req.params.id),
+      sourceImage, targetRepo, targetTag,
+    );
+  } catch (err) {
+    auditService.log({
+      userId: req.user.id, username: req.user.username,
+      action: 'registry_push_failed', targetType: 'image', targetId: sourceImage,
+      details: { error: err.message.substring(0, 300), targetRepo, targetTag },
+      ip: getClientIp(req),
+    });
+    return res.status(502).json({ error: err.message });
+  }
+
+  // Stream NDJSON push events to the client as SSE. Each layer/status line
+  // gets one `data:` event. On error inside the stream we still send a final
+  // event so the UI can show the message; HTTP status stays 200 because we
+  // already sent headers.
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',  // disable nginx/Caddy buffering for this response
+  });
+
+  let pushFailed = false;
+  let lastError = null;
+
+  const docker = dockerService.getDocker(req.hostId);
+  docker.modem.followProgress(push.stream,
+    (err) => {
+      if (err || pushFailed) {
+        const msg = (err?.message) || lastError || 'Push failed';
+        try { res.write(`event: error\ndata: ${JSON.stringify({ error: msg })}\n\n`); } catch { /* client closed */ }
+        auditService.log({
+          userId: req.user.id, username: req.user.username,
+          action: 'registry_push_failed', targetType: 'image', targetId: push.fullImage,
+          details: {
+            error: msg.substring(0, 300),
+            registry: push.registry,
+            sourceImage, targetRepo, targetTag,
+            durationMs: Date.now() - startedAt,
+          },
+          ip: getClientIp(req),
+        });
+      } else {
+        try { res.write(`event: done\ndata: ${JSON.stringify({ ok: true, image: push.fullImage })}\n\n`); } catch { /* client closed */ }
+        auditService.log({
+          userId: req.user.id, username: req.user.username,
+          action: 'registry_push', targetType: 'image', targetId: push.fullImage,
+          details: {
+            registry: push.registry,
+            sourceImage, targetRepo, targetTag,
+            durationMs: Date.now() - startedAt,
+          },
+          ip: getClientIp(req),
+        });
+      }
+      try { res.end(); } catch { /* already ended */ }
+    },
+    (event) => {
+      // Each progress event: { status, id?, progressDetail?, error? }
+      if (event && event.error) {
+        pushFailed = true;
+        lastError = event.error;
+      }
+      try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* client closed */ }
+    }
+  );
+}));
+
 // Pull image from a configured registry
 router.post('/:id/pull', requireAuth, requireRole('admin', 'operator'), writeable, asyncHandler(async (req, res) => {
   const { image, tag } = req.body;

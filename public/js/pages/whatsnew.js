@@ -10,6 +10,20 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '7.5.0',
+      date: '2026-04-26',
+      title: 'Image Registry — push, browse, deploy template',
+      changes: [
+        { type: 'feature', text: 'New "Private Registry (Distribution)" template under DevOps. Single container + 1 volume + htpasswd auth — the full Distribution registry:3 stack in one click. Use it as your own private OCI registry, then push to it from the Images page.' },
+        { type: 'feature', text: 'Push to Registry action on every image row (button + right-click menu). Modal lets you pick the target registry, repo, and tag; submit streams layer-by-layer progress via SSE so you see what\'s happening in real time. Audit log on success/failure with registry, image, duration, size.' },
+        { type: 'feature', text: 'New Registry Browser page (admin-only sidebar entry "Registries", separate from Settings → Registries which manages credentials). Two-pane layout: repo list on the left with filter, tag list + manifest inspector on the right. Manifest panel shows digest, content type, schema version, layer count + size, per-layer breakdown, and per-arch manifests for multi-arch image indexes. "Copy pull command" button renders the docker pull command to clipboard.' },
+        { type: 'improvement', text: 'Backend: src/services/registry.js gets pushImage() + manifest() + _authConfigForRegistry(). The push flow uses dockerode tag + push with the existing encrypted-credential store (AES-GCM, with legacy XOR/base64 auto-migrated). Multi-arch manifest lists deliberately not supported via this path (that\'s a buildx imagetools job); the modal includes a clear info note.' },
+        { type: 'improvement', text: 'We deliberately don\'t bundle Harbor as a template. Harbor needs 9-11 containers + 4-8 GB RAM and uses a dynamic installer-generated compose. Operators who need enterprise features (RBAC, scanning, replication, signing) deploy Harbor via its official installer and add it as a Registry credential here — same UX from our end. Documented as the recommended path.' },
+        { type: 'improvement', text: 'Delete-from-registry intentionally not in v7.5.0 — Distribution exposes delete by digest only (requires manifest resolution + a strong confirmation gate). Ships in v7.6 if the workflow is needed.' },
+        { type: 'improvement', text: '8 new tests for the push service (error paths, dockerode call shape, authconfig structure, last_used_at update). Suite: 944 → 952 / 62 suites.' },
+      ],
+    },
+    {
       version: '7.4.0',
       date: '2026-04-25',
       title: '"Contributor Demo" — sample plugin + CONTRIBUTING.md',

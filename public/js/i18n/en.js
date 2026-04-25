@@ -38,7 +38,7 @@ i18n.register('en', 'EN', 'English', {
     system: 'System', firewall: 'Firewall', hosts: 'Hosts', about: 'About', whatsnew: "What's New", settings: 'Settings', profile: 'Profile',
     insights: 'Insights', 'git-stacks': 'Git Stacks', stacks: 'Stacks', compare: 'Compare', timeline: 'Timeline',
     notifications: 'Notifications', 'api-playground': 'API', 'cost-optimizer': 'Cost', 'dependency-map': 'Dep Map', swarm: 'Swarm', 'multi-host': 'Multi-Host',
-    logs: 'Log Explorer', howto: 'How-To', observability: 'Observability', 'sample-feature': 'Sample Plugin',
+    logs: 'Log Explorer', howto: 'How-To', observability: 'Observability', 'sample-feature': 'Sample Plugin', 'registry-browse': 'Registries',
     sectionResources: 'Resources', sectionOperations: 'Operations', sectionAdmin: 'Admin',
     sectionCompute: 'Compute', sectionStorage: 'Storage', sectionNetworking: 'Networking', sectionMonitor: 'Monitor',
   },

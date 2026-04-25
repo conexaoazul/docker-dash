@@ -261,6 +261,18 @@ const TEMPLATES = [
     description: 'Euro-Office + OnlyOffice side-by-side for comparison testing and development',
     compose: `services:\n  eurooffice:\n    image: ghcr.io/euro-office/documentserver:latest\n    container_name: eurooffice-dev\n    ports:\n      - "8080:80"\n    environment:\n      JWT_SECRET: dev-secret\n      ALLOW_PRIVATE_IP_ADDRESS: "true"\n      USE_UNAUTHORIZED_STORAGE: "true"\n    restart: unless-stopped\n\n  onlyoffice:\n    image: onlyoffice/documentserver:latest\n    container_name: onlyoffice-compare\n    ports:\n      - "8082:80"\n    environment:\n      JWT_SECRET: dev-secret\n      ALLOW_PRIVATE_IP_ADDRESS: "true"\n      USE_UNAUTHORIZED_STORAGE: "true"\n    restart: unless-stopped\n\n  nextcloud:\n    image: nextcloud:latest\n    container_name: nextcloud-dev\n    ports:\n      - "8081:80"\n    environment:\n      NEXTCLOUD_ADMIN_USER: admin\n      NEXTCLOUD_ADMIN_PASSWORD: admin\n      SQLITE_DATABASE: nextcloud\n    volumes:\n      - nc-dev-data:/var/www/html\n    restart: unless-stopped\n\nvolumes:\n  nc-dev-data:`,
   },
+  {
+    // v7.5.0 — Private OCI Image Registry (Docker Distribution).
+    // Single container + 1 volume + htpasswd auth. After deploy:
+    //   1. Generate htpasswd:
+    //      docker run --rm --entrypoint htpasswd httpd:2 -Bbn youruser yourpass > ./auth/htpasswd
+    //   2. Configure as a Registry credential in Settings → Registries (URL: http://<host>:5000)
+    //   3. Push images via the Images page → Push to Registry action.
+    // For TLS, front it with the Caddy compose profile (--profile tls) — don't expose :5000 publicly without it.
+    id: 'private-registry', name: 'Private Registry (Distribution)', category: 'DevOps', icon: 'fas fa-warehouse',
+    description: 'Self-hosted OCI image registry. Single container + htpasswd auth. Compatible with docker push/pull and the Docker Dash push-to-registry action.',
+    compose: `services:\n  registry:\n    image: registry:3\n    container_name: docker-registry\n    restart: unless-stopped\n    ports:\n      - "5000:5000"\n    environment:\n      REGISTRY_AUTH: htpasswd\n      REGISTRY_AUTH_HTPASSWD_REALM: "Docker Dash Registry"\n      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd\n      REGISTRY_STORAGE_DELETE_ENABLED: "true"\n    volumes:\n      - registry-data:/var/lib/registry\n      - ./auth:/auth:ro\nvolumes:\n  registry-data:`,
+  },
 ];
 
 // Get all templates (built-in + custom, with overrides merged)

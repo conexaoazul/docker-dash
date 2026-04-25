@@ -40,6 +40,7 @@ const App = {
     'howto':          () => HowToPage,
     'observability':  () => ObservabilityWizardPage,
     'sample-feature': () => SampleFeaturePage,
+    'registry-browse': () => RegistryBrowsePage,
   },
 
   async init() {

@@ -71,6 +71,97 @@ class RegistryService {
     return data.body?.tags || [];
   }
 
+  /**
+   * Inspect a manifest. Returns the raw manifest object + size + digest from headers.
+   * Uses the V2 manifest accept header to handle both v1, v2, and OCI manifests
+   * (registries return whichever format the manifest was pushed as).
+   *
+   * @param {number} id  registry id
+   * @param {string} repo  e.g. "library/nginx"
+   * @param {string} ref  tag (e.g. "latest") or digest (e.g. "sha256:...")
+   */
+  async manifest(id, repo, ref) {
+    const reg = this.get(id);
+    if (!reg) throw new Error('Registry not found');
+    const data = await this._apiCall(reg, `/v2/${repo}/manifests/${ref}`, {
+      accept: 'application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json',
+    });
+    return {
+      manifest: data.body,
+      digest: data.headers?.['docker-content-digest'] || null,
+      contentType: data.headers?.['content-type'] || null,
+      size: data.headers?.['content-length'] ? parseInt(data.headers['content-length'], 10) : null,
+    };
+  }
+
+  /**
+   * Build the X-Registry-Auth header value for dockerode.push().
+   * Returns the dockerode `authconfig` object (NOT the encoded header).
+   * Dockerode handles the base64-of-JSON encoding internally.
+   */
+  _authConfigForRegistry(reg) {
+    return {
+      username: reg.username || '',
+      password: reg.password_encrypted ? this._decryptLegacyOrNew(reg.password_encrypted) : '',
+      serveraddress: reg.url,
+    };
+  }
+
+  /**
+   * Push a local image to a configured registry. Tags `sourceImage` (e.g.
+   * "myapp:latest") under the registry's host as `<host>/<repo>:<tag>` and
+   * pushes it. Returns the dockerode push stream so the caller can pipe
+   * progress events to SSE/WS.
+   *
+   * Multi-arch manifest lists are NOT supported — dockerode pushes whatever
+   * the local engine has tagged (typically single-arch). Documented limitation.
+   *
+   * @param {object} dockerService  the docker service singleton
+   * @param {number} hostId         multi-host context (0 = local)
+   * @param {number} registryId
+   * @param {string} sourceImage    e.g. "myapp:1.2.3" or full ID
+   * @param {string} targetRepo     e.g. "team/myapp"
+   * @param {string} targetTag      e.g. "1.2.3"
+   * @returns {Promise<{stream: NodeJS.ReadableStream, fullImage: string, registry: string}>}
+   */
+  async pushImage(dockerService, hostId, registryId, sourceImage, targetRepo, targetTag) {
+    const reg = this.get(registryId);
+    if (!reg) throw new Error('Registry not found');
+    if (!sourceImage) throw new Error('sourceImage required');
+    if (!targetRepo) throw new Error('targetRepo required');
+    if (!targetTag) throw new Error('targetTag required');
+
+    const docker = dockerService.getDocker(hostId);
+    const registryHost = new URL(reg.url).host;
+    const fullImage = `${registryHost}/${targetRepo}:${targetTag}`;
+
+    // 1. Tag the source under the registry host (idempotent — Docker engine
+    //    is fine with re-tagging the same source repeatedly).
+    const sourceImg = docker.getImage(sourceImage);
+    await new Promise((resolve, reject) => {
+      sourceImg.tag({ repo: `${registryHost}/${targetRepo}`, tag: targetTag }, (err) => {
+        if (err) return reject(new Error(`Tag failed: ${err.message}`));
+        resolve();
+      });
+    });
+
+    // 2. Push the newly-tagged image. The stream emits NDJSON events that
+    //    the caller forwards to SSE.
+    const targetImg = docker.getImage(fullImage);
+    const authconfig = this._authConfigForRegistry(reg);
+    const stream = await new Promise((resolve, reject) => {
+      targetImg.push({ authconfig }, (err, s) => {
+        if (err) return reject(new Error(`Push init failed: ${err.message}`));
+        resolve(s);
+      });
+    });
+
+    // Update last_used_at so operators see this registry was hit recently.
+    getDb().prepare("UPDATE registries SET last_used_at = datetime('now') WHERE id = ?").run(registryId);
+
+    return { stream, fullImage, registry: reg.name };
+  }
+
   getAuthForImage(imageName) {
     const db = getDb();
     // Match registry URL from image name
@@ -162,14 +253,14 @@ class RegistryService {
     }
   }
 
-  _apiCall(reg, path) {
+  _apiCall(reg, path, opts = {}) {
     return new Promise((resolve, reject) => {
       const url = new URL(path, reg.url);
       const mod = url.protocol === 'https:' ? https : http;
-      const headers = { 'Accept': 'application/json' };
+      const headers = { 'Accept': opts.accept || 'application/json' };
 
       if (reg.username && reg.password_encrypted) {
-        const pass = this._decryptLegacyOrNew(reg.password_encrypted);   
+        const pass = this._decryptLegacyOrNew(reg.password_encrypted);
         headers['Authorization'] = 'Basic ' + Buffer.from(`${reg.username}:${pass}`).toString('base64');
       }
 
@@ -177,11 +268,13 @@ class RegistryService {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
+          const result = { status: res.statusCode, headers: res.headers };
           try {
-            resolve({ status: res.statusCode, body: JSON.parse(data) });
+            result.body = JSON.parse(data);
           } catch {
-            resolve({ status: res.statusCode, body: data });
+            result.body = data;
           }
+          resolve(result);
         });
       });
       req.on('error', reject);
