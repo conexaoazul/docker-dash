@@ -5,6 +5,7 @@
 
 const Toast = {
   _container: null,
+  _muteErrorsUntil: 0,  // v7.3.1: drop error/warning toasts during auth transitions
 
   _getContainer() {
     if (!this._container) {
@@ -13,7 +14,21 @@ const Toast = {
     return this._container;
   },
 
+  /**
+   * Suppress error + warning toasts for `ms` milliseconds. Used by the
+   * auth layer when a 401 fires: in-flight parallel requests would
+   * otherwise each spawn a "Failed to load X: Unauthorized" toast,
+   * burying the login form.
+   */
+  muteErrorsForMs(ms) {
+    const until = Date.now() + ms;
+    if (until > this._muteErrorsUntil) this._muteErrorsUntil = until;
+  },
+
   show(message, type = 'info', duration = 4000) {
+    if ((type === 'error' || type === 'warning') && Date.now() < this._muteErrorsUntil) {
+      return null;
+    }
     const container = this._getContainer();
     if (!container) return;
 

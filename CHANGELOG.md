@@ -2,6 +2,31 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.3.1] - 2026-04-25 — Smoother session-expiry recovery
+
+When a session expired, the UX collapsed: every parallel in-flight API call (containers list, stats, alerts, notifications, host overview…) returned 401 and each one independently:
+
+1. Spawned a `Failed to load X: Unauthorized` red toast — burying the login form under 5-15 stacked errors.
+2. Called `App.handleUnauthorized()` → `_showLogin()` → which **cloned the login form node** to remove old listeners, **detaching whatever the user was typing into**. Focus disappeared mid-keystroke. Some users had to triple-click to re-focus the password field.
+3. Did nothing to stop the previous page's `setInterval` polling, so 401s kept arriving every few seconds and the cycle repeated.
+
+This release fixes all three.
+
+### Fixed
+
+- **Toast spam during auth transitions** — added [`Toast.muteErrorsForMs(ms)`](public/js/components/toast.js). When `Api.request` sees a 401, it mutes error/warning toasts for 6s before calling `handleUnauthorized()`. The mute window self-extends if more 401s arrive (so a stuck `setInterval` doesn't break out after 6s).
+- **`App.handleUnauthorized()` is idempotent** — the first 401 transitions to login and sets `_inUnauthState = true`; subsequent 401s are no-ops until login succeeds. Cleared in `_showApp()` so a future expiration triggers fresh.
+- **`App._showLogin()` is idempotent** — if the screen is already visible, the existing form bindings are reused (no clone, no focus theft). Best-effort focus to `#login-user` if nothing else is focused.
+- **Stale polling stopped** — `handleUnauthorized()` now destroys `_currentPage` (calling its `destroy()` to clear `_refreshTimer` / `_statsTimer` / etc.) so the previous page's intervals stop firing while the user is on the login screen.
+- **Auto-focus on login screen** — username field gets focus 50ms after `_showLogin()` so re-auth is `type → tab → type → enter` (no mouse).
+
+### Files touched
+
+- `public/js/components/toast.js` — `muteErrorsForMs` + `show()` mute gate
+- `public/js/api.js` — sets the mute window before calling `handleUnauthorized`, throws `Error` with `isAuthError = true` flag
+- `public/js/app.js` — idempotent `handleUnauthorized` + `_showLogin`, page destroy on 401, auto-focus, `_inUnauthState` cleared in `_showApp`
+- `public/js/pages/whatsnew.js` — entries for v7.3.1, v7.3.0, v7.2.1
+
 ## [7.3.0] - 2026-04-25 — "Update Notifications"
 
 Periodic, opt-out check for new Docker Dash releases on GitHub. Solves the "user cloned the repo a week ago and has no idea v7.3.0 shipped" gap. Designed to be **quiet**: a tiny pulsing ↑ badge next to the sidebar version, click-to-open modal with the full release notes (rendered from the GitHub Release `body`), and a one-click "show upgrade command" for admins.

@@ -10,6 +10,41 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '7.3.1',
+      date: '2026-04-25',
+      title: 'Smoother session-expiry recovery',
+      changes: [
+        { type: 'fix', text: 'When the session expired, parallel in-flight API calls each spawned a "Failed to load X: Unauthorized" toast — burying the login form under 5-15 red error toasts. Now: the first 401 mutes error/warning toasts for 6 seconds, so the login form stays clean. The mute window auto-extends if more 401s arrive (e.g. from setIntervals on the previously-active page).' },
+        { type: 'fix', text: 'Login form no longer steals keyboard focus mid-typing. Previously, every parallel 401 called _showLogin() which cloned the form node, detaching whatever the user was typing into. Now _showLogin() is idempotent — if the screen is already visible, the form bindings are reused and focus is preserved.' },
+        { type: 'fix', text: 'handleUnauthorized() is now idempotent and also destroys the current page (stopping its setInterval timers). Previously, a containers list page kept polling every few seconds while the user was on the login screen, generating a fresh 401 each tick and re-triggering the login dance.' },
+        { type: 'improvement', text: 'Username field auto-focuses when the login screen appears, so re-authenticating after a session timeout is now: type → tab → type → enter, with no mouse needed.' },
+      ],
+    },
+    {
+      version: '7.3.0',
+      date: '2026-04-25',
+      title: 'In-app update notifications via GitHub releases',
+      changes: [
+        { type: 'feature', text: 'Subtle pulsing ↑ badge appears next to the sidebar version when a newer Docker Dash release exists on GitHub. Click → modal with the release notes (rendered from this very Release body), publish date, last-checked timestamp, and a "View on GitHub" link.' },
+        { type: 'feature', text: 'Admin-only collapsed details inside the modal: copy-pasteable upgrade command (`git pull && APP_VERSION=X.Y.Z docker compose up -d --build app`) with a "back up /data first" reminder. Operators and viewers see the notes but not the command.' },
+        { type: 'feature', text: 'New System Settings → General card with a toggle ("Check for updates"), the last-checked timestamp, and a "Check now" button (admin-only). Default ON. Disable for fully air-gapped deployments — zero outbound calls, badge never appears.' },
+        { type: 'feature', text: 'Backend: src/services/update-check.js polls api.github.com/repos/<owner>/<repo>/releases/latest every 12 hours (configurable owner/repo via DD_UPDATE_CHECK_OWNER and DD_UPDATE_CHECK_REPO env vars). Cache lives in the settings table. Network failures preserve the existing cache (UI shows last known release until next successful poll).' },
+        { type: 'feature', text: 'Endpoints: GET /api/system/update-check (any auth user, for sidebar badge) + POST /api/system/update-check/refresh (admin, force) + POST /api/system/update-check/setting (admin, toggle, audited).' },
+        { type: 'improvement', text: 'HA-aware: the 12h cron + the 60s post-boot one-shot both run on the leader replica only, so 4-replica HA still makes 1 GitHub call per 12h (not 4). User-Agent is `docker-dash/<version>` — no install ID, no telemetry beyond what the TCP connection inherently exposes.' },
+        { type: 'improvement', text: 'Minimal markdown-to-HTML renderer in update-notifier.js (~190 LOC, no external deps) handles the subset GitHub release notes use: headings, bold/italic, inline code, fenced code blocks, lists, links. All input HTML-escaped first.' },
+        { type: 'improvement', text: '24 new tests (semver compare, enable/disable, getStatus state machine including cache JSON corruption tolerance, refresh HTTP behavior with mocked https). Suite: 907 → 931 / 60 suites. Lint clean, npm audit clean.' },
+      ],
+    },
+    {
+      version: '7.2.1',
+      date: '2026-04-23',
+      title: 'Containers page TypeError + missing nav.observability key',
+      changes: [
+        { type: 'fix', text: 'Fixed `TypeError: this._stopLogFollow is not a function` thrown on every navigation away from the containers list view. Root cause was the v6.16.0 lazy-load split: `_stopLogFollow` lives in the lazy-loaded container-detail.js module, but `destroy()` (eager containers.js) called it unconditionally. If the user never opened a detail view, the method didn\'t exist and the call crashed. Now guarded with a `typeof === "function"` check — harmless no-op when the detail module was never loaded.' },
+        { type: 'fix', text: 'Sidebar showed `nav.observability` as a raw string (missing translation). Added the key to the `nav:` block in EN + RO; other 9 languages fall back to EN automatically via `_fallback`.' },
+      ],
+    },
+    {
       version: '7.2.0',
       date: '2026-04-22',
       title: 'In-app Observability Wizard — detect + guide + import',

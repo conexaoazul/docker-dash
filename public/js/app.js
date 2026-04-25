@@ -73,8 +73,23 @@ const App = {
   // ─── Auth ──────────────────────────────────────
 
   _showLogin() {
-    document.getElementById('login-screen').classList.remove('hidden');
-    document.getElementById('app-shell').classList.add('hidden');
+    const loginScreen = document.getElementById('login-screen');
+    const appShell = document.getElementById('app-shell');
+
+    // v7.3.1: if the login screen is already visible, don't tear down + re-bind
+    // the form. Doing so on every 401 stole keyboard focus mid-typing. The
+    // form bindings from the previous _showLogin call are still good.
+    if (!loginScreen.classList.contains('hidden')) {
+      // Best-effort: focus the username field if nothing is focused yet
+      const userField = document.getElementById('login-user');
+      if (userField && document.activeElement === document.body) {
+        try { userField.focus(); } catch { /* ignore */ }
+      }
+      return;
+    }
+
+    loginScreen.classList.remove('hidden');
+    appShell.classList.add('hidden');
     WS.disconnect();
 
     // Check if OIDC is enabled and show SSO button
@@ -91,6 +106,11 @@ const App = {
 
     // IMPORTANT: re-query errEl from the NEW form (old ref is detached from DOM)
     const errEl = newForm.querySelector('#login-error');
+
+    // Auto-focus username so the user can start typing immediately
+    setTimeout(() => {
+      try { newForm.querySelector('#login-user')?.focus(); } catch { /* ignore */ }
+    }, 50);
 
     newForm.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -354,6 +374,9 @@ const App = {
   },
 
   _showApp() {
+    // v7.3.1: clear unauth-state flag so a future session expiry triggers
+    // the login transition again.
+    this._inUnauthState = false;
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('app-shell').classList.remove('hidden');
 
@@ -1210,8 +1233,20 @@ const App = {
   },
 
   handleUnauthorized() {
+    // v7.3.1: idempotent. Multiple parallel 401s used to each tear down
+    // the login form (re-cloning it), stealing focus from the user trying
+    // to type their password. Now: first 401 transitions, subsequent 401s
+    // are no-ops until login succeeds.
+    if (this._inUnauthState) return;
+    this._inUnauthState = true;
     this.user = null;
     WS.disconnect();
+    // Stop the current page's timers/intervals so they don't keep firing
+    // 401s in a loop while the user is on the login screen.
+    if (this._currentPage?.destroy) {
+      try { this._currentPage.destroy(); } catch { /* page destroy errors are non-fatal */ }
+    }
+    this._currentPage = null;
     this._showLogin();
   },
 

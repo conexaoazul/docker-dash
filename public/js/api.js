@@ -61,8 +61,14 @@ const Api = {
     try {
       const res = await fetch(`/api${this._appendHostId(path)}`, options);
       if (res.status === 401 && !path.startsWith('/auth/login')) {
+        // v7.3.1: mute error toasts for 6s so parallel in-flight requests
+        // don't bury the login form with "Failed to load X: Unauthorized".
+        // App.handleUnauthorized() is idempotent so repeated 401s are harmless.
+        if (typeof Toast !== 'undefined') Toast.muteErrorsForMs(6000);
         App.handleUnauthorized();
-        throw new Error('Unauthorized');
+        const err = new Error('Unauthorized');
+        err.isAuthError = true;
+        throw err;
       }
       const data = res.headers.get('content-type')?.includes('json')
         ? await res.json()
