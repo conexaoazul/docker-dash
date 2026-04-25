@@ -10,6 +10,15 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '7.7.0',
+      date: '2026-04-26',
+      title: 'CI lint enforcement + registry feature doc',
+      changes: [
+        { type: 'feature', text: 'New docs/features/registry.md — a unified ~200-line guide for the registry workflow built across v7.5.0–v7.6.0. Covers quick start (clone-to-pushed-image in 5 min), why Distribution and not Harbor, push/browse/delete flows, RBAC + audit, programmatic API with curl examples, 8-row troubleshooting table, and an explicit "what\'s NOT here" section with rationale per item.' },
+        { type: 'fix', text: 'CI now enforces ESLint. The CONTRIBUTING.md rule "lint must be 0/0" was on the honor system — npm run lint wasn\'t in the workflow. Contributors could open PRs with warnings and CI would still pass. Added a dedicated Lint step that fails on any warning or error.' },
+      ],
+    },
+    {
       version: '7.6.0',
       date: '2026-04-26',
       title: 'Registry delete + observability extras',

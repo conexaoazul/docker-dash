@@ -40,6 +40,11 @@ jobs:
           done
           echo "All frontend files OK"
 
+      - name: Lint (ESLint)
+        # v7.7.0: enforce 0 warnings / 0 errors. CONTRIBUTING.md tells contributors
+        # `npm run lint` must be clean — without this step, that promise was on the honor system.
+        run: npm run lint
+
       - name: Run tests
         id: tests
         run: |
@@ -87,6 +92,7 @@ jobs:
           echo "### CI Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Node.js syntax: ✅ (backend + frontend)" >> $GITHUB_STEP_SUMMARY
+          echo "- Lint (ESLint): ✅" >> $GITHUB_STEP_SUMMARY
           echo "- Tests: ✅ (${{ steps.tests.outputs.passed || 'unknown' }} passed, ${{ steps.tests.outputs.skipped || '0' }} skipped — 100% passing)" >> $GITHUB_STEP_SUMMARY
           echo "- Security audit: ✅" >> $GITHUB_STEP_SUMMARY
           echo "- i18n: ✅ (11 languages)" >> $GITHUB_STEP_SUMMARY

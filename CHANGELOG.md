@@ -2,6 +2,41 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [7.7.0] - 2026-04-26 — CI lint enforcement + registry feature doc
+
+Two no-feature changes that close real gaps:
+
+### Added — `docs/features/registry.md`
+
+A unified ~200-line guide for the registry workflow shipped over v7.5.0–v7.6.0. Until now, the implementation details lived in CHANGELOG entries — fine for ship notes, hard to navigate for an operator who just wants to deploy a registry and push to it.
+
+The doc covers:
+- **Quick start** — clone-to-pushed-image in five minutes
+- **Why Distribution and not Harbor** — rationale comparison table
+- **Push flow** — UI walkthrough + backend code snippet + RBAC + audit + limitations (multi-arch, insecure registries, OAuth tokens)
+- **Browse + manifest inspect** — endpoints + UI behavior
+- **Delete tag** — Distribution's by-digest constraint, our two-step gate, idempotency, garbage-collection guidance
+- **Programmatic API** — `curl` examples for CI scripts that want to reuse the credential store
+- **Troubleshooting table** — 8 common symptoms + fixes
+- **Explicit "what's NOT here" section** — multi-arch, auto-GC, pagination, per-repo perms, signing, webhooks (with rationale per item)
+
+Linked from `CHANGELOG.md` and `docs/CONTRIBUTING.md`. Future "what does this feature do?" questions point here, not at the changelog.
+
+### Fixed — CI now enforces ESLint
+
+The existing CI workflow (`.github/workflows/ci.yml`) already ran syntax checks, tests, npm audit, and i18n validation on every PR + push to main. But `npm run lint` was **not** in the pipeline — the CONTRIBUTING.md "must be 0/0" rule was on the honor system. A contributor could open a PR with lint warnings and CI would still pass green.
+
+Added a dedicated **Lint (ESLint)** step between syntax-check and tests. Runs `npm run lint` which fails if eslint reports any warning or error. Summary footer now lists "Lint (ESLint): ✅" alongside the other steps.
+
+### Tests
+
+Suite unchanged: 961 passing / 62 suites. The CI fix is a process improvement, not a code change.
+
+### Files touched
+
+- `.github/workflows/ci.yml` — Lint step added between syntax-check and tests
+- `docs/features/registry.md` (new) — full registry feature guide
+
 ## [7.6.0] - 2026-04-26 — Registry delete + observability extras
 
 Closes the explicit v7.6 commitments from v7.5.0 and a few v7.2.0/v7.3.0 roadmap items that were "may add later". Three coordinated additions, all real backend + UI + tests.
