@@ -180,6 +180,7 @@ app.use('/api/translations', apiLimiter, require('./routes/translations'));
 app.use('/api/remediate', apiLimiter, require('./routes/remediate'));
 app.use('/api/log-forwarders', apiLimiter, require('./routes/log-forwarders'));
 app.use('/api/observability', apiLimiter, require('./routes/observability'));
+app.use('/api/ai', apiLimiter, require('./routes/ai'));
 app.use('/api/swarm', apiLimiter, require('./routes/swarm'));
 
 // v7.4.0 — Sample feature for contributors (gated by env so it can be

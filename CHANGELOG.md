@@ -2,6 +2,110 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [8.0.0] - 2026-04-27 — AI features (audit NL search, BYOK, off by default)
+
+**Major bump.** First feature category that introduces optional outbound traffic to non-user-controlled hosts. New Settings tab, new database table, new privacy posture, full audit trail. Designed strategy-first — see `plans/deep-spec-ai-features.md` (~2700 words) and `plans/spikes-ai-features.md` for the full rationale before any code landed.
+
+### One sentence to defend
+
+> **AI in Docker Dash exists to translate noisy data into ranked, explainable decisions — never to take actions on the user's behalf.**
+
+Every design choice flows from this. Read-only or read-then-suggest. No auto-remediation agent. No always-on chat sidebar. No AI-generated padding. If a future request feels like one of those, it'll get a polite no with rationale on the issue.
+
+### Added — Provider abstraction (BYOK)
+
+- **`src/services/ai/`** module with three adapters:
+  - `providers/anthropic.js` — Claude via Messages API + tool_use forced via `tool_choice`
+  - `providers/openai.js` — GPT via Chat Completions + `response_format: json_schema` (strict mode)
+  - `providers/ollama.js` — local LLM via `/api/chat` + `format: "json"`
+- All adapters implement the same `structured()` contract: pass schema, get back validated `{data, usage, model, latencyMs}`. Caller can trust `.data` is valid.
+- **BYOK only.** Docker Dash ships zero API keys. Operator pastes their own (or points at their own Ollama URL).
+- **Off by default.** New deployments have `enabled = 0` after migration. UI only shows AI surfaces beyond the Settings tab when enabled + provider configured.
+
+### Added — Privacy + audit infrastructure
+
+- **`src/services/ai/redactor.js`** strips secrets/PII before any payload leaves the host. Built-in patterns cover Bearer auth, env-style assignments (`*PASSWORD*=val`, `*SECRET*=val`, etc. with prefix/suffix tolerance like `STRIPE_SECRET_KEY`), connection-string credentials (13 schemes — `postgres://user:pass@host`), high-entropy tokens, IPs, emails. Operators can add custom regex via Settings → AI.
+- Validated via spike S4 (`plans/spikes-ai-features.md`): **100% recall, 100% precision** on a 27-case hand-built corpus.
+- **D4 — abort on regex failure.** Bad custom regex (catastrophic backtracking) aborts the AI call rather than sending unredacted. Privacy beats utility.
+- Every AI call writes a row to `audit_log` with `action = 'ai_call'` and details: `provider`, `model`, `inputTokens`, `outputTokens`, `durationMs`, `redactions` (per-pattern count), `payloadHash` (SHA-256 of original prompt, 8 hex), `ok: bool`, `error?`.
+- **Compliance gold:** the `payloadHash` lets operators prove "did this exact text get sent?" by hashing locally and comparing — privacy-preserving evidence trail without storing the actual prompt.
+
+### Added — Audit log NL search (the v8.0.0 feature)
+
+System → Audit page → magic-wand search box at the top. Examples: *"who deleted containers in the last 7 days"*, *"all actions by alice today"*, *"failed registry pushes this week"*.
+
+How it works:
+1. Query → redactor → provider via `aiService.call()`.
+2. Provider returns a structured filter conforming to `AUDIT_FILTER_SCHEMA` (actor, action, resource, host, since, until, limit). The `action` enum is the **canonical 161-entry list extracted from the codebase via spike S5** — LLMs cannot invent action values.
+3. Schema validated client-side (defense in depth). Invalid responses rejected.
+4. Translated to existing audit query path. **Never NL→SQL** — only structured fields.
+5. **D5 — server-side limit cap of 200**, regardless of LLM-requested limit. Prevents accidental massive scans.
+6. Parsed filter renders as chips above the result table so operators see what the LLM understood. Click "Clear" to reset.
+
+### Added — Settings → AI tab
+
+Admin-only. Three tabs of configuration: provider selector (radio buttons with built-in catalog), model picker (recommended badge), API key / endpoint URL (encrypted at rest via existing AES-GCM helper). "Test connection" button verifies cred + connectivity without burning real-feature tokens. Privacy panel with explicit "what gets sent / what doesn't" lists. Custom redaction patterns textarea (one regex per line, validated on save).
+
+### Added — Documentation
+
+- **`docs/features/ai.md`** (~400 lines) — 3-min setup, provider tradeoffs (cost + latency + privacy per provider), redactor pattern reference, the v8.0.0 feature, failure modes, programmatic API examples, anti-features section.
+- **`plans/deep-spec-ai-features.md`** (local) — architectural deep-spec written before any code. 6 open decisions (D1-D6) resolved before commit.
+- **`plans/spikes-ai-features.md`** (local) — pre-implementation validation. S4 + S5 ran autonomously; S1-S3 documented as runnable protocols (need API keys).
+
+### Database
+
+New migration `061_ai_settings.js` creates a single-row `ai_settings` table (CHECK id = 1) with: enabled, provider, model, api_key_encrypted, endpoint_url, custom_redaction_patterns (JSON), updated_at, updated_by. Seeded with `enabled = 0` so all installs start in the off state.
+
+### Tests
+
+- **63 new tests** across `ai-redactor.test.js` (33 — pattern coverage + payload hash determinism + custom pattern compilation + D4 abort) and `ai-service.test.js` (30 — settings persistence + encryption round-trip + key masking + provider abstraction with `MockAiProvider` + audit log entry verification + schema validator).
+- Suite: 961 → **1024 passing / 64 suites**. Lint clean, npm audit clean.
+
+### Files touched
+
+- `src/services/ai/index.js` (new — service entrypoint)
+- `src/services/ai/redactor.js` (new)
+- `src/services/ai/providers/base.js` (new — interface + MockAiProvider)
+- `src/services/ai/providers/anthropic.js` (new)
+- `src/services/ai/providers/openai.js` (new)
+- `src/services/ai/providers/ollama.js` (new)
+- `src/services/ai/features/audit-search.js` (new — schema + translateQuery)
+- `src/services/ai/features/audit-actions-list.js` (new — 161-entry enum)
+- `src/routes/ai.js` (new — settings + test + providers catalog)
+- `src/routes/audit.js` — `POST /ai-search`
+- `src/server.js` — mount `/api/ai`
+- `src/db/migrations/061_ai_settings.js` (new)
+- `public/js/pages/settings.js` — AI tab (~200 LOC)
+- `public/js/pages/system.js` — Audit NL search box + parsed-filter chips
+- `src/__tests__/ai-redactor.test.js` (new, 33 tests)
+- `src/__tests__/ai-service.test.js` (new, 30 tests)
+- `docs/features/ai.md` (new)
+- `plans/deep-spec-ai-features.md` + `plans/spikes-ai-features.md` (local)
+
+### Why v8.0.0 (major bump)
+
+- New feature category with new privacy posture (optional cloud egress)
+- New Settings tab + new database table
+- Deserves a release note operators read carefully before enabling
+- Not breaking on API surface — but the privacy story is significant enough that minor (v7.8.0) would understate it
+
+### What's NOT in v8.0.0 (by design)
+
+- **Vulnerability triage** — ships in v8.1.0 once the abstraction is battle-tested
+- **Incident triage** — ships in v8.2.0
+- **Always-on chat sidebar** — won't ship (anti-feature, see deep-spec §1)
+- **Auto-remediation** — won't ship (Replit-class risk)
+- **Per-feature provider override** — single global provider in v8.0.0; per-feature deferred to v8.2.0 if requested
+- **Result caching** — each NL query is unique, caching adds complexity without value
+
+### Roadmap
+
+| Version | Feature | Decision gate |
+|---------|---------|---------------|
+| **v8.0.0** | Audit NL search | ≥ 1 operator configures + runs ≥ 10 successful searches over a week |
+| v8.1.0 | Vulnerability triage | Audit search has been in production 2+ weeks with no compliance issues + ≥ 1 redactor catch in real usage |
+| v8.2.0 | Incident triage | v8.1.0 stable + redaction layer battle-tested |
+
 ## [7.7.0] - 2026-04-26 — CI lint enforcement + registry feature doc
 
 Two no-feature changes that close real gaps:

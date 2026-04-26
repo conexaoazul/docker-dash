@@ -22,6 +22,72 @@ router.get('/', requireAuth, requireRole('admin'), asyncHandler((req, res) => {
   res.json(result);
 }));
 
+// v8.0.0 — NL search. Translates a natural-language query into a structured
+// filter via the AI service, then runs that filter through the existing
+// audit query path. NL → JSON-with-fixed-schema, never NL → SQL. The user
+// sees the parsed filter in the response so they can verify what the LLM
+// understood.
+router.post('/ai-search', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+  const { query } = req.body || {};
+  if (typeof query !== 'string' || !query.trim()) {
+    return res.status(400).json({ error: 'query (string) required' });
+  }
+
+  const aiService = require('../services/ai');
+  if (!aiService.isEnabled()) {
+    return res.status(400).json({ error: 'AI is not configured. Enable it in Settings → AI.' });
+  }
+
+  const auditSearch = require('../services/ai/features/audit-search');
+  const { getClientIp } = require('../utils/helpers');
+
+  let translation;
+  try {
+    translation = await auditSearch.translateQuery({
+      query,
+      audit: {
+        userId: req.user.id,
+        username: req.user.username,
+        ip: getClientIp(req),
+      },
+    });
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+
+  // Run the existing query with the parsed filter
+  const f = translation.filter;
+  const result = auditService.query({
+    action: f.action,
+    page: 1,
+    limit: f.limit || 100,
+    since: f.since,
+    until: f.until,
+  });
+
+  // Post-filter for actor / host / resource if present. The existing query()
+  // doesn't index on these, but the result set is already capped at limit so
+  // a Node-side filter is fine for v8.0.0.
+  let rows = result.rows || result.entries || result.events || (Array.isArray(result) ? result : []);
+  if (Array.isArray(rows)) {
+    if (f.actor) rows = rows.filter(r => (r.username || '').toLowerCase().includes(f.actor.toLowerCase()));
+    if (f.host) rows = rows.filter(r => JSON.stringify(r.details || {}).toLowerCase().includes(f.host.toLowerCase()));
+    if (f.resource) rows = rows.filter(r => (r.target_id || r.targetId || '').toLowerCase().includes(f.resource.toLowerCase()));
+  }
+
+  res.json({
+    parsedFilter: f,
+    rows: rows || [],
+    totalMatched: Array.isArray(rows) ? rows.length : 0,
+    aiMeta: {
+      provider: translation.raw.provider,
+      latencyMs: translation.raw.latencyMs,
+      usage: translation.raw.usage,
+      redactionsApplied: translation.raw.redactions,
+    },
+  });
+}));
+
 // Verify audit log integrity (admin only)
 router.get('/verify', requireAuth, requireRole('admin'), asyncHandler((req, res) => {
   const { from, to } = req.query;

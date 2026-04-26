@@ -10,6 +10,21 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '8.0.0',
+      date: '2026-04-27',
+      title: 'AI features — audit NL search, BYOK, off by default',
+      changes: [
+        { type: 'feature', text: 'New Settings → AI tab (admin-only). Pick a provider — Anthropic Claude, OpenAI, or Ollama (local). BYOK only — Docker Dash ships zero API keys. Off by default. Test connection button verifies cred + connectivity before saving.' },
+        { type: 'feature', text: 'New audit log NL search (System → Audit → magic-wand search box). Type "who deleted containers in the last 7 days" or "all actions by alice today" — translated to a structured filter via the AI provider, then run through the existing audit query path. Never NL→SQL — only structured filter fields conforming to a JSON schema with a 161-entry action enum extracted from the codebase.' },
+        { type: 'feature', text: 'Built-in redactor strips secrets/PII before any payload leaves the host: Bearer auth, env-style assignments (*PASSWORD*=val with prefix tolerance like STRIPE_SECRET_KEY), connection-string credentials (postgres://user:pass@host across 13 schemes), high-entropy tokens, IPs, emails. Validated 100% recall + 100% precision on a 27-case corpus. Bad custom regex aborts the AI call (privacy beats utility).' },
+        { type: 'feature', text: 'Every AI call writes an audit log entry with provider, model, token counts, redaction counts per pattern, SHA-256 payload hash (compliance gold — operators can prove "did this exact text get sent?" by hashing locally and comparing). Query: System → Audit → "actions by anyone with action ai_call".' },
+        { type: 'feature', text: 'Ollama is a first-class citizen for privacy-first deployments — zero outbound traffic. Recommended local model: qwen2.5-coder:7b (≈6GB RAM, ~$0/month). Cloud Anthropic Haiku 4.5 is ~$1/month for 100 NL searches/day; OpenAI GPT-4o-mini is ~$0.30/month.' },
+        { type: 'improvement', text: 'Strategy-first: ~2700-word deep-spec written before any code (plans/deep-spec-ai-features.md, local). 5 spikes designed; S4 (redactor) + S5 (audit action extraction) ran autonomously and passed before implementation. 6 open decisions resolved in writing before commit.' },
+        { type: 'improvement', text: '63 new unit tests (33 redactor + 30 service with MockAiProvider). Suite: 961 → 1024 / 64 suites. Lint clean.' },
+        { type: 'improvement', text: 'Anti-features deliberately NOT shipped: always-on chat sidebar (most-mocked AI pattern of 2025), auto-remediation agent (Replit-class risk), AI-generated weekly emails (padding nobody reads), NL→Compose generation (Gordon does that for dev), AI insights forecasting (single-host data too small). All future requests in those directions get a polite no with rationale.' },
+      ],
+    },
+    {
       version: '7.7.0',
       date: '2026-04-26',
       title: 'CI lint enforcement + registry feature doc',

@@ -2486,23 +2486,80 @@ DB_PASS=secret"></textarea>
         return;
       }
 
+      const renderRows = (entries) => entries.map(e => `
+        <tr>
+          <td>${Utils.formatDate(e.created_at || e.timestamp)}</td>
+          <td>${Utils.escapeHtml(e.username || '')}</td>
+          <td><span class="badge badge-info">${Utils.escapeHtml(e.action)}</span></td>
+          <td class="mono text-sm">${Utils.escapeHtml(e.target_type ? e.target_type + ':' + Utils.shortId(e.target_id) : '')}</td>
+          <td class="mono text-sm">${Utils.escapeHtml(e.ip || '')}</td>
+        </tr>
+      `).join('');
+
       el.innerHTML = `
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px">
-        <button class="btn btn-sm btn-secondary" id="audit-export-csv"><i class="fas fa-download"></i> Export CSV</button>
-        <button class="btn btn-sm btn-secondary" id="audit-analytics-btn"><i class="fas fa-chart-bar"></i> Analytics</button>
+      <div style="display:flex;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap">
+        <div style="display:flex;gap:6px;flex:1;min-width:280px;max-width:560px">
+          <div class="search-box" style="flex:1">
+            <i class="fas fa-magic"></i>
+            <input type="text" id="audit-ai-search" placeholder="Ask in plain English: 'who deleted containers last 7 days?'" style="font-style:italic">
+          </div>
+          <button class="btn btn-sm btn-primary" id="audit-ai-go"><i class="fas fa-search"></i></button>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-secondary" id="audit-export-csv"><i class="fas fa-download"></i> Export CSV</button>
+          <button class="btn btn-sm btn-secondary" id="audit-analytics-btn"><i class="fas fa-chart-bar"></i> Analytics</button>
+        </div>
       </div>
+      <div id="audit-ai-chips" style="display:none;margin-bottom:10px;flex-wrap:wrap;gap:6px"></div>
       <table class="data-table">
         <thead><tr><th>${i18n.t('pages.system.eventTime')}</th><th>${i18n.t('pages.system.auditUser')}</th><th>${i18n.t('pages.system.auditAction')}</th><th>${i18n.t('pages.system.auditTarget')}</th><th>${i18n.t('pages.system.auditIp')}</th></tr></thead>
-        <tbody>${entries.map(e => `
-          <tr>
-            <td>${Utils.formatDate(e.created_at || e.timestamp)}</td>
-            <td>${Utils.escapeHtml(e.username || '')}</td>
-            <td><span class="badge badge-info">${Utils.escapeHtml(e.action)}</span></td>
-            <td class="mono text-sm">${Utils.escapeHtml(e.target_type ? e.target_type + ':' + Utils.shortId(e.target_id) : '')}</td>
-            <td class="mono text-sm">${Utils.escapeHtml(e.ip || '')}</td>
-          </tr>
-        `).join('')}</tbody>
+        <tbody id="audit-tbody">${renderRows(entries)}</tbody>
       </table>`;
+
+      // v8.0.0 — AI search wiring
+      const aiInput = el.querySelector('#audit-ai-search');
+      const aiGo = el.querySelector('#audit-ai-go');
+      const chips = el.querySelector('#audit-ai-chips');
+      const tbody = el.querySelector('#audit-tbody');
+
+      const runAiSearch = async () => {
+        const query = aiInput.value.trim();
+        if (!query) return;
+        const original = aiGo.innerHTML;
+        aiGo.disabled = true;
+        aiGo.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        try {
+          const r = await Api.post('/audit/ai-search', { query });
+          // Render chips for the parsed filter — critical for trust (operator sees what LLM understood)
+          chips.style.display = 'flex';
+          const f = r.parsedFilter || {};
+          const chipHtml = Object.entries(f).map(([k, v]) =>
+            `<span class="badge" style="background:rgba(56,139,253,0.12);color:var(--accent);padding:4px 10px;border-radius:12px;font-size:11px">${Utils.escapeHtml(k)}: ${Utils.escapeHtml(String(v))}</span>`
+          ).join('');
+          const aiPill = r.aiMeta ? `<span class="text-muted" style="font-size:10px;align-self:center">via ${Utils.escapeHtml(r.aiMeta.provider || 'AI')} · ${r.aiMeta.latencyMs}ms · ${r.totalMatched} match${r.totalMatched === 1 ? '' : 'es'}</span>` : '';
+          chips.innerHTML = chipHtml + aiPill +
+            `<button class="btn btn-sm" id="audit-ai-clear" style="padding:2px 8px;font-size:10px">Clear</button>`;
+          tbody.innerHTML = renderRows(r.rows || []);
+          el.querySelector('#audit-ai-clear')?.addEventListener('click', async () => {
+            aiInput.value = '';
+            chips.style.display = 'none';
+            chips.innerHTML = '';
+            const data2 = await Api.getAuditLog(1, 100);
+            tbody.innerHTML = renderRows(data2.rows || data2.entries || data2.logs || (Array.isArray(data2) ? data2 : []));
+          });
+        } catch (err) {
+          if (/not configured/i.test(err.message)) {
+            Toast.warning('AI not configured. Settings → AI → enable a provider.');
+          } else {
+            Toast.error(err.message);
+          }
+        } finally {
+          aiGo.disabled = false;
+          aiGo.innerHTML = original;
+        }
+      };
+      aiGo.addEventListener('click', runAiSearch);
+      aiInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runAiSearch(); });
 
       el.querySelector('#audit-export-csv')?.addEventListener('click', () => {
         window.open('/api/audit/export?days=30', '_blank');
