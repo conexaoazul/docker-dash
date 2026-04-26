@@ -257,7 +257,21 @@ Deep reading: [HA Mode reference](docs/features/ha-mode.md) · [Failover runbook
 - **Self-Reporting Footprint** — Docker Dash memory, uptime, DB size at `/api/footprint`
 - **Let's Encrypt Wizard** — 3-step UI for issuing certs via DNS-01 (Cloudflare, Route53, DigitalOcean, Hetzner, Linode) or HTTP-01. Encrypted credential vault, auto-renewal via Caddy, hash-chained audit trail. Open source — no other Docker UI ships this
 - **Container Remediation Wizard** — 3-step UI that turns Secrets Audit + CIS Benchmark findings into actionable fixes. 20-entry catalog, 4 live-updatable (zero downtime), 16 with compose-recreate + auto-rollback. Git-PR mode for git-backed stacks. No other OSS Docker UI ships this
-- **866 Tests** — 57 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics, permissions RBAC, settings CRUD, security alert rule evaluation, event notifier dispatch, cluster abstraction (HA mode), rate-limiter memory + Redis paths (100% passing)
+- **1024 Tests** — 64 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics, permissions RBAC, settings CRUD, security alert rule evaluation, event notifier dispatch, cluster abstraction (HA mode), rate-limiter memory + Redis paths, registry push + browse + delete, AI redactor + service abstraction (100% passing)
+
+### AI (v8.0.0+) — opt-in, BYOK, off by default
+
+The first feature category that introduces optional outbound traffic to non-user-controlled hosts. Designed strategy-first ([deep-spec](plans/deep-spec-ai-features.md), [spikes](plans/spikes-ai-features.md)). One sentence to defend: **AI in Docker Dash exists to translate noisy data into ranked, explainable decisions — never to take actions on the user's behalf.** Read-only or read-then-suggest. No always-on chat sidebar. No auto-remediation agent.
+
+- **Provider abstraction** — Anthropic Claude, OpenAI, Ollama. **BYOK** — Docker Dash ships zero API keys. Off by default until operator configures + enables in Settings → AI tab.
+- **Privacy-first redactor** — strips secrets/PII before any payload leaves the host. Built-in patterns cover Bearer auth, env-style assignments (incl. `STRIPE_SECRET_KEY`-style prefixes), connection-string credentials (13 schemes), high-entropy tokens, IPs, emails. Validated 100/100 on a 27-case corpus. Bad custom regex aborts the call (privacy beats utility).
+- **Compliance-grade audit** — every AI call logged with provider, model, token counts, redaction counts, SHA-256 payload hash. Operators can prove "did this exact text get sent?" without storing the prompt.
+- **Audit log NL search (v8.0.0)** — System → Audit page → magic-wand search box. Type *"who deleted containers in the last 7 days"* → translates to a structured filter via the AI provider, runs through existing audit query path. Never NL→SQL — only structured fields conforming to a JSON schema with a 161-entry action enum.
+- **Ollama is first-class** for sovereignty-critical deployments — zero outbound traffic. Recommended local model: `qwen2.5-coder:7b` (≈6 GB RAM, $0/month).
+- **Cost example** for cloud providers: 100 NL searches/day ≈ **$1.50/month** on Claude Haiku 4.5, **$0.30/month** on GPT-4o-mini.
+- **Roadmap**: v8.1.0 vulnerability triage (ranks scan results by real exploitability via EPSS + LLM reasoning), v8.2.0 incident triage (container restart-loop diagnosis from inspect + logs + stats). Both ship after v8.0.0 has 2+ weeks in production with no compliance issues.
+
+See [`docs/features/ai.md`](docs/features/ai.md) for the full setup walkthrough, provider tradeoffs, redactor reference, and programmatic API.
 
 ### Feature Reference
 
@@ -271,6 +285,8 @@ Dedicated reference docs for the deeper features, in [docs/features/](docs/featu
 - **[HA Load Balancer Configs](docs/features/ha-lb-configs.md)** — copy-paste examples for Caddy + Traefik + HAProxy + nginx with sticky-session + WS upgrade + health checks
 - **[Observability Stack (v7.1.0)](docs/features/observability.md)** — opt-in Prometheus + Grafana via `docker compose --profile observability up -d`, 8-panel dashboard auto-provisioned, recommended alerts, integration with existing Prometheus/Grafana
 - **[Observability Wizard (v7.2.0)](docs/features/observability.md#1a-in-app-wizard-v720)** — admin UI at **System → Observability**. Detects existing Prometheus/Grafana on the host and offers 3 UX branches: integrate (both found → copy scrape snippet + one-click dashboard import via Grafana API), partial deploy, or full deploy with copy-paste instructions. Admin-only, audit-logged, token never persisted
+- **[Image Registry (v7.5.0–v7.6.0)](docs/features/registry.md)** — Distribution one-click template + push from Images page (SSE progress stream) + Browse page (catalog + tags + manifest inspect) + delete-by-digest with two-step confirmation gate. Reuses the encrypted credential store from Settings → Registries. Multi-arch manifest lists deliberately not supported (use `buildx imagetools`)
+- **[AI Features (v8.0.0)](docs/features/ai.md)** — opt-in, BYOK, off by default. Provider abstraction across Anthropic / OpenAI / Ollama. Privacy-first redactor (validated 100/100 on a hand-built corpus). SHA-256 payload hash in audit log for compliance evidence. Audit NL search (System → Audit) ships first; vulnerability triage + incident triage on the v8.1.0/v8.2.0 roadmap
 
 ## Where to start
 
