@@ -2,6 +2,62 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [8.0.1] - 2026-04-27 — AI Workload Pack + UX polish
+
+Three orthogonal additions while v8.0.0 bakes. Zero new AI infrastructure (deep-spec gate respected). Pure value adds for self-hosters.
+
+### Added — AI Workload Template Pack
+
+12 curated compose snippets in a new **AI** category in the Templates page:
+
+| Template | What it deploys |
+|----------|-----------------|
+| **Ollama (LLM runtime)** | Local LLM server. Use as the AI provider for Docker Dash itself. |
+| **Ollama + Open WebUI** | Full local ChatGPT-style stack. Web UI at :3000. |
+| **RAG Stack** | Ollama + Qdrant + Open WebUI. Upload docs, query with citations. |
+| **vLLM (high-throughput inference)** | Production-grade GPU inference, OpenAI-compatible API at :8000. |
+| **Stable Diffusion WebUI** | AUTOMATIC1111 image generation, GPU required. |
+| **ComfyUI (node-based image gen)** | Workflow editor for complex image pipelines. |
+| **Whisper (speech-to-text)** | Faster-whisper REST API at :9000. CPU works, GPU is 5-10× faster. |
+| **Langflow (visual LangChain)** | Drag-drop LLM workflow editor. |
+| **AnythingLLM (full-stack RAG)** | Multi-user RAG with workspaces and document ingestion. |
+| **n8n (workflow automation with AI)** | Zapier-style automation with native AI nodes. |
+| **LiteLLM Proxy (unified gateway)** | OpenAI-compatible proxy for 100+ providers, cost tracking. |
+| **Flowise (drag-drop LLM apps)** | Polished alternative to Langflow. |
+
+All templates ship with the GPU `deploy.resources.reservations.devices` block — commented out by default for CPU compatibility, uncomment for NVIDIA GPU. Pure YAML — zero new code paths, zero risk to v8.0.0 stability.
+
+### Added — Query history for audit NL search
+
+The audit page's NL search box now remembers the last 10 successful queries in `localStorage`. Focus the empty input → dropdown of recent queries appears. Click to re-run; ESC to dismiss; "Clear all" to wipe.
+
+Stays in browser. Never sent server-side beyond the actual search call. Helps operators iterate on phrasing without retyping. ([public/js/pages/system.js](public/js/pages/system.js))
+
+### Added — 3 How-To guides for AI workloads
+
+New `ai` category in How-To Guides. EN + RO content (other 9 languages auto-fall-back via existing i18n machinery):
+
+- **Run Ollama in Docker (CPU and GPU)** — beginner. Pull models, query the API, use as the Docker Dash AI provider, troubleshooting common gotchas (OOM, "model not found", slow CPU inference).
+- **GPU passthrough to Docker containers (NVIDIA)** — intermediate. Install nvidia-container-toolkit on Ubuntu/Debian/RHEL, smoke test, compose syntax for GPU access, multi-GPU pinning, AMD ROCm note.
+- **Build a self-hosted RAG stack (Ollama + Qdrant + Open WebUI)** — intermediate. Architecture explained, ingest documents, tune chunk size + Top K + hybrid search, common gotchas. Same architecture as commercial RAG products (Glean, NotebookLM) but you own the data.
+
+### Tests
+
+Suite unchanged: **1024 passing / 64 suites**. No new tests needed — pure content additions (templates are static YAML, howto guides are HTML strings, query history is localStorage frontend logic).
+
+### Files touched
+
+- `src/routes/templates.js` — 12 new entries in TEMPLATES array (~80 lines)
+- `src/db/migrations/062_howto_ai_workloads.js` (new) — 3 howto guides
+- `public/js/pages/system.js` — query history dropdown + click-to-re-run
+
+### Why a patch (8.0.1) and not a minor (8.1.0)
+
+- Zero new AI infrastructure, zero new outbound calls, zero new privacy surface
+- Pure additive content (templates + guides + frontend UX)
+- The deep-spec discipline gate explicitly blocks v8.1.0 until v8.0.0 has 2+ weeks production + redactor catch in real usage
+- Operators upgrading from v8.0.0 will see the new templates and guides; nothing breaks
+
 ## [8.0.0] - 2026-04-27 — AI features (audit NL search, BYOK, off by default)
 
 **Major bump.** First feature category that introduces optional outbound traffic to non-user-controlled hosts. New Settings tab, new database table, new privacy posture, full audit trail. Designed strategy-first — see `plans/deep-spec-ai-features.md` (~2700 words) and `plans/spikes-ai-features.md` for the full rationale before any code landed.

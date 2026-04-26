@@ -273,6 +273,75 @@ const TEMPLATES = [
     description: 'Self-hosted OCI image registry. Single container + htpasswd auth. Compatible with docker push/pull and the Docker Dash push-to-registry action.',
     compose: `services:\n  registry:\n    image: registry:3\n    container_name: docker-registry\n    restart: unless-stopped\n    ports:\n      - "5000:5000"\n    environment:\n      REGISTRY_AUTH: htpasswd\n      REGISTRY_AUTH_HTPASSWD_REALM: "Docker Dash Registry"\n      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd\n      REGISTRY_STORAGE_DELETE_ENABLED: "true"\n    volumes:\n      - registry-data:/var/lib/registry\n      - ./auth:/auth:ro\nvolumes:\n  registry-data:`,
   },
+
+  // ─── v8.0.1 — AI Workload Pack ─────────────────────────────────────
+  // Curated compose snippets for self-hosted AI. All ship with `:latest` tags
+  // (operator pins to a specific version when deploying for production).
+  // GPU passthrough requires `nvidia-container-toolkit` on the host — see
+  // the "GPU passthrough" how-to guide for setup. Templates with GPU support
+  // include the `deploy.resources.reservations.devices` block; remove it if
+  // running CPU-only.
+
+  {
+    id: 'ai-ollama', name: 'Ollama (LLM runtime)', category: 'AI', icon: 'fas fa-brain',
+    description: 'Local LLM runtime — runs Llama, Qwen, DeepSeek, Mistral, etc. on your hardware. CPU works; GPU recommended for >7B models. After deploy: `docker exec ollama ollama pull qwen2.5-coder:7b`. Use as the AI provider in Settings → AI for Docker Dash itself.',
+    compose: `services:\n  ollama:\n    image: ollama/ollama:latest\n    container_name: ollama\n    restart: unless-stopped\n    ports:\n      - "11434:11434"\n    volumes:\n      - ollama-data:/root/.ollama\n    # Uncomment for GPU support (requires nvidia-container-toolkit on host):\n    # deploy:\n    #   resources:\n    #     reservations:\n    #       devices:\n    #         - driver: nvidia\n    #           count: all\n    #           capabilities: [gpu]\nvolumes:\n  ollama-data:`,
+  },
+  {
+    id: 'ai-ollama-openwebui', name: 'Ollama + Open WebUI', category: 'AI', icon: 'fas fa-comments',
+    description: 'Full local ChatGPT-style stack: Ollama backend + Open WebUI frontend. Web UI at :3000, Ollama API at :11434. After deploy: open :3000, create an account, pull a model from the UI. Privacy-first — nothing leaves your network.',
+    compose: `services:\n  ollama:\n    image: ollama/ollama:latest\n    container_name: ollama\n    restart: unless-stopped\n    volumes:\n      - ollama-data:/root/.ollama\n    # Uncomment for GPU support (requires nvidia-container-toolkit on host):\n    # deploy:\n    #   resources:\n    #     reservations:\n    #       devices:\n    #         - driver: nvidia\n    #           count: all\n    #           capabilities: [gpu]\n\n  open-webui:\n    image: ghcr.io/open-webui/open-webui:main\n    container_name: open-webui\n    restart: unless-stopped\n    ports:\n      - "3000:8080"\n    environment:\n      OLLAMA_BASE_URL: http://ollama:11434\n      WEBUI_AUTH: "true"\n    volumes:\n      - openwebui-data:/app/backend/data\n    depends_on:\n      - ollama\nvolumes:\n  ollama-data:\n  openwebui-data:`,
+  },
+  {
+    id: 'ai-rag-stack', name: 'RAG Stack (Ollama + Qdrant + Open WebUI)', category: 'AI', icon: 'fas fa-database',
+    description: 'Retrieval-augmented generation: Ollama for inference + Qdrant vector DB for embeddings + Open WebUI for chat. Upload docs in Open WebUI, they get embedded into Qdrant, queries cite sources. Self-contained, no cloud.',
+    compose: `services:\n  ollama:\n    image: ollama/ollama:latest\n    container_name: ollama-rag\n    restart: unless-stopped\n    volumes:\n      - ollama-rag-data:/root/.ollama\n\n  qdrant:\n    image: qdrant/qdrant:latest\n    container_name: qdrant\n    restart: unless-stopped\n    ports:\n      - "6333:6333"\n    volumes:\n      - qdrant-data:/qdrant/storage\n\n  open-webui:\n    image: ghcr.io/open-webui/open-webui:main\n    container_name: open-webui-rag\n    restart: unless-stopped\n    ports:\n      - "3000:8080"\n    environment:\n      OLLAMA_BASE_URL: http://ollama-rag:11434\n      RAG_EMBEDDING_ENGINE: ollama\n      VECTOR_DB: qdrant\n      QDRANT_URI: http://qdrant:6333\n      WEBUI_AUTH: "true"\n    volumes:\n      - openwebui-rag-data:/app/backend/data\n    depends_on:\n      - ollama\n      - qdrant\nvolumes:\n  ollama-rag-data:\n  qdrant-data:\n  openwebui-rag-data:`,
+  },
+  {
+    id: 'ai-vllm', name: 'vLLM (high-throughput inference)', category: 'AI', icon: 'fas fa-tachometer-alt',
+    description: 'Production-grade LLM inference server with PagedAttention. Higher throughput than Ollama for concurrent requests. Requires NVIDIA GPU. Set MODEL env var to a HuggingFace model ID. OpenAI-compatible API at :8000/v1.',
+    compose: `services:\n  vllm:\n    image: vllm/vllm-openai:latest\n    container_name: vllm\n    restart: unless-stopped\n    ports:\n      - "8000:8000"\n    environment:\n      MODEL: meta-llama/Llama-3.2-3B-Instruct\n      HUGGING_FACE_HUB_TOKEN: \${HF_TOKEN:-}\n    volumes:\n      - vllm-cache:/root/.cache/huggingface\n    command: --model \${MODEL:-meta-llama/Llama-3.2-3B-Instruct} --host 0.0.0.0\n    deploy:\n      resources:\n        reservations:\n          devices:\n            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n    ipc: host\nvolumes:\n  vllm-cache:`,
+  },
+  {
+    id: 'ai-stable-diffusion', name: 'Stable Diffusion WebUI', category: 'AI', icon: 'fas fa-image',
+    description: 'AUTOMATIC1111 Stable Diffusion WebUI — image generation with SD 1.5/2.x/SDXL/Flux. Requires NVIDIA GPU with 6GB+ VRAM. First boot downloads SD 1.5 (~4GB). Web UI at :7860.',
+    compose: `services:\n  stable-diffusion:\n    image: ghcr.io/abdbarho/stable-diffusion-webui-docker/auto:latest\n    container_name: stable-diffusion\n    restart: unless-stopped\n    ports:\n      - "7860:7860"\n    volumes:\n      - sd-models:/data/models\n      - sd-output:/output\n      - sd-config:/data/config\n    environment:\n      CLI_ARGS: --listen --no-half-vae --xformers\n    deploy:\n      resources:\n        reservations:\n          devices:\n            - driver: nvidia\n              count: all\n              capabilities: [gpu]\nvolumes:\n  sd-models:\n  sd-output:\n  sd-config:`,
+  },
+  {
+    id: 'ai-comfyui', name: 'ComfyUI (node-based image gen)', category: 'AI', icon: 'fas fa-project-diagram',
+    description: 'Node-based image generation workflow editor. Power users prefer ComfyUI over Stable Diffusion WebUI for complex pipelines (img2img, ControlNet, animation, video). Requires NVIDIA GPU. Web UI at :8188.',
+    compose: `services:\n  comfyui:\n    image: yanwk/comfyui-boot:latest\n    container_name: comfyui\n    restart: unless-stopped\n    ports:\n      - "8188:8188"\n    volumes:\n      - comfyui-storage:/root\n    deploy:\n      resources:\n        reservations:\n          devices:\n            - driver: nvidia\n              count: all\n              capabilities: [gpu]\nvolumes:\n  comfyui-storage:`,
+  },
+  {
+    id: 'ai-whisper', name: 'Whisper (speech-to-text)', category: 'AI', icon: 'fas fa-microphone',
+    description: 'OpenAI Whisper transcription server (faster-whisper backend). REST API at :9000 — POST audio file, get transcript. CPU works; GPU is 5-10× faster. Multilingual.',
+    compose: `services:\n  whisper:\n    image: onerahmet/openai-whisper-asr-webservice:latest\n    container_name: whisper\n    restart: unless-stopped\n    ports:\n      - "9000:9000"\n    environment:\n      ASR_MODEL: base\n      ASR_ENGINE: faster_whisper\n    volumes:\n      - whisper-cache:/root/.cache\n    # Uncomment for GPU:\n    # deploy:\n    #   resources:\n    #     reservations:\n    #       devices:\n    #         - driver: nvidia\n    #           count: all\n    #           capabilities: [gpu]\nvolumes:\n  whisper-cache:`,
+  },
+  {
+    id: 'ai-langflow', name: 'Langflow (visual LangChain)', category: 'AI', icon: 'fas fa-sitemap',
+    description: 'Visual editor for LangChain workflows. Drag-and-drop nodes for prompt chains, RAG, agents. Connect to Ollama/OpenAI/Anthropic. Web UI at :7860.',
+    compose: `services:\n  langflow:\n    image: langflowai/langflow:latest\n    container_name: langflow\n    restart: unless-stopped\n    ports:\n      - "7860:7860"\n    environment:\n      LANGFLOW_AUTO_LOGIN: "false"\n      LANGFLOW_SUPERUSER: admin\n      LANGFLOW_SUPERUSER_PASSWORD: changeme\n    volumes:\n      - langflow-data:/app/langflow\nvolumes:\n  langflow-data:`,
+  },
+  {
+    id: 'ai-anything-llm', name: 'AnythingLLM (full-stack RAG)', category: 'AI', icon: 'fas fa-book',
+    description: 'Multi-user RAG application — workspaces, document upload, multi-source ingestion (websites, GitHub, Confluence, etc.), chat with citations. Connects to Ollama/OpenAI/Anthropic. Web UI at :3001.',
+    compose: `services:\n  anything-llm:\n    image: mintplexlabs/anythingllm:latest\n    container_name: anything-llm\n    restart: unless-stopped\n    ports:\n      - "3001:3001"\n    environment:\n      STORAGE_DIR: /app/server/storage\n      JWT_SECRET: changeme-generate-strong-secret-min-12-chars\n    volumes:\n      - anythingllm-data:/app/server/storage\n      - anythingllm-hotdir:/app/collector/hotdir\nvolumes:\n  anythingllm-data:\n  anythingllm-hotdir:`,
+  },
+  {
+    id: 'ai-n8n', name: 'n8n (workflow automation with AI)', category: 'AI', icon: 'fas fa-cogs',
+    description: 'Workflow automation tool with native AI nodes (OpenAI, Ollama, vector stores, agents). Visual editor — connect APIs without writing code. Self-hosted alternative to Zapier with AI superpowers. Web UI at :5678.',
+    compose: `services:\n  n8n:\n    image: n8nio/n8n:latest\n    container_name: n8n\n    restart: unless-stopped\n    ports:\n      - "5678:5678"\n    environment:\n      N8N_BASIC_AUTH_ACTIVE: "true"\n      N8N_BASIC_AUTH_USER: admin\n      N8N_BASIC_AUTH_PASSWORD: changeme\n      N8N_HOST: localhost\n      N8N_PORT: 5678\n      WEBHOOK_URL: http://localhost:5678/\n    volumes:\n      - n8n-data:/home/node/.n8n\nvolumes:\n  n8n-data:`,
+  },
+  {
+    id: 'ai-litellm', name: 'LiteLLM Proxy (unified LLM gateway)', category: 'AI', icon: 'fas fa-route',
+    description: 'OpenAI-compatible proxy that unifies 100+ LLM providers (OpenAI, Anthropic, Cohere, Bedrock, local Ollama). Apps point here; you switch backends without touching app code. Cost tracking + rate limiting. API at :4000.',
+    compose: `services:\n  litellm:\n    image: ghcr.io/berriai/litellm:main-latest\n    container_name: litellm\n    restart: unless-stopped\n    ports:\n      - "4000:4000"\n    environment:\n      LITELLM_MASTER_KEY: sk-changeme-generate-strong-secret\n    command: --config /app/config.yaml --port 4000\n    volumes:\n      # Mount your config.yaml here. Example:\n      #   model_list:\n      #     - model_name: gpt-4o-mini\n      #       litellm_params:\n      #         model: openai/gpt-4o-mini\n      #         api_key: os.environ/OPENAI_API_KEY\n      - ./litellm-config.yaml:/app/config.yaml:ro`,
+  },
+  {
+    id: 'ai-flowise', name: 'Flowise (drag-drop LLM apps)', category: 'AI', icon: 'fas fa-stream',
+    description: 'Drag-and-drop builder for LLM applications: chatbots, agents, RAG. Similar to Langflow but more polished UX. 100+ integrations. Web UI at :3000.',
+    compose: `services:\n  flowise:\n    image: flowiseai/flowise:latest\n    container_name: flowise\n    restart: unless-stopped\n    ports:\n      - "3000:3000"\n    environment:\n      FLOWISE_USERNAME: admin\n      FLOWISE_PASSWORD: changeme\n    volumes:\n      - flowise-data:/root/.flowise\n    command: /bin/sh -c "sleep 3; flowise start"\nvolumes:\n  flowise-data:`,
+  },
 ];
 
 // Get all templates (built-in + custom, with overrides merged)

@@ -10,6 +10,17 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '8.0.1',
+      date: '2026-04-27',
+      title: 'AI Workload Pack + UX polish',
+      changes: [
+        { type: 'feature', text: 'New AI category in Templates with 12 curated compose snippets for self-hosted AI: Ollama, Open WebUI, full RAG stack (Ollama+Qdrant+Open WebUI), vLLM (high-throughput inference), Stable Diffusion WebUI, ComfyUI, Whisper, Langflow, AnythingLLM, n8n, LiteLLM Proxy, Flowise. All ship with GPU passthrough block ready (commented out for CPU compat — uncomment for NVIDIA GPU).' },
+        { type: 'feature', text: 'Audit NL search now remembers your last 10 successful queries in localStorage. Focus the empty search input → dropdown of recent queries appears. Click to re-run; ESC to dismiss; Clear all to wipe. Stays in browser, never sent server-side beyond the actual search.' },
+        { type: 'feature', text: 'Three new How-To guides under a new "ai" category: "Run Ollama in Docker (CPU and GPU)", "GPU passthrough to Docker containers (NVIDIA)", "Build a self-hosted RAG stack (Ollama + Qdrant + Open WebUI)". EN + RO content; other 9 languages fall back via i18n.' },
+        { type: 'improvement', text: 'Why patch (8.0.1) and not minor — zero new AI infrastructure, zero new outbound calls, zero new privacy surface. Pure additive content while v8.0.0 bakes. v8.1.0 (vulnerability triage) still gated on production signal per deep-spec discipline.' },
+      ],
+    },
+    {
       version: '8.0.0',
       date: '2026-04-27',
       title: 'AI features — audit NL search, BYOK, off by default',

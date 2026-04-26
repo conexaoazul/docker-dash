@@ -2522,14 +2522,83 @@ DB_PASS=secret"></textarea>
       const chips = el.querySelector('#audit-ai-chips');
       const tbody = el.querySelector('#audit-tbody');
 
+      // v8.0.1 — query history (last 10 NL queries, localStorage). Stays in
+      // browser, never sent server-side beyond the actual search call. Helps
+      // operators iterate on phrasing without retyping.
+      const HISTORY_KEY = 'dd_audit_ai_history';
+      const HISTORY_MAX = 10;
+      const loadHistory = () => {
+        try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
+        catch { return []; }
+      };
+      const saveHistory = (q) => {
+        try {
+          const list = loadHistory().filter(x => x !== q);
+          list.unshift(q);
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX)));
+        } catch { /* localStorage may be blocked — non-fatal */ }
+      };
+      const showHistory = () => {
+        const list = loadHistory();
+        if (list.length === 0) return;
+        // Remove existing dropdown if any
+        document.getElementById('audit-ai-history-pop')?.remove();
+        const pop = document.createElement('div');
+        pop.id = 'audit-ai-history-pop';
+        pop.style.cssText = 'position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:100;max-height:280px;overflow-y:auto;margin-top:2px';
+        pop.innerHTML = `
+          <div style="padding:6px 12px;font-size:10px;color:var(--text-dim);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <span>RECENT QUERIES</span>
+            <button class="btn-link" id="audit-ai-history-clear" style="background:none;border:none;color:var(--text-dim);font-size:10px;cursor:pointer;padding:0">Clear all</button>
+          </div>
+          ${list.map((q, i) => `
+            <div class="audit-ai-history-item" data-q="${Utils.escapeHtml(q)}" style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);transition:background 0.15s">
+              <i class="fas fa-history" style="color:var(--text-dim);margin-right:8px;font-size:10px"></i>${Utils.escapeHtml(q)}
+            </div>
+          `).join('')}
+        `;
+        // The search-box parent is position:static — make it relative so the absolute pop anchors correctly
+        const wrap = aiInput.closest('.search-box');
+        if (wrap) wrap.style.position = 'relative';
+        wrap?.appendChild(pop);
+        pop.querySelectorAll('.audit-ai-history-item').forEach(item => {
+          item.addEventListener('mouseenter', () => { item.style.background = 'var(--surface2)'; });
+          item.addEventListener('mouseleave', () => { item.style.background = ''; });
+          item.addEventListener('click', () => {
+            aiInput.value = item.dataset.q;
+            pop.remove();
+            runAiSearch();
+          });
+        });
+        document.getElementById('audit-ai-history-clear')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          try { localStorage.removeItem(HISTORY_KEY); } catch {}
+          pop.remove();
+        });
+        // Click outside closes
+        const closer = (e) => {
+          if (!pop.contains(e.target) && e.target !== aiInput) {
+            pop.remove();
+            document.removeEventListener('click', closer);
+          }
+        };
+        setTimeout(() => document.addEventListener('click', closer), 0);
+      };
+
+      aiInput.addEventListener('focus', () => {
+        if (!aiInput.value.trim()) showHistory();
+      });
+
       const runAiSearch = async () => {
         const query = aiInput.value.trim();
         if (!query) return;
+        document.getElementById('audit-ai-history-pop')?.remove();
         const original = aiGo.innerHTML;
         aiGo.disabled = true;
         aiGo.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
         try {
           const r = await Api.post('/audit/ai-search', { query });
+          saveHistory(query);  // only successful searches
           // Render chips for the parsed filter — critical for trust (operator sees what LLM understood)
           chips.style.display = 'flex';
           const f = r.parsedFilter || {};
@@ -2559,7 +2628,10 @@ DB_PASS=secret"></textarea>
         }
       };
       aiGo.addEventListener('click', runAiSearch);
-      aiInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runAiSearch(); });
+      aiInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') runAiSearch();
+        if (e.key === 'Escape') document.getElementById('audit-ai-history-pop')?.remove();
+      });
 
       el.querySelector('#audit-export-csv')?.addEventListener('click', () => {
         window.open('/api/audit/export?days=30', '_blank');
