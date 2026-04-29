@@ -2,6 +2,16 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [8.1.1] - 2026-04-29 — Bug fix: edit-meta button on Containers list
+
+### Fixed
+
+- **`Uncaught TypeError: ContainersPage._editMetaDialog is not a function`** when clicking the per-row "Edit metadata" button on the Containers list view, IF the user hadn't first opened a container detail page. Same root cause family as v7.2.1's `_stopLogFollow` bug: `_editMetaDialog` lives in `container-detail.js` (lazy-loaded module from the v6.16.0 split), but the eager `containers.js` delegated click handler called it unconditionally. Unlike v7.2.1 (where the safe fix was a no-op guard because the call was internal cleanup), edit-meta is a user-clicked button — must actually work — so the fix lazy-loads the detail module first, then calls. ([public/js/pages/containers.js:3199-3215](public/js/pages/containers.js#L3199))
+
+### Audit
+
+Grepped for other eager-side calls to lazy-only methods. Found `_execUnsub` (also lives in container-detail.js) called from `destroy()` in eager — but it's already protected by `if (this._execUnsub)` guard since the property is `undefined` until the lazy module merges. Safe.
+
 ## [8.1.0] - 2026-04-29 — Registry Hygiene Pack (provenance + retention + remote/virtual)
 
 Three orthogonal-but-thematic features that close the most operationally-painful gaps versus JFrog's universal artifact repo, without taking on Harbor's or JFrog's complexity. Ships as one coherent release per the deep-spec ([`plans/deep-spec-registry-hygiene-pack.md`](plans/deep-spec-registry-hygiene-pack.md)).

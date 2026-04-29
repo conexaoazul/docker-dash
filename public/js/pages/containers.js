@@ -3198,7 +3198,19 @@ document.addEventListener('click', (e) => {
 
   if (action === 'edit-meta') {
     const name = btn.dataset.name;
-    if (name) ContainersPage._editMetaDialog(name);
+    if (!name) return;
+    // v8.1.1 — _editMetaDialog lives in the lazy-loaded container-detail.js
+    // module (split in v6.16.0). When the user clicks "Edit metadata" from
+    // the list view without ever opening a detail page, the method doesn't
+    // exist yet. Load the detail module first, then call.
+    (async () => {
+      try {
+        await ContainersPage._loadDetailModule();
+        await ContainersPage._editMetaDialog(name);
+      } catch (err) {
+        Toast.error('Could not open meta editor: ' + err.message);
+      }
+    })();
     return;
   }
 
