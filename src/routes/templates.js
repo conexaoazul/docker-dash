@@ -273,6 +273,35 @@ const TEMPLATES = [
     description: 'Self-hosted OCI image registry. Single container + htpasswd auth. Compatible with docker push/pull and the Docker Dash push-to-registry action.',
     compose: `services:\n  registry:\n    image: registry:3\n    container_name: docker-registry\n    restart: unless-stopped\n    ports:\n      - "5000:5000"\n    environment:\n      REGISTRY_AUTH: htpasswd\n      REGISTRY_AUTH_HTPASSWD_REALM: "Docker Dash Registry"\n      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd\n      REGISTRY_STORAGE_DELETE_ENABLED: "true"\n    volumes:\n      - registry-data:/var/lib/registry\n      - ./auth:/auth:ro\nvolumes:\n  registry-data:`,
   },
+  {
+    // v8.1.0 — Private Registry + Cache (3 containers). Solves Docker Hub
+    // rate-limits + offline operation after first cache. Uses Distribution's
+    // proxy mode (one upstream per container, hard constraint of registry:3),
+    // with Caddy doing path-prefix routing for the virtual aggregator URL.
+    //
+    // After deploy:
+    //   1. Generate htpasswd:
+    //      docker run --rm --entrypoint htpasswd httpd:2 -Bbn youruser yourpass > ./auth/htpasswd
+    //   2. Recreate the 3 registry containers to pick up auth.
+    //   3. In Docker Dash: Settings → Registries → New, URL = http://<host>:5000
+    //   4. Browse → Repositories tab → register 3 repos:
+    //        local           type=local
+    //        dockerhub       type=remote, upstream=https://registry-1.docker.io
+    //        ghcr            type=remote, upstream=https://ghcr.io
+    //   5. Pull via the virtual URLs:
+    //        docker pull <host>:5000/dockerhub/library/nginx:alpine
+    //        docker pull <host>:5000/ghcr/some-org/some-image:tag
+    //        docker pull <host>:5000/myteam/myapp:v1     ← falls through to local
+    id: 'private-registry-with-cache', name: 'Private Registry + Cache (3 containers)', category: 'DevOps', icon: 'fas fa-warehouse',
+    description: 'Self-hosted Distribution registry + caching proxies for Docker Hub and GHCR + Caddy virtual-repo router. Solves Docker Hub rate-limits and offline operation. 4 containers total. After deploy: generate htpasswd then register 3 repos in Docker Dash.',
+    compose: `services:\n  registry-local:\n    image: registry:3\n    container_name: docker-registry-local\n    restart: unless-stopped\n    environment:\n      REGISTRY_AUTH: htpasswd\n      REGISTRY_AUTH_HTPASSWD_REALM: "Docker Dash Registry — local"\n      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd\n      REGISTRY_STORAGE_DELETE_ENABLED: "true"\n    volumes:\n      - registry-local-data:/var/lib/registry\n      - ./auth:/auth:ro\n\n  registry-proxy-dockerhub:\n    image: registry:3\n    container_name: docker-registry-proxy-dockerhub\n    restart: unless-stopped\n    environment:\n      REGISTRY_PROXY_REMOTEURL: https://registry-1.docker.io\n      REGISTRY_AUTH: htpasswd\n      REGISTRY_AUTH_HTPASSWD_REALM: "Docker Dash Registry — Docker Hub proxy"\n      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd\n    volumes:\n      - registry-proxy-dockerhub-data:/var/lib/registry\n      - ./auth:/auth:ro\n\n  registry-proxy-ghcr:\n    image: registry:3\n    container_name: docker-registry-proxy-ghcr\n    restart: unless-stopped\n    environment:\n      REGISTRY_PROXY_REMOTEURL: https://ghcr.io\n      REGISTRY_AUTH: htpasswd\n      REGISTRY_AUTH_HTPASSWD_REALM: "Docker Dash Registry — GHCR proxy"\n      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd\n    volumes:\n      - registry-proxy-ghcr-data:/var/lib/registry\n      - ./auth:/auth:ro\n\n  registry-router:\n    image: caddy:2-alpine\n    container_name: docker-registry-router\n    restart: unless-stopped\n    ports:\n      - "5000:5000"\n    volumes:\n      - ./registry-virtual.Caddyfile:/etc/caddy/Caddyfile:ro\n      - registry-router-data:/data\n    depends_on:\n      - registry-local\n      - registry-proxy-dockerhub\n      - registry-proxy-ghcr\n\nvolumes:\n  registry-local-data:\n  registry-proxy-dockerhub-data:\n  registry-proxy-ghcr-data:\n  registry-router-data:`,
+    extraFiles: [
+      {
+        filename: 'registry-virtual.Caddyfile',
+        content: `:5000 {\n  handle / {\n    respond "Docker Registry Router (Docker Dash v8.1.0)" 200\n  }\n  handle /v2/dockerhub/* {\n    uri strip_prefix /dockerhub\n    reverse_proxy registry-proxy-dockerhub:5000\n  }\n  handle /v2/ghcr/* {\n    uri strip_prefix /ghcr\n    reverse_proxy registry-proxy-ghcr:5000\n  }\n  handle /v2/* {\n    reverse_proxy registry-local:5000\n  }\n}\n`,
+      },
+    ],
+  },
 
   // ─── v8.0.1 — AI Workload Pack ─────────────────────────────────────
   // Curated compose snippets for self-hosted AI. All ship with `:latest` tags

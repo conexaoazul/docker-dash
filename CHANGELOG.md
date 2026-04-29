@@ -2,6 +2,122 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [8.1.0] - 2026-04-29 — Registry Hygiene Pack (provenance + retention + remote/virtual)
+
+Three orthogonal-but-thematic features that close the most operationally-painful gaps versus JFrog's universal artifact repo, without taking on Harbor's or JFrog's complexity. Ships as one coherent release per the deep-spec ([`plans/deep-spec-registry-hygiene-pack.md`](plans/deep-spec-registry-hygiene-pack.md)).
+
+### One sentence to defend
+
+> **Registry hygiene that operators actually use — provenance you can read, retention you can preview, upstream caching that survives Docker Hub rate limits — without taking on Harbor's or JFrog's operational burden.**
+
+### Added — Build Provenance Panel (read-only)
+
+New collapsible **Provenance** panel inside the manifest-inspect modal on the Registry Browser page. Pure read-side parser ([`src/services/registry-provenance.js`](src/services/registry-provenance.js)) reads OCI annotations + cosign signature presence from the manifest the existing endpoint already fetches. Zero new state, zero new endpoints.
+
+Surfaces:
+- **Source** (`org.opencontainers.image.source`) — clickable link if host is `github.com / gitlab.com / bitbucket.org / codeberg.org / gitea.com`; plain text otherwise
+- **Commit** (truncated SHA + tooltip with full one) + **Created** timestamp
+- **Authors**, **License** (SPDX), **Vendor**, **Version**, **URL**, **Documentation**, **Base image**
+- **Signed** badge if `dev.sigstore.cosign.*` annotations or `signatures[]` array present (presence detection only — cryptographic verification deferred to v8.2.0)
+- "Show all annotations" expander with full JSON for power users
+
+Empty state when manifest has no annotations: friendly hint linking to the Docker docs on enabling buildx provenance.
+
+### Added — Retention Policies with Dry-Run
+
+Per-repository cleanup rules with **5 layers of safety** (deep-spec D2, D6):
+
+1. **Default disabled** — every saved policy is dry-run only until operator explicitly enables
+2. **Hard floor** — `minTagsToKeep` cannot go below 1 (default 3)
+3. **Default protected patterns** — `latest`, `v*`, `main`, `master`, `prod-*`, `stable` always survive unless rule explicitly overrides
+4. **Server hard cap** — 200 deletions per single run, regardless of rule (prevents misconfigured "delete all but X" from nuking a 5000-tag repo in one tick)
+5. **Audit trail** — each deletion writes its own `registry_tag_delete` entry (tamper-evident hash chain) plus an umbrella `retention_executed` summary per run
+
+UX (admin only): Browse page → repo → "Repository settings" expander → Retention policy editor.
+- 4 rule templates: Keep Last 10 / Delete Untagged > 30d / Aggressive (5 + 7d) / Reset
+- JSON editor for custom rules
+- **Preview button** runs dry-run and shows table: would-delete vs would-keep with reason chips per row, total bytes reclaimed
+- **Save (dry-run)** vs **Enable** — separate two-step gate
+- Last-run state surfaced inline (deleted count, errors, capped indicator, timestamp)
+
+Cron: daily at 03:17 (off-:00), leader-only via the existing `_m()` wrapper. Iterates all enabled policies, evaluates + executes each, persists run summary.
+
+Backend: pure-function evaluator at [`src/services/retention.js`](src/services/retention.js) (no I/O, trivially testable). 7 new endpoints under `/api/registries/:id/repos/:repoPath/retention`. New audit actions: `retention_policy_create`, `retention_policy_update`, `retention_policy_delete`, `retention_dry_run`, `retention_executed`.
+
+### Added — Remote/Virtual Repository Support
+
+JFrog-style repo taxonomy adapted to Distribution's **one-upstream-per-instance** constraint:
+
+| Type | What it does | Implementation |
+|------|--------------|----------------|
+| **local** | Push target. You push, others pull. | The existing v7.5.0 template, untouched. |
+| **remote** | Caching proxy of an upstream registry. | One `registry:3` container per remote upstream, with `REGISTRY_PROXY_REMOTEURL` set. |
+| **virtual** | Aggregator URL. Path-prefix routes to local + remotes. | Caddy reverse-proxy with strip_prefix routing. |
+
+**New template "Private Registry + Cache (3 containers)"** — sibling of the v7.5.0 single-container template (which stays untouched). Ships:
+- 1 local registry (`registry-local`) — push target
+- 2 remote proxies (`registry-proxy-dockerhub` → `https://registry-1.docker.io`, `registry-proxy-ghcr` → `https://ghcr.io`)
+- 1 Caddy router (`registry-router` on `:5000`) — virtual routing
+- A `registry-virtual.Caddyfile` shipped via the new `extraFiles` template field
+
+After deploy: pull `<host>:5000/dockerhub/library/nginx:alpine` (proxied + cached), `<host>:5000/ghcr/foo/bar:tag` (same), or `<host>:5000/myteam/myapp:v1` (catch-all → local). Solves Docker Hub rate-limit pain + offline operation after first cache.
+
+**Browse UI** gets a "Repository settings" expander with type editor (radio: local / remote / virtual) + upstream URL field (when remote) + encrypted upstream credential storage. Type pill renders next to repo name.
+
+Backend: 4 new endpoints under `/api/registries/:id/repos`. Per-credential encryption of upstream passwords reuses the AES-GCM helper. New audit actions: `registry_repo_create`, `registry_repo_update`, `registry_repo_delete`.
+
+### Database
+
+New migration `063_registry_repos_and_retention.js` — single migration creating both `registry_repos` (local/remote/virtual + upstream metadata) and `retention_policies` (rule JSON + enabled + schedule). ON DELETE CASCADE keeps the schema consistent if a registry credential is removed.
+
+### Tests
+
+| Suite | Tests | Coverage |
+|-------|------:|----------|
+| `registry-provenance.test.js` | 15 | Empty inputs, defensive array handling, all 12 known OCI keys, source linkification (5 hosts + non-linkable + malformed URL), revision truncation, cosign detection (3 variants), signer extraction |
+| `retention.test.js` | 27 | All 4 rule clauses, default protect patterns, min-floor enforcement, 200-cap, sort order, missing pushedAt, summary shape, dry-run vs real execute, partial-failure handling, untagged manifest skip |
+| `registry-repos.test.js` | 16 | List, upsert (insert + ON CONFLICT update), encryption round-trip, cascade delete, virtual member resolution, retention policy CRUD |
+
+**Suite: 1024 → 1082 passing / 67 suites.** Lint clean for v8.1.0 (3 pre-existing warnings from v8.0.0 still tracked separately).
+
+### Deep-spec D1-D6 — pre-committed decisions (now shipped)
+
+- **D1** — Auto-seed catch-all `local *` repo entry on first read of any registry credential (so existing UX works without configuration). ✅
+- **D2** — Hard floor "keep last 3" enforced regardless of rule. ✅
+- **D3** — Provenance panel renders inline in the manifest modal (not a separate tab). ✅
+- **D4** — Default 3-container template = local + Docker Hub + GHCR. ✅
+- **D5** — Caddy as the virtual-repo router. ✅
+- **D6** — Server-side cap of 200 deletions per retention run, regardless of rule. ✅
+
+### Anti-features explicitly NOT shipped (deep-spec §10)
+
+- Federation / multi-region replication
+- JFrog Distribution-style release bundles + edge nodes
+- Pre-ingest curation gating
+- AppTrust evidence graph
+- Multi-format repos (Maven/npm/PyPI)
+- Promotion workflows (deferred to v8.2.0+)
+- Cosign cryptographic verification (deferred to v8.2.0+)
+- Auto-trigger of `registry garbage-collect`
+
+If a future request feels like one of those, it'll get a polite no with this CHANGELOG line as the receipt.
+
+### Files touched
+
+- `src/db/migrations/063_registry_repos_and_retention.js` (new)
+- `src/services/registry-provenance.js` (new) — pure parser
+- `src/services/retention.js` (new) — pure evaluator + executor
+- `src/services/retention-cron.js` (new) — daily sweep
+- `src/services/registry.js` — 7 new helpers (listRepos, upsertRepo, deleteRepo, resolveVirtual, getRetentionPolicy, upsertRetentionPolicy, deleteRetentionPolicy)
+- `src/routes/registries.js` — provenance in manifest endpoint + 11 new endpoints (4 repo CRUD + 5 retention CRUD/preview/run)
+- `src/routes/templates.js` — new "Private Registry + Cache (3 containers)" template + Caddyfile in `extraFiles`
+- `src/jobs/index.js` — daily retention-sweep cron
+- `src/services/ai/features/audit-actions-list.js` — 8 new audit action names added to canonical enum
+- `public/js/pages/registry-browse.js` — Provenance panel + Repository settings expander (type editor + retention editor + dry-run preview UI)
+- `src/__tests__/registry-provenance.test.js` (new, 15 tests)
+- `src/__tests__/retention.test.js` (new, 27 tests)
+- `src/__tests__/registry-repos.test.js` (new, 16 tests)
+
 ## [8.0.1] - 2026-04-27 — AI Workload Pack + UX polish
 
 Three orthogonal additions while v8.0.0 bakes. Zero new AI infrastructure (deep-spec gate respected). Pure value adds for self-hosters.

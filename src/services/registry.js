@@ -264,6 +264,119 @@ class RegistryService {
     }
   }
 
+  // ─── v8.1.0 — Registry repos (typing) + retention policies ──────────
+
+  /**
+   * List all registry_repos rows for a given registry credential, ordered
+   * by repo_path. Excludes encrypted upstream password.
+   */
+  listRepos(registryId) {
+    const rows = getDb().prepare(`
+      SELECT id, registry_id AS registryId, repo_path AS repoPath, type,
+             upstream_url AS upstreamUrl, upstream_username AS upstreamUsername,
+             virtual_member_ids AS virtualMemberIdsJson,
+             created_at, updated_at
+        FROM registry_repos
+       WHERE registry_id = ?
+       ORDER BY repo_path
+    `).all(registryId);
+    return rows.map(r => ({
+      ...r,
+      virtualMemberIds: r.virtualMemberIdsJson ? JSON.parse(r.virtualMemberIdsJson) : null,
+      virtualMemberIdsJson: undefined,
+    }));
+  }
+
+  /**
+   * Insert or update a registry_repos row by (registryId, repoPath).
+   * Encrypts upstreamPassword if provided.
+   * Returns the row's id.
+   */
+  upsertRepo({ registryId, repoPath, type, upstreamUrl, upstreamUsername, upstreamPassword, virtualMemberIds }, userId) {
+    const enc = upstreamPassword ? encrypt(upstreamPassword) : null;
+    const memberJson = Array.isArray(virtualMemberIds) ? JSON.stringify(virtualMemberIds) : null;
+    const db = getDb();
+    const result = db.prepare(`
+      INSERT INTO registry_repos
+        (registry_id, repo_path, type, upstream_url, upstream_username,
+         upstream_password_encrypted, virtual_member_ids, created_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(registry_id, repo_path) DO UPDATE SET
+        type = excluded.type,
+        upstream_url = excluded.upstream_url,
+        upstream_username = excluded.upstream_username,
+        upstream_password_encrypted = COALESCE(excluded.upstream_password_encrypted, registry_repos.upstream_password_encrypted),
+        virtual_member_ids = excluded.virtual_member_ids,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(
+      registryId, repoPath, type,
+      upstreamUrl || null, upstreamUsername || null,
+      enc, memberJson, userId,
+    );
+    if (result.lastInsertRowid > 0) return result.lastInsertRowid;
+    // ON CONFLICT path — fetch the existing id
+    const row = db.prepare('SELECT id FROM registry_repos WHERE registry_id = ? AND repo_path = ?').get(registryId, repoPath);
+    return row.id;
+  }
+
+  deleteRepo(repoId) {
+    getDb().prepare('DELETE FROM registry_repos WHERE id = ?').run(repoId);
+  }
+
+  /**
+   * Resolve a virtual repo to its underlying member registry_repos rows.
+   */
+  resolveVirtual(repoId) {
+    const db = getDb();
+    const repo = db.prepare('SELECT * FROM registry_repos WHERE id = ?').get(repoId);
+    if (!repo || repo.type !== 'virtual') return null;
+    const memberIds = JSON.parse(repo.virtual_member_ids || '[]');
+    if (memberIds.length === 0) return [];
+    const placeholders = memberIds.map(() => '?').join(',');
+    return db.prepare(`SELECT * FROM registry_repos WHERE id IN (${placeholders})`).all(...memberIds);
+  }
+
+  // Retention policies
+
+  getRetentionPolicy(registryRepoId) {
+    const row = getDb().prepare(`
+      SELECT id, registry_repo_id AS registryRepoId, rule_json AS ruleJson,
+             enabled, schedule_cron AS scheduleCron,
+             last_run_at AS lastRunAt, last_run_summary AS lastRunSummaryJson,
+             created_at, updated_at
+        FROM retention_policies WHERE registry_repo_id = ?
+    `).get(registryRepoId);
+    if (!row) return null;
+    return {
+      ...row,
+      rule: JSON.parse(row.ruleJson),
+      enabled: row.enabled === 1,
+      lastRunSummary: row.lastRunSummaryJson ? JSON.parse(row.lastRunSummaryJson) : null,
+      ruleJson: undefined,
+      lastRunSummaryJson: undefined,
+    };
+  }
+
+  upsertRetentionPolicy({ registryRepoId, rule, enabled, scheduleCron }, userId) {
+    getDb().prepare(`
+      INSERT INTO retention_policies
+        (registry_repo_id, rule_json, enabled, schedule_cron, created_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(registry_repo_id) DO UPDATE SET
+        rule_json = excluded.rule_json,
+        enabled = excluded.enabled,
+        schedule_cron = COALESCE(excluded.schedule_cron, retention_policies.schedule_cron),
+        updated_at = CURRENT_TIMESTAMP
+    `).run(
+      registryRepoId, JSON.stringify(rule),
+      enabled ? 1 : 0, scheduleCron || '17 3 * * *', userId,
+    );
+  }
+
+  deleteRetentionPolicy(registryRepoId) {
+    getDb().prepare('DELETE FROM retention_policies WHERE registry_repo_id = ?').run(registryRepoId);
+  }
+
   /**
    * One-time migration: re-encrypt any legacy XOR/base64 passwords with AES-GCM.
    * Safe to call on startup — skips rows already in AES-GCM format.

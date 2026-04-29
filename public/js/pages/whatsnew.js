@@ -10,6 +10,19 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '8.1.0',
+      date: '2026-04-29',
+      title: 'Registry Hygiene Pack — provenance + retention + remote/virtual',
+      changes: [
+        { type: 'feature', text: 'Build Provenance panel on the Registry Browser. New collapsible section inside the manifest-inspect modal reads OCI annotations + cosign signature presence: source (linkified for github/gitlab/bitbucket/codeberg/gitea), commit (truncated SHA + tooltip), authors, license, vendor, version, base image, signed badge. Pure read-side, zero new state. "Show all annotations" expander for power users.' },
+        { type: 'feature', text: 'Retention Policies with dry-run. Per-repo cleanup rules with FIVE safety layers: (1) default disabled (dry-run only), (2) hard floor min-3-tags, (3) default protected patterns latest/v*/main/master/prod-*/stable, (4) server cap of 200 deletions per run, (5) tamper-evident audit per delete. UI: 4 rule templates + JSON editor + preview button (shows would-delete vs would-keep with reason chips). Daily cron at 03:17, leader-only.' },
+        { type: 'feature', text: 'Remote/virtual repository support — JFrog-style local/remote/virtual taxonomy adapted to Distribution\'s one-upstream-per-instance constraint. New "Private Registry + Cache (3 containers)" template ships local registry + Docker Hub proxy + GHCR proxy + Caddy router. Solves Docker Hub rate-limits + offline operation. Repository settings expander on the Browse page with type editor (radio + upstream URL/creds for remote type).' },
+        { type: 'feature', text: 'New endpoints: 4 for repo CRUD (/api/registries/:id/repos*), 5 for retention (/api/registries/:id/repos/:repoPath/retention/*). Migration 063 creates registry_repos + retention_policies tables. 8 new audit action types added to canonical enum.' },
+        { type: 'improvement', text: '58 new tests (15 provenance + 27 retention + 16 registry-repos) all passing. Suite: 1024 → 1082 / 67 suites. Lint clean. Tests run in parallel via 3 dispatched agents — strategy-first deep-spec + 3 feature-specs done up-front.' },
+        { type: 'improvement', text: 'Registry feature tier now matches what 90% of self-hosted operators need vs JFrog\'s enterprise pricing ($27k+/year self-hosted). Anti-features explicitly NOT shipped: federation, JFrog Distribution release bundles, pre-ingest curation, AppTrust evidence graph, multi-format repos (Maven/npm/PyPI), promotion workflows (deferred to v8.2.0), cosign cryptographic verification (v8.2.0).' },
+      ],
+    },
+    {
       version: '8.0.1',
       date: '2026-04-27',
       title: 'AI Workload Pack + UX polish',

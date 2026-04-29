@@ -446,6 +446,15 @@ function startAll() {
     catch (e) { log.error('Git polling stop failed', e.message); }
   });
 
+  // v8.1.0 — Retention sweep (registry hygiene). Daily at 03:17 (off-:00).
+  // Leader-only via _m() default. Iterates all enabled retention policies,
+  // evaluates each rule against current registry state, executes deletes
+  // via existing v7.6.0 deleteTag() path. Each per-tag delete writes its
+  // own audit_log entry; an umbrella retention_executed entry summarizes.
+  jobs.push(cron.schedule('17 3 * * *', _m('retention-sweep', () => {
+    return require('../services/retention-cron').runAllPolicies();
+  })));
+
   // v7.4.0 — Sample feature cron tick (CONTRIBUTOR DEMO). Auto-increments
   // the demo counter every minute so contributors see the cron pattern fire
   // without external triggers. Leader-only via _m() default; skipped entirely

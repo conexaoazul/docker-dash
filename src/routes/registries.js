@@ -113,7 +113,9 @@ router.get('/:id/manifest/*ref', requireAuth, asyncHandler(async (req, res) => {
     ref = raw.substring(lastColon + 1);
   }
   const data = await registryService.manifest(parseInt(req.params.id), repo, ref);
-  res.json(data);
+  // v8.1.0 — surface build provenance parsed from OCI annotations
+  const provenance = require('../services/registry-provenance').parse(data);
+  res.json({ ...data, provenance });
 }));
 
 // v7.5.0 — Push action. Tags + pushes a local image to the configured
@@ -235,6 +237,169 @@ router.post('/:id/pull', requireAuth, requireRole('admin', 'operator'), writeabl
   });
 
   res.json({ ok: true, image: fullImage });
+}));
+
+// ───────────────────────────────────────────────────────────────────────
+// v8.1.0 — Registry Hygiene Pack
+//
+// Adds three orthogonal feature surfaces:
+//   1. Repository typing (local / remote / virtual) — `/repos` endpoints
+//   2. Retention policies with dry-run — `/retention` endpoints
+//   3. Build provenance — already wired into the `/manifest` endpoint above
+//
+// All admin-gated for writes; reads inherit the existing audit-log requirement.
+// ───────────────────────────────────────────────────────────────────────
+
+// List configured repository entries for a registry credential.
+// Auto-creates a default 'local *' row on first read so existing UX
+// (Browse, Push) just works for v7.5.0 operators upgrading to v8.1.0.
+router.get('/:id/repos', requireAuth, asyncHandler(async (req, res) => {
+  const registryId = parseInt(req.params.id);
+  const repos = registryService.listRepos(registryId);
+  if (repos.length === 0) {
+    // Auto-seed default local catch-all (deep-spec D1)
+    registryService.upsertRepo({
+      registryId, repoPath: '*', type: 'local',
+    }, req.user.id);
+    res.json(registryService.listRepos(registryId));
+    return;
+  }
+  res.json(repos);
+}));
+
+// Create or update a repository entry. Validates type + required fields per type.
+router.post('/:id/repos', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+  const registryId = parseInt(req.params.id);
+  const { repoPath, type, upstreamUrl, upstreamUsername, upstreamPassword, virtualMemberIds } = req.body || {};
+  if (!repoPath || !type) return res.status(400).json({ error: 'repoPath and type are required' });
+  if (!['local', 'remote', 'virtual'].includes(type)) return res.status(400).json({ error: 'type must be local, remote, or virtual' });
+  if (type === 'remote' && !upstreamUrl) return res.status(400).json({ error: 'upstreamUrl is required for remote type' });
+  if (type === 'virtual' && (!Array.isArray(virtualMemberIds) || virtualMemberIds.length === 0)) {
+    return res.status(400).json({ error: 'virtualMemberIds (non-empty array) is required for virtual type' });
+  }
+  const id = registryService.upsertRepo({
+    registryId, repoPath, type, upstreamUrl, upstreamUsername, upstreamPassword, virtualMemberIds,
+  }, req.user.id);
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'registry_repo_create', targetType: 'registry-repo',
+    targetId: `${registryId}/${repoPath}`,
+    details: { type, upstreamUrl: upstreamUrl ? new URL(upstreamUrl).host : null },
+    ip: getClientIp(req),
+  });
+  res.status(201).json({ id, registryId, repoPath, type });
+}));
+
+router.delete('/:id/repos/:repoId', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+  const repoId = parseInt(req.params.repoId);
+  const before = registryService.listRepos(parseInt(req.params.id)).find(r => r.id === repoId);
+  if (!before) return res.status(404).json({ error: 'Repository entry not found' });
+  registryService.deleteRepo(repoId);
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'registry_repo_delete', targetType: 'registry-repo',
+    targetId: `${req.params.id}/${before.repoPath}`,
+    details: { type: before.type },
+    ip: getClientIp(req),
+  });
+  res.json({ ok: true });
+}));
+
+// ─── Retention Policies ────────────────────────────────────────────────
+
+// Helper: resolve registry_repos.id from registryId + repoPath, auto-creating
+// the row if it doesn't exist yet (so retention works even when operator
+// hasn't manually classified the repo as local).
+function _resolveRepoId(registryId, repoPath, userId) {
+  const existing = registryService.listRepos(registryId).find(r => r.repoPath === repoPath);
+  if (existing) return existing.id;
+  return registryService.upsertRepo({
+    registryId, repoPath, type: 'local',
+  }, userId);
+}
+
+// Read a policy (or null if none).
+router.get('/:id/repos/:repoPath(*)/retention', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+  const registryId = parseInt(req.params.id);
+  const repoPath = req.params.repoPath;
+  const repoId = _resolveRepoId(registryId, repoPath, req.user.id);
+  const policy = registryService.getRetentionPolicy(repoId);
+  res.json(policy || { repoId, exists: false });
+}));
+
+// Save a policy (create or update). Defaults to enabled=0 (dry-run only).
+router.put('/:id/repos/:repoPath(*)/retention', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+  const { rule, enabled, scheduleCron } = req.body || {};
+  if (!rule || typeof rule !== 'object') return res.status(400).json({ error: 'rule (object) is required' });
+  const registryId = parseInt(req.params.id);
+  const repoPath = req.params.repoPath;
+  const repoId = _resolveRepoId(registryId, repoPath, req.user.id);
+  const existed = !!registryService.getRetentionPolicy(repoId);
+  registryService.upsertRetentionPolicy({
+    registryRepoId: repoId, rule, enabled: enabled === true, scheduleCron,
+  }, req.user.id);
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: existed ? 'retention_policy_update' : 'retention_policy_create',
+    targetType: 'registry-repo', targetId: `${registryId}/${repoPath}`,
+    details: { rule, enabled: enabled === true },
+    ip: getClientIp(req),
+  });
+  res.json({ ok: true });
+}));
+
+router.delete('/:id/repos/:repoPath(*)/retention', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+  const registryId = parseInt(req.params.id);
+  const repoPath = req.params.repoPath;
+  const repoId = _resolveRepoId(registryId, repoPath, req.user.id);
+  registryService.deleteRetentionPolicy(repoId);
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'retention_policy_delete', targetType: 'registry-repo',
+    targetId: `${registryId}/${repoPath}`,
+    ip: getClientIp(req),
+  });
+  res.json({ ok: true });
+}));
+
+// Preview (dry-run) — fetches tags + manifests, evaluates rule, returns plan.
+router.post('/:id/repos/:repoPath(*)/retention/preview', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+  const { rule } = req.body || {};
+  if (!rule || typeof rule !== 'object') return res.status(400).json({ error: 'rule (object) is required' });
+  const registryId = parseInt(req.params.id);
+  const repoPath = req.params.repoPath;
+  const retentionCron = require('../services/retention-cron');
+  const retention = require('../services/retention');
+  const tags = await retentionCron._internals._gatherTagsWithMetadata(registryId, repoPath);
+  const plan = retention.evaluate({ tags, rule });
+  auditService.log({
+    userId: req.user.id, username: req.user.username,
+    action: 'retention_dry_run', targetType: 'registry-repo',
+    targetId: `${registryId}/${repoPath}`,
+    details: {
+      candidateTags: tags.length, wouldDelete: plan.toDelete.length,
+      bytes: plan.summary.bytes, cappedAt: plan.summary.cappedAt,
+    },
+    ip: getClientIp(req),
+  });
+  res.json(plan);
+}));
+
+// Run now (manual trigger of an enabled or disabled policy — admin override).
+router.post('/:id/repos/:repoPath(*)/retention/run', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+  const { rule, dryRun } = req.body || {};
+  if (!rule || typeof rule !== 'object') return res.status(400).json({ error: 'rule (object) is required' });
+  const registryId = parseInt(req.params.id);
+  const repoPath = req.params.repoPath;
+  const retentionCron = require('../services/retention-cron');
+  const retention = require('../services/retention');
+  const tags = await retentionCron._internals._gatherTagsWithMetadata(registryId, repoPath);
+  const plan = retention.evaluate({ tags, rule });
+  const result = await retention.execute({
+    registryService, registryId, repoPath, plan, dryRun: dryRun !== false,
+    auditCtx: { userId: req.user.id, username: req.user.username, ip: getClientIp(req) },
+  });
+  res.json({ plan: plan.summary, result });
 }));
 
 module.exports = router;
