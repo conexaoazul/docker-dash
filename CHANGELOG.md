@@ -2,6 +2,22 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [8.1.2] - 2026-04-29 — Files tab: preview-mode selector
+
+### Added
+
+- **Per-operator preview-mode selector** on the container detail page → Files tab. Four radio options between the "File Browser" title and the "Upload" button: **Off** (default — single-click does nothing, only the per-row download button works), **Bottom** (single-click → preview panel below — the original behavior), **Right** (single-click → preview panel to the right of the file list, split layout), **Modal** (single-click does nothing, **double-click** opens a modal with the content).
+- Choice persists in `localStorage` as `dd_files_preview_mode` so it sticks across container detail visits.
+- Default is **Off** — least surprising. No accidental network fetch when an operator is just clicking around.
+
+### Why
+
+Previous behavior was hard-coded "single-click any file → preview below". Operators who don't need previews paid for an HTTP fetch on every click. Operators who wanted side-by-side or modal views had no option.
+
+### Files touched
+
+- `public/js/pages/container-detail.js` — `_renderFilesTab` extended (~50 LOC), `_applyFilesLayout` helper (~30 LOC), `_renderFilePreviewInline` + `_renderFilePreviewModal` extracted from the inline click handler (~40 LOC). Click handler reduced — single + dblclick listeners with mode dispatch.
+
 ## [8.1.1] - 2026-04-29 — Bug fix: edit-meta button on Containers list
 
 ### Fixed

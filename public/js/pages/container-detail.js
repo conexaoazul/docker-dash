@@ -2259,25 +2259,61 @@ const ContainersPageDetail = {
   },
   async _renderFilesTab(el) {
     this._filesPath = '/';
+
+    // v8.1.2 — preview-mode selector. Persisted in localStorage so the
+    // operator's choice sticks across container detail visits.
+    //   off    — single-click does nothing; only the per-row download button works
+    //   bottom — single-click → preview panel below (the original v6.x behavior)
+    //   right  — single-click → preview panel to the RIGHT (split layout)
+    //   modal  — single-click does nothing; DOUBLE-click → preview in a Modal
+    // Default: off (least surprising — no accidental network fetch on row click)
+    if (!this._filesPreviewMode) {
+      try { this._filesPreviewMode = localStorage.getItem('dd_files_preview_mode') || 'off'; }
+      catch { this._filesPreviewMode = 'off'; }
+    }
+    if (!['off', 'bottom', 'right', 'modal'].includes(this._filesPreviewMode)) {
+      this._filesPreviewMode = 'off';
+    }
+
+    const mode = this._filesPreviewMode;
     el.innerHTML = `
-      <div class="card">
-        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
-          <h3><i class="fas fa-folder-open" style="margin-right:8px"></i>File Browser</h3>
-          <button class="btn btn-sm btn-primary" id="file-upload-btn"><i class="fas fa-upload" style="margin-right:4px"></i>Upload</button>
+      <div id="files-layout">
+        <div class="card" id="files-card">
+          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+            <h3 style="margin:0"><i class="fas fa-folder-open" style="margin-right:8px"></i>File Browser</h3>
+            <div id="files-preview-mode-radios" style="display:inline-flex;align-items:center;gap:10px;font-size:11px;color:var(--text-dim)">
+              <span>Preview:</span>
+              ${[
+                { v: 'off',    label: 'Off' },
+                { v: 'bottom', label: 'Bottom' },
+                { v: 'right',  label: 'Right' },
+                { v: 'modal',  label: 'Modal (dbl-click)' },
+              ].map(o => `
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+                  <input type="radio" name="files-preview-mode" value="${o.v}" ${mode === o.v ? 'checked' : ''}>
+                  ${o.label}
+                </label>
+              `).join('')}
+            </div>
+            <button class="btn btn-sm btn-primary" id="file-upload-btn"><i class="fas fa-upload" style="margin-right:4px"></i>Upload</button>
+          </div>
+          <div class="card-body">
+            <div id="files-breadcrumb" class="files-breadcrumb" style="margin-bottom:12px"></div>
+            <div id="files-list"></div>
+          </div>
         </div>
-        <div class="card-body">
-          <div id="files-breadcrumb" class="files-breadcrumb" style="margin-bottom:12px"></div>
-          <div id="files-list"></div>
+        <div id="file-preview-panel" style="display:none" class="card">
+          <div class="card-header">
+            <h3 id="file-preview-name"><i class="fas fa-file" style="margin-right:8px"></i>File Preview</h3>
+            <button class="btn btn-sm btn-secondary" id="file-preview-close"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="card-body"><pre id="file-preview-content" class="inspect-json" style="max-height:500px;overflow:auto;white-space:pre-wrap;word-break:break-all"></pre></div>
         </div>
-      </div>
-      <div id="file-preview-panel" style="display:none" class="card mt-md">
-        <div class="card-header">
-          <h3 id="file-preview-name"><i class="fas fa-file" style="margin-right:8px"></i>File Preview</h3>
-          <button class="btn btn-sm btn-secondary" id="file-preview-close"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="card-body"><pre id="file-preview-content" class="inspect-json" style="max-height:500px;overflow:auto;white-space:pre-wrap;word-break:break-all"></pre></div>
       </div>
     `;
+
+    this._applyFilesLayout(el);
+
     el.querySelector('#file-preview-close')?.addEventListener('click', () => {
       el.querySelector('#file-preview-panel').style.display = 'none';
     });
@@ -2287,7 +2323,52 @@ const ContainersPageDetail = {
       this._showUploadModal(el);
     });
 
+    // Preview-mode radio change → persist + reflow layout
+    el.querySelectorAll('input[name="files-preview-mode"]').forEach(r => {
+      r.addEventListener('change', () => {
+        if (!r.checked) return;
+        this._filesPreviewMode = r.value;
+        try { localStorage.setItem('dd_files_preview_mode', r.value); } catch { /* localStorage may be blocked */ }
+        this._applyFilesLayout(el);
+      });
+    });
+
     await this._loadFiles(el);
+  },
+
+  // v8.1.2 — Switch the files tab between bottom/right/modal/off layouts.
+  // Pure DOM-shuffling; the click handler in _loadFiles checks the same flag
+  // when deciding what to do on row clicks.
+  _applyFilesLayout(el) {
+    const layout = el.querySelector('#files-layout');
+    const panel  = el.querySelector('#file-preview-panel');
+    const card   = el.querySelector('#files-card');
+    const mode   = this._filesPreviewMode;
+    if (!layout || !panel || !card) return;
+
+    // Reset wrapper + panel inline styles
+    layout.style.cssText = '';
+    card.style.cssText = '';
+    panel.classList.remove('mt-md');
+    panel.style.removeProperty('flex');
+    panel.style.removeProperty('min-width');
+    panel.style.removeProperty('margin-top');
+    panel.style.removeProperty('margin-left');
+
+    if (mode === 'right') {
+      // Side-by-side. File list takes the larger share by default.
+      layout.style.cssText = 'display:flex;gap:14px;align-items:flex-start';
+      card.style.cssText   = 'flex:1 1 0;min-width:0';
+      panel.style.flex     = '1 1 0';
+      panel.style.minWidth = '0';
+      // Preview shows up only after a file click
+    } else if (mode === 'bottom') {
+      // Stacked: file list, then preview below
+      panel.classList.add('mt-md');
+    } else {
+      // off / modal — hide panel entirely
+      panel.style.display = 'none';
+    }
   },
 
   _showUploadModal(filesEl) {
@@ -2434,32 +2515,74 @@ const ContainersPageDetail = {
       });
 
       listEl.querySelectorAll('.file-entry').forEach(row => {
+        // Single-click: directory always navigates; file behavior depends on preview mode
         row.addEventListener('click', async () => {
           const path = row.dataset.path;
           const type = row.dataset.type;
           if (type === 'directory' || row.classList.contains('file-dir')) {
             this._filesPath = path;
             this._loadFiles(el);
-          } else {
-            // Preview file
-            try {
-              const panel = el.querySelector('#file-preview-panel');
-              const nameEl = el.querySelector('#file-preview-name');
-              const contentEl = el.querySelector('#file-preview-content');
-              nameEl.innerHTML = `<i class="fas fa-file" style="margin-right:8px"></i>${Utils.escapeHtml(path)}`;
-              contentEl.textContent = 'Loading...';
-              panel.style.display = '';
-              const data = await Api.getFileContent(this._detailId, path);
-              contentEl.textContent = data.content || '(empty)';
-              if (data.truncated) contentEl.textContent += '\n\n--- Truncated (file too large) ---';
-            } catch (err) {
-              el.querySelector('#file-preview-content').textContent = 'Error: ' + err.message;
-            }
+            return;
           }
+          // File row — respect the preview-mode selector (v8.1.2)
+          const mode = this._filesPreviewMode || 'off';
+          if (mode === 'off' || mode === 'modal') return;
+          // bottom / right: load preview into the inline panel
+          await this._renderFilePreviewInline(el, path);
+        });
+        // Double-click: only meaningful in modal mode
+        row.addEventListener('dblclick', async (ev) => {
+          if (this._filesPreviewMode !== 'modal') return;
+          const path = row.dataset.path;
+          const type = row.dataset.type;
+          if (type === 'directory' || row.classList.contains('file-dir')) return;
+          ev.preventDefault();
+          await this._renderFilePreviewModal(path);
         });
       });
     } catch (err) {
       listEl.innerHTML = `<div class="text-muted">Error: ${Utils.escapeHtml(err.message)}</div>`;
+    }
+  },
+
+  // v8.1.2 — render the file preview into the inline panel (bottom or right mode).
+  async _renderFilePreviewInline(el, path) {
+    const panel    = el.querySelector('#file-preview-panel');
+    const nameEl   = el.querySelector('#file-preview-name');
+    const contentEl = el.querySelector('#file-preview-content');
+    if (!panel || !nameEl || !contentEl) return;
+    nameEl.innerHTML = `<i class="fas fa-file" style="margin-right:8px"></i>${Utils.escapeHtml(path)}`;
+    contentEl.textContent = 'Loading...';
+    panel.style.display = '';
+    try {
+      const data = await Api.getFileContent(this._detailId, path);
+      contentEl.textContent = data.content || '(empty)';
+      if (data.truncated) contentEl.textContent += '\n\n--- Truncated (file too large) ---';
+    } catch (err) {
+      contentEl.textContent = 'Error: ' + err.message;
+    }
+  },
+
+  // v8.1.2 — render the file preview into a modal (modal mode, on dblclick).
+  async _renderFilePreviewModal(path) {
+    Modal.open(`
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px">
+        <h3 style="margin:0;display:flex;align-items:center;gap:8px;min-width:0">
+          <i class="fas fa-file"></i>
+          <code style="font-family:'JetBrains Mono',monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left" title="${Utils.escapeHtml(path)}">${Utils.escapeHtml(path)}</code>
+        </h3>
+        <button class="btn btn-sm btn-secondary" id="file-preview-modal-close" style="flex:0 0 auto"><i class="fas fa-times"></i></button>
+      </div>
+      <pre id="file-preview-modal-content" class="inspect-json" style="max-height:60vh;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:0">Loading...</pre>
+    `, { width: '900px' });
+    Modal._content.querySelector('#file-preview-modal-close').addEventListener('click', () => Modal.close());
+    try {
+      const data = await Api.getFileContent(this._detailId, path);
+      const contentEl = Modal._content.querySelector('#file-preview-modal-content');
+      contentEl.textContent = data.content || '(empty)';
+      if (data.truncated) contentEl.textContent += '\n\n--- Truncated (file too large) ---';
+    } catch (err) {
+      Modal._content.querySelector('#file-preview-modal-content').textContent = 'Error: ' + err.message;
     }
   },
 
