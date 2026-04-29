@@ -319,7 +319,7 @@ function _resolveRepoId(registryId, repoPath, userId) {
 }
 
 // Read a policy (or null if none).
-router.get('/:id/repos/:repoPath(*)/retention', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+router.get('/:id/repos/:repoPath/retention', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
   const registryId = parseInt(req.params.id);
   const repoPath = req.params.repoPath;
   const repoId = _resolveRepoId(registryId, repoPath, req.user.id);
@@ -328,7 +328,7 @@ router.get('/:id/repos/:repoPath(*)/retention', requireAuth, requireRole('admin'
 }));
 
 // Save a policy (create or update). Defaults to enabled=0 (dry-run only).
-router.put('/:id/repos/:repoPath(*)/retention', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+router.put('/:id/repos/:repoPath/retention', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
   const { rule, enabled, scheduleCron } = req.body || {};
   if (!rule || typeof rule !== 'object') return res.status(400).json({ error: 'rule (object) is required' });
   const registryId = parseInt(req.params.id);
@@ -348,7 +348,7 @@ router.put('/:id/repos/:repoPath(*)/retention', requireAuth, requireRole('admin'
   res.json({ ok: true });
 }));
 
-router.delete('/:id/repos/:repoPath(*)/retention', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+router.delete('/:id/repos/:repoPath/retention', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
   const registryId = parseInt(req.params.id);
   const repoPath = req.params.repoPath;
   const repoId = _resolveRepoId(registryId, repoPath, req.user.id);
@@ -363,7 +363,7 @@ router.delete('/:id/repos/:repoPath(*)/retention', requireAuth, requireRole('adm
 }));
 
 // Preview (dry-run) — fetches tags + manifests, evaluates rule, returns plan.
-router.post('/:id/repos/:repoPath(*)/retention/preview', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+router.post('/:id/repos/:repoPath/retention/preview', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
   const { rule } = req.body || {};
   if (!rule || typeof rule !== 'object') return res.status(400).json({ error: 'rule (object) is required' });
   const registryId = parseInt(req.params.id);
@@ -386,7 +386,7 @@ router.post('/:id/repos/:repoPath(*)/retention/preview', requireAuth, requireRol
 }));
 
 // Run now (manual trigger of an enabled or disabled policy — admin override).
-router.post('/:id/repos/:repoPath(*)/retention/run', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
+router.post('/:id/repos/:repoPath/retention/run', requireAuth, requireRole('admin'), writeable, asyncHandler(async (req, res) => {
   const { rule, dryRun } = req.body || {};
   if (!rule || typeof rule !== 'object') return res.status(400).json({ error: 'rule (object) is required' });
   const registryId = parseInt(req.params.id);
