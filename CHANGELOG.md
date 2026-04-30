@@ -2,6 +2,24 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [8.1.3] - 2026-04-30 — Bug fix: garbage rows in Files tab on BusyBox containers
+
+### Fixed
+
+User-reported screenshot showed file rows with bizarre names (`2G)`, `and ..`, `binary.`, `instead of names`, `to names`) and garbled sizes (`0 B 243M`, `0 B */=@|)`) on a frontend container's Files tab.
+
+**Root cause:** the listing endpoint ran `ls -la --time-style=+ISO /path`. BusyBox `ls` (Alpine, distroless, scratch-based images) doesn't support `--time-style` — it responds with help/usage text on stderr. The exec stream demux concatenates stdout + stderr, so the parser ate the help text and produced one bogus "file" entry per help line.
+
+**Fix** ([`src/routes/containers.js:1707-1779`](src/routes/containers.js)) — three layers of defense:
+
+1. **Permissions regex gate** — every line must start with a valid `ls -l` permissions field (`/^[-dlbcps][-rwxstST]{9}[.+]?$/`) or it's discarded. Drops help text, error messages, blank lines, anything that isn't a real row.
+2. **Timestamp-shape detection** — if `parts[5]` is an ISO 8601 token (GNU `--time-style` worked), name starts at `parts[6]`; otherwise it's the Unix 3-token form (`MMM DD time-or-year`) and name starts at `parts[8]`. Filenames with spaces still join correctly.
+3. **Auto-fallback** without `--time-style` when the first parse returns zero entries — covers BusyBox where the flag itself bombed.
+
+### Verification
+
+The screenshot's specific failure mode (BusyBox-flavored container) is now caught by all three layers — primarily layer #3 (retry without flag) plus layer #1 (regex gate would have caught the help-text rows even on the first pass).
+
 ## [8.1.2] - 2026-04-29 — Files tab: preview-mode selector
 
 ### Added

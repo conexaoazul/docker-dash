@@ -1704,32 +1704,84 @@ function validateFilePath(p) {
   return true;
 }
 
+// v8.1.3 — robust file listing.
+//
+// Original code piped `ls -la --time-style=+ISO` and trusted every output
+// line to be a valid `ls -la` row. BusyBox-based images (Alpine, distroless)
+// don't support `--time-style` and respond with help text on stderr (which
+// our exec demux concatenates with stdout) — that help text was being
+// parsed into garbage rows like `2G)`, `and ..`, `instead of names`.
+//
+// Three layers of defense, in order:
+//   1. Permissions regex MUST match at start of line. Drops help text,
+//      error messages, anything that isn't a real ls row.
+//   2. Detect timestamp shape (ISO single-token vs Unix three-token) and
+//      pick the right slice() offset for the name.
+//   3. Fallback retry without --time-style when first attempt yields zero
+//      entries — covers BusyBox boxes where the flag itself bombed.
 router.get('/:id/files', requireAuth, asyncHandler(async (req, res) => {
   const filePath = req.query.path || '/';
-    if (!validateFilePath(filePath)) return res.status(400).json({ error: 'Invalid path' });
+  if (!validateFilePath(filePath)) return res.status(400).json({ error: 'Invalid path' });
 
-    const output = await dockerService.execCommand(
-      req.params.id,
-      ['ls', '-la', '--time-style=+%Y-%m-%dT%H:%M:%S', filePath],
-      req.hostId
-    );
-
-    const lines = output.split('\n').filter(l => l.trim() && !l.startsWith('total'));
+  const parseLs = (output) => {
+    const PERM_RE = /^[-dlbcps][-rwxstST]{9}[.+]?$/;     // valid first column from ls -l
+    const ISO_RE  = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
+    const lines = output.split('\n').filter(l => l.trim() && !/^total\s/i.test(l));
     const entries = [];
-    for (const line of lines) {
+    for (const raw of lines) {
+      const line = raw.replace(/\r$/, '');
       const parts = line.trim().split(/\s+/);
       if (parts.length < 7) continue;
+      if (!PERM_RE.test(parts[0])) continue;             // not an ls row — skip
+
       const permissions = parts[0];
       const owner = parts[2];
       const group = parts[3];
-      const size = parseInt(parts[4]) || 0;
-      const modified = parts[5];
-      const name = parts.slice(6).join(' ').replace(/ -> .*$/, '');
-      if (name === '.' || name === '..') continue;
+      const size  = parseInt(parts[4]) || 0;
+
+      // Timestamp shape: GNU --time-style=ISO is one token at parts[5].
+      // BusyBox / GNU default is "MMM DD time-or-year" — three tokens
+      // (parts[5..7]) — so the name starts at parts[8] in that case.
+      let modified, nameStart;
+      if (ISO_RE.test(parts[5])) {
+        modified = parts[5];
+        nameStart = 6;
+      } else if (parts.length >= 9) {
+        modified = `${parts[5]} ${parts[6]} ${parts[7]}`;
+        nameStart = 8;
+      } else {
+        // Unrecognized layout — bail rather than mis-render
+        continue;
+      }
+
+      const name = parts.slice(nameStart).join(' ').replace(/ -> .*$/, '');
+      if (!name || name === '.' || name === '..') continue;
+
       const type = permissions.startsWith('d') ? 'directory' :
                    permissions.startsWith('l') ? 'symlink' : 'file';
       entries.push({ name, type, size, modified, permissions, owner, group });
     }
+    return entries;
+  };
+
+  // First try: GNU ls with deterministic ISO timestamps
+  let output = await dockerService.execCommand(
+    req.params.id,
+    ['ls', '-la', '--time-style=+%Y-%m-%dT%H:%M:%S', filePath],
+    req.hostId
+  );
+  let entries = parseLs(output);
+
+  // Fallback: drop --time-style for BusyBox / minimal coreutils
+  if (entries.length === 0) {
+    output = await dockerService.execCommand(
+      req.params.id,
+      ['ls', '-la', filePath],
+      req.hostId
+    );
+    entries = parseLs(output);
+  }
+
   res.json({ path: filePath, entries });
 }));
 
