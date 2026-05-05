@@ -13,6 +13,14 @@ const Modal = {
     this._overlay = document.getElementById('modal-overlay');
     this._content = document.getElementById('modal-content');
 
+    // v8.2.x post-audit a11y: announce modal as a dialog + add aria-modal so
+    // screen readers announce the role and trap focus context. Title is
+    // resolved per-open via aria-labelledby below.
+    this._overlay.setAttribute('role', 'dialog');
+    this._overlay.setAttribute('aria-modal', 'true');
+    this._content.setAttribute('tabindex', '-1');
+    this._content.setAttribute('role', 'document');
+
     this._overlay.addEventListener('click', (e) => {
       if (e.target === this._overlay) this.close();
     });
@@ -33,6 +41,11 @@ const Modal = {
 
   open(html, { width, onClose } = {}) {
     this._init();
+    // Save the previously focused element so close() can restore focus —
+    // without this, screen readers and keyboard users get dropped to the
+    // body element on close.
+    this._previouslyFocused = document.activeElement;
+
     this._content.innerHTML = typeof html === 'string' ? html : '';
     if (typeof html === 'object' && html.nodeType) {
       this._content.innerHTML = '';
@@ -41,9 +54,27 @@ const Modal = {
     if (width) this._content.style.maxWidth = width;
     else this._content.style.maxWidth = '';
     this._onClose = onClose || null;
+
+    // Hook the modal's primary heading to aria-labelledby so screen readers
+    // announce "Dialog: <title>" instead of "Dialog" naked.
+    const heading = this._content.querySelector('.modal-header h3, .modal-header h2');
+    if (heading) {
+      if (!heading.id) heading.id = 'dd-modal-heading-' + Math.random().toString(36).slice(2, 9);
+      this._overlay.setAttribute('aria-labelledby', heading.id);
+    } else {
+      this._overlay.removeAttribute('aria-labelledby');
+    }
+
+    // Mark the close button with aria-label if it has only an icon child.
+    const closeBtn = this._content.querySelector('.modal-close-btn');
+    if (closeBtn && !closeBtn.getAttribute('aria-label')) {
+      closeBtn.setAttribute('aria-label', 'Close dialog');
+    }
+
     this._overlay.classList.remove('hidden');
+    this._overlay.removeAttribute('aria-hidden');
     requestAnimationFrame(() => this._overlay.classList.add('modal-visible'));
-    // Focus first input
+    // Focus first interactive element
     const firstInput = this._content.querySelector('input, textarea, select, button');
     if (firstInput) setTimeout(() => firstInput.focus(), 100);
   },
@@ -51,11 +82,17 @@ const Modal = {
   close() {
     if (!this._overlay) return;
     this._overlay.classList.remove('modal-visible');
+    this._overlay.setAttribute('aria-hidden', 'true');
     setTimeout(() => {
       this._overlay.classList.add('hidden');
       this._content.innerHTML = '';
       if (this._onClose) this._onClose();
       this._onClose = null;
+      // v8.2.x post-audit a11y: restore focus to the trigger element
+      if (this._previouslyFocused && typeof this._previouslyFocused.focus === 'function') {
+        try { this._previouslyFocused.focus(); } catch { /* element may have been removed */ }
+      }
+      this._previouslyFocused = null;
     }, 200);
   },
 

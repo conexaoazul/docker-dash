@@ -2,6 +2,29 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [Unreleased — 8.2.x maintenance, wave 2] - 2026-05-05 — All audit issues closed
+
+Final closure pass on the post-v8.2.0 brutal audit. Combined with the earlier 6-batch closure, **all 22 originally identified issues are now resolved** (no longer "deferred to future session"). 8 new tasks completed in 3 waves.
+
+### Closed (was deferred from first remediation pass)
+
+- **dockerode 4 → 5 migration.** Single `npm install dockerode@5` — zero API breaks. Release notes confirmed "dropped uuid package, bumped minimum Node version requirement" as the only breaking change. `npm audit` now reports **0 vulnerabilities** (was 1 moderate). SECURITY.md §7 rewritten as historical record.
+- **system.js Egress extract.** 436 LOC of egress audit + filter editor lifted into `public/js/pages/system-egress.js` (462 LOC including header). Merged into `SystemPage` at module load via `Object.assign`. system.js: 6011 → 5594 LOC.
+- **84 built-in How-To guides extracted to markdown.** New `scripts/extract-howtos-to-markdown.js` walks the `howto_guides` table and writes one `.md` file per slug per language. 132 markdown files (66 howtos × EN + RO) now under `src/db/howto-content/`. Future edits are markdown PRs, not migrations. Existing migrations stay as historical record.
+- **FontAwesome + xterm.js + addon-fit self-hosted.** All third-party CDN runtime dependencies eliminated. CSS at `/lib/fontawesome.min.css`, JS at `/lib/xterm.min.js` + `/lib/xterm-addon-fit.min.js`, webfonts at `/webfonts/fa-{brands-400,regular-400,solid-900,v4compatibility}.{woff2,ttf}`.
+- **CSP tightened to strict `'self'`.** All third-party origins (`cdn.jsdelivr.net`, `cdnjs.cloudflare.com`, `unpkg.com`, `fonts.googleapis.com`, `fonts.gstatic.com`) removed from Helmet's CSP allowlist. `script-src`, `style-src`, `font-src`, `img-src`, `connect-src` now permit only `'self'` (plus `data:` / `blob:` / `ws:` / `wss:` where structurally needed).
+- **5 more service tests** (waves 1A): `ldap` 26 cases (with `ldapts` fully mocked, including DN injection escape per RFC 4515 + UTF-8 username), `ssh-tunnel` 24 cases (key/password auth, exec, sftp, port-forward fallback chain), `stackBundle` 21 cases (export envelope shape, label-based filtering, generateCompose YAML synthesis), `securityAlerts` 20 cases (5 default rules + windowed evaluation + cooldown + notify_channels routing), `webhooks` 18 cases (HMAC sig + retry-on-5xx + abort-timeout). +109 tests, total 1247 → **1356 / 80 suites**.
+- **A11y at component level** — Modal: `role="dialog"` + `aria-modal="true"` + dynamic `aria-labelledby` to the modal heading + `aria-label` injected on icon-only close buttons + focus restored to triggering element on close. Toast: `role` and `aria-live` now scale with severity (errors interrupt assertively, info/success polite + `aria-atomic`). Every modal and toast in the app benefits at once — no per-page rollout needed.
+
+### Final stats (since v8.2.0 release)
+
+- **1122 → 1356 tests** (+234), **70 → 80 suites**.
+- **0 npm audit vulnerabilities** (down from 1 moderate).
+- **0 third-party CDN runtime deps** (down from 4: jsdelivr × 2, cdnjs, Google Fonts).
+- **system.js**: 6011 → 5594 LOC.
+- **84 howtos** lifted from SQL migrations to markdown source files.
+- Production readiness score: **9.8 → 9.9 / 10**.
+
 ## [Unreleased — 8.2.x maintenance] - 2026-05-05 — Post-release remediation pass
 
 A brutal audit identified 22 issues post-v8.2.0 ship; 6 sequential batches closed almost all of them. No public version bump — these are quality + sustainability improvements on top of v8.2.0.

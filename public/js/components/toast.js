@@ -41,8 +41,12 @@ const Toast = {
 
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    toast.setAttribute('role', 'alert');
-    toast.setAttribute('aria-live', 'assertive');
+    // v8.2.x post-audit a11y: errors interrupt with assertive; success/info
+    // use polite so we don't trample whatever the user is currently reading.
+    const isUrgent = type === 'error' || type === 'warning';
+    toast.setAttribute('role', isUrgent ? 'alert' : 'status');
+    toast.setAttribute('aria-live', isUrgent ? 'assertive' : 'polite');
+    toast.setAttribute('aria-atomic', 'true');
     toast.innerHTML = `
       <i class="fas ${icons[type] || icons.info}"></i>
       <span class="toast-msg">${Utils.escapeHtml(message)}</span>

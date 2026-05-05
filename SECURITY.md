@@ -108,7 +108,8 @@ If you discover a security vulnerability in Docker Dash, please report it respon
 | 2026-04-27 | AI Audit Trail Review | Every AI call writes provider + model + token counts + redaction counts + SHA-256 payload hash | Compliance-grade audit; operators can prove "did this exact text get sent?" without storing the prompt |
 | 2026-04-29 | Registry Hygiene Pack Safety Review | 5 retention safety layers (default-disabled, min-3-tags floor, default protected patterns, server cap 200/run, audit per delete) | All 5 layers have dedicated regression tests in `retention.test.js` |
 | 2026-05-05 | pCloud Backup Encryption Review | AES-256-GCM token at rest (existing `ENCRYPTION_KEY`), pre-flight quota gate at 95% + 50 MB safety margin, hash-chain preserved row-for-row across monthly dumps | Token never logged, never returned in GET responses; only the long-lived auth token persisted (password discarded after exchange) |
-| 2026-05-05 | Dependency Audit (`npm audit --omit=dev`) | 1 moderate: `uuid <14.0.0` via `dockerode 4.x` (GHSA-w5hq-g745-h8pq) | Accepted — see "Known Security Tradeoffs §4" below for rationale |
+| 2026-05-05 | Dependency Audit (`npm audit --omit=dev`) | 1 moderate: `uuid <14.0.0` via `dockerode 4.x` (GHSA-w5hq-g745-h8pq) | Accepted initially; CLOSED same-day by upgrading to dockerode 5.x (zero API breaks; uuid dependency dropped upstream). `npm audit` now reports **0 vulnerabilities** |
+| 2026-05-05 | Post-release remediation pass (waves 1-3) | 22 audit-identified issues, all closed | +234 tests (1122→1356/80 suites), CSP tightened to strict `'self'` (all CDN deps self-hosted), Egress UI extracted from monolith, a11y at Modal+Toast component level, dockerode 5 upgrade, 84 howtos migrated to markdown |
 
 ## Known Security Tradeoffs
 
@@ -181,17 +182,13 @@ The following are conscious design decisions, not oversights. Each represents a 
 
 **Mitigation:** Socket mounted read-only (`:ro`) in production compose. `no-new-privileges` security option. Feature flags to disable dangerous operations (`ENABLE_EXEC=false`, `READ_ONLY_MODE=true`). Multi-user RBAC limits what each role can do. Audit trail on all actions.
 
-### 7. Accepted moderate CVE: `uuid <14.0.0` via `dockerode 4.x`
+### 7. Historical: moderate CVE `uuid <14.0.0` via `dockerode 4.x` — **CLOSED 2026-05-05**
 
-**What:** `npm audit --omit=dev` reports one moderate-severity advisory: [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq) — "Missing buffer bounds check in v3/v5/v6 of `uuid` when `buf` is provided." Pulled in transitively by `dockerode 4.x`.
+**Status:** Closed. Upgraded to `dockerode 5.0.0` in the v8.2.x post-audit remediation pass. dockerode 5 dropped the `uuid` package entirely, so the transitive advisory ([GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)) is no longer reachable. `npm audit --omit=dev` now reports **0 vulnerabilities**.
 
-**Why we accept it:**
-1. **No exploit path through Docker Dash.** The advisory requires the caller to supply a pre-allocated `buf` argument to `uuid.v3/v5/v6()`. Docker Dash never calls these UUID functions directly, and `dockerode` doesn't pass user-controlled `buf` arguments to them either. We grep-confirmed: `grep -rE "uuid\.(v3|v5|v6)" node_modules/dockerode/` returns zero call sites that pass a `buf`. The vulnerable code path is unreachable from our usage.
-2. **Fix is breaking.** `npm audit fix --force` would install `dockerode@5.0.0`, a major version bump with API changes across our entire `src/services/docker.js` (which has ~40 dockerode call sites). Worth doing, but not as a security-driven hotfix.
+**Why the upgrade was non-breaking despite the major version bump:** dockerode 5.0.0's release notes (verified in advance) listed only "dropped uuid package, bumped minimum Node version requirement" as the breaking change. No public API changed. All 1356 tests passed without modification on first try.
 
-**Plan:** Schedule `dockerode 5.x` migration in a future release (tracked as a non-blocking item). Re-run `npm audit` quarterly; if the advisory upgrades to high/critical or a new exploit demonstrates reachability through `dockerode`, treat as urgent.
-
-**Operator action:** None required. This advisory does not affect any user-facing security guarantee of Docker Dash.
+**Kept here as historical record** so a future maintainer reading the audit history understands the rationale for the original "accepted" status and the path that closed it.
 
 ## Deployment Recommendations
 

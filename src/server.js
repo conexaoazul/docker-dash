@@ -35,13 +35,18 @@ const app = express();
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
+      // v8.2.x post-audit: removed third-party CDN allowlist entries.
+      // Chart.js (/lib/chart.umd.min.js), xterm + addon-fit (/lib/xterm.*),
+      // FontAwesome CSS + webfonts (/lib/fontawesome.min.css + /webfonts/*)
+      // are all served from 'self'. CSP is now strict 'self' for everything
+      // — no third-party origins allowed.
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://unpkg.com"],
+      scriptSrc: ["'self'"],
       scriptSrcAttr: ["'none'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
-      imgSrc: ["'self'", "data:", "blob:", "https://cdn.jsdelivr.net"],
-      connectSrc: ["'self'", "ws:", "wss:", "https://cdn.jsdelivr.net"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      fontSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", "ws:", "wss:"],
       upgradeInsecureRequests: null,
     },
   },
