@@ -459,6 +459,44 @@ const App = {
     // Initialize task bar (Enterprise mode only)
     TaskBar.init();
 
+    // ─── Global delegated handlers — replace inline onclick (CSP) ────
+    // [data-tab-jump="X"] on a link/button → navigate to #/system + click tab X
+    document.body.addEventListener('click', (e) => {
+      const tabJump = e.target.closest('[data-tab-jump]');
+      if (tabJump) {
+        e.preventDefault();
+        const tab = tabJump.getAttribute('data-tab-jump');
+        const target = tabJump.getAttribute('data-tab-jump-page') || '/system';
+        window.location.hash = target;
+        setTimeout(() => {
+          const tabEl = document.querySelector(`[data-tab="${tab}"]`);
+          if (tabEl) tabEl.click();
+        }, 250);
+        return;
+      }
+      // [data-copy="..."] on a button → copy text to clipboard + Toast
+      const copyBtn = e.target.closest('[data-copy]');
+      if (copyBtn) {
+        e.preventDefault();
+        const text = copyBtn.getAttribute('data-copy');
+        if (typeof Utils !== 'undefined' && Utils.copyToClipboard) {
+          Utils.copyToClipboard(text).then(() => {
+            if (typeof Toast !== 'undefined') Toast.success('Copied');
+          });
+        }
+        return;
+      }
+    });
+    // [data-img-fallback] on an <img> → replace with sibling text on error
+    document.body.addEventListener('error', (e) => {
+      const img = e.target;
+      if (img && img.tagName === 'IMG' && img.hasAttribute('data-img-fallback')) {
+        img.style.display = 'none';
+        const sibling = img.nextElementSibling;
+        if (sibling) sibling.style.display = 'inline';
+      }
+    }, true); // capture phase — error doesn't bubble
+
     // Sync preferences from server (fire-and-forget, localStorage wins for instant display)
     this._syncUserPreferences();
 

@@ -2,6 +2,47 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [Unreleased — 8.2.x maintenance] - 2026-05-05 — Post-release remediation pass
+
+A brutal audit identified 22 issues post-v8.2.0 ship; 6 sequential batches closed almost all of them. No public version bump — these are quality + sustainability improvements on top of v8.2.0.
+
+### Added
+- **CLAUDE.md at repo root** — durable conventions for AI-assisted contributions (architecture invariants, deep-spec discipline, port/auth conventions, deploy procedure).
+- **3 targeted product comparisons** at `docs/comparisons/`: Portainer, Dockge, Komodo. Each ~600 words, no marketing fluff, "pick X if Y, pick DD if Z" framing.
+- **Template trust signals** — `verified_at` and `deprecated_in_favor_of` columns on `custom_templates` (migration 065). Built-in `BUILTIN_VERIFICATION` map covers 14 templates (registry + AI Workload Pack). UI renders verified ✓ / stale ⏰ / deprecated ⚠ badges based on age vs 180-day threshold.
+- **How-to markdown loader** — `src/db/howto-content/<slug>.md` with YAML front-matter; UPSERTed at startup. Convention shipped, existing 84 howtos kept in their original migrations until piece-by-piece migration.
+- **GitHub Discussions enabled** — community Q&A surface alongside Issues. Linked from README header.
+- **Anonymous opt-in telemetry scaffold** at `src/services/telemetry.js` — off by default, no PII, install ID stable per install. Collector + Settings UI ship in v8.3.0; v8.2.x is scaffold + design notes only.
+- **Observability profile activated on the public VPS** at `http://89.37.212.66:3015` (Grafana + Prometheus on port 3015 to avoid clash with medinet-backend on 3001). Eats own dog food.
+
+### Changed
+- **README scrubbed**: test count 1122→1247, test suites 70→75, badges + body kept in sync. Roadmap rewrite to honest "AI vuln/incident triage gated on production signal — v8.x prioritized adjacent value (registry hygiene, pCloud)". Marketing claim "30+ exclusive features" softened to "20+ rows where DD ships features no compared free tool has, coverage gaps cut both ways".
+- **SECURITY.md**: Supported Versions rewritten (8.2.x current / 8.1.x security-only / 8.0.x security-only / 7.x best-effort / <7.0 unsupported). Audit history extended with Production Readiness rows for v6.16.1, v7.0.0, v7.3-7.7, v8.0.0, v8.1.0, v8.2.0, and the v8.2.x post-release remediation pass. New §7 documents the accepted moderate `uuid <14.0.0` CVE via `dockerode 4.x` (verified unreachable through Docker Dash's usage; dockerode 5.x migration tracked in BACKLOG).
+- **CONTRIBUTING.md**: stats refreshed to v8.2.0, port `:3456`→`:8101`, new "Project workflow conventions" section explains the gitignored `plans/` strategic-spec workflow.
+- **BACKLOG.md**: refreshed to post-v8.2.0 state. F30 (HA mode) marked fully shipped. Added P2 entries for AI vuln/incident triage (gated), system.js Egress extract (specified, deferred), and how-to markdown migration (in progress).
+
+### Fixed (architecture / hygiene)
+- **9 inline `onclick=` template-string violations** across `containers.js`, `container-detail.js`, `security.js`, `swarm.js`, `system.js` refactored to delegated handlers (`data-tab-jump`, `data-copy`, `data-img-fallback`) registered in `app.js`. **Custom ESLint rule** added at `eslint.config.js` to fail builds on any new inline event-handler string in `public/js/`. The v5.0 promise — "no inline handlers, ever" — is now actually enforced, not on the honor system.
+- **Login flow a11y baseline**: `role="alert"` + `aria-live` on error/success regions, `aria-required` on inputs, `aria-label` on theme toggle + GitHub link, `aria-hidden="true"` on icon-only `<i>` elements, `<label class="sr-only">` for the reset-email field that previously had only a placeholder.
+
+### Tests
+- **+125 new tests** closing the dedicated-test gap on 5 critical-path services (auth, audit, docker, registry, ssl). Total: 1122 → 1247 (75 suites). Each test file has a header explaining post-v8.2.0 audit rationale.
+- New tests fail loudly if their service contract drifts; they were written against the actual exported API, not assumed shape.
+
+### Self-hosted asset
+- **Chart.js 4.4.1 served from `/lib/chart.umd.min.js`** (~205 KB local) instead of `cdn.jsdelivr.net`. Removes one external runtime dependency. Note: this does NOT eliminate `unsafe-eval` in CSP — Chart.js uses `new Function()` internally. FontAwesome + xterm.js self-host deferred (BACKLOG P3).
+
+### Deferred to a future session (documented, not silently dropped)
+- `system.js` Egress section extract → `system-egress.js` lazy module (~435 LOC, 6 interlinked methods; needs Puppeteer regression of the egress flow).
+- `dockerode 4 → 5` migration (~40 call sites; not urgent, advisory unreachable per audit §7).
+- i18n auto-translate batch for the 9 ~66%-translated locales (needs Google/DeepL API key + provider decision).
+- 84 existing howtos migrated piece-by-piece to markdown files (loader convention is in place; existing data stays in DB until each is migrated).
+
+### Quality gate
+- 1247 tests passing, 4 skipped (live-CF ACME), 0 failures.
+- Lint: 0 errors, 3 pre-existing warnings unchanged.
+- Local + LAN + VPS smoke-tested.
+
 ## [8.2.0] - 2026-05-05 — pCloud backup target + stack & audit off-site archives
 
 ### Added

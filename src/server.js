@@ -304,8 +304,16 @@ async function start() {
   }
 
   // Initialize DB (runs migrations)
-  getDb();
+  const db = getDb();
   log.info('Database initialized');
+
+  // v8.3.0-prep — UPSERT howto markdown content (idempotent, no-op if dir empty)
+  try {
+    const howtoLoader = require('./services/howto-loader');
+    howtoLoader.loadAll(db);
+  } catch (err) {
+    log.warn('How-to markdown loader failed (continuing)', err.message);
+  }
 
   // Seed admin user
   const authService = require('./services/auth');

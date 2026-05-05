@@ -915,7 +915,7 @@ const ContainersPageDetail = {
             <div style="color:var(--text-dim)">Filter policy:</div><div>${policy ? `<span style="padding:2px 6px;background:rgba(59,130,246,0.15);border-radius:3px;font-size:11px">${Utils.escapeHtml(policy.preset)} · ${Utils.escapeHtml(policy.mode)}</span>` : '<span class="text-muted text-sm">none</span>'}</div>
           </div>
           <div style="margin-top:8px">${policy
-            ? `<a href="#/system" style="font-size:11px;color:var(--accent);text-decoration:none" onclick="setTimeout(()=>document.querySelector('[data-tab=egress]')?.click(),250)">Manage policy →</a>`
+            ? `<a href="#/system" style="font-size:11px;color:var(--accent);text-decoration:none" data-tab-jump="egress">Manage policy →</a>`
             : `<button class="btn btn-xs btn-primary" id="sec-enable-egress"><i class="fas fa-shield-alt" style="margin-right:4px"></i>Enable filter</button>`
           }</div>
         `;
@@ -960,7 +960,7 @@ const ContainersPageDetail = {
         const scan = (res.scans || [])[0];
         if (!scan) {
           slot.innerHTML = `<div class="text-muted text-sm">No vulnerability scan yet for <code>${Utils.escapeHtml(image)}</code>.</div>
-            <div style="margin-top:8px"><a href="#/system" class="btn btn-xs btn-secondary" onclick="setTimeout(()=>{location.hash='#/security'},50);return false"><i class="fas fa-search-plus" style="margin-right:4px"></i>Go to Security → scan</a></div>`;
+            <div style="margin-top:8px"><a href="#/security" class="btn btn-xs btn-secondary"><i class="fas fa-search-plus" style="margin-right:4px"></i>Go to Security → scan</a></div>`;
           return;
         }
         slot.innerHTML = `

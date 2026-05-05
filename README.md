@@ -9,7 +9,7 @@
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/releases/latest"><img src="https://img.shields.io/github/v/release/bogdanpricop/docker-dash?color=blue" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
-    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-1122%20passing%20(100%25)-brightgreen" alt="Tests"></a>
+    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-1247%20passing%20(100%25)-brightgreen" alt="Tests"></a>
     <img src="https://img.shields.io/badge/version-8.2.0-blue" alt="Version">
     <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.8%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
@@ -24,6 +24,12 @@
     <a href="#screenshots">Screenshots</a> &bull;
     <a href="#comparison">Comparison</a> &bull;
     <a href="#contributing">Contributing</a>
+  </p>
+  <p align="center">
+    <a href="https://github.com/bogdanpricop/docker-dash/discussions">💬 Discussions</a> &bull;
+    <a href="https://github.com/bogdanpricop/docker-dash/issues">🐞 Issues</a> &bull;
+    <a href="https://github.com/bogdanpricop/docker-dash/releases">📦 Releases</a> &bull;
+    <a href="docs/comparisons/">⚖️ Comparisons</a>
   </p>
 </p>
 
@@ -265,7 +271,7 @@ Deep reading: [HA Mode reference](docs/features/ha-mode.md) · [Failover runbook
 - **Self-Reporting Footprint** — Docker Dash memory, uptime, DB size at `/api/footprint`
 - **Let's Encrypt Wizard** — 3-step UI for issuing certs via DNS-01 (Cloudflare, Route53, DigitalOcean, Hetzner, Linode) or HTTP-01. Encrypted credential vault, auto-renewal via Caddy, hash-chained audit trail. Open source — no other Docker UI ships this
 - **Container Remediation Wizard** — 3-step UI that turns Secrets Audit + CIS Benchmark findings into actionable fixes. 20-entry catalog, 4 live-updatable (zero downtime), 16 with compose-recreate + auto-rollback. Git-PR mode for git-backed stacks. No other OSS Docker UI ships this
-- **1122 Tests** — 70 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics, permissions RBAC, settings CRUD, security alert rule evaluation, event notifier dispatch, cluster abstraction (HA mode), rate-limiter memory + Redis paths, registry push + browse + delete + retention + provenance, AI redactor + service abstraction, pCloud client + backup orchestration + audit dump (hash-chain integrity verified), 100% passing
+- **1247 Tests** — 75 test suites covering auth (29 cases incl. lockout, MFA, SSO provisioning), audit log (15 cases incl. hash-chain genesis + chain link + cleanup-blocked-in-strict-mode), docker service (24 cases with mocked dockerode incl. all containerAction verbs + multi-host enumeration + connection routing), registry (21 cases: push/manifest/deleteTag/repos CRUD/retention round-trip with encryption), ssl (36 cases: Caddyfile gen + sanitisation + self-signed + ACME stubs + cert-paths allow-list), RBAC, security, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics, settings CRUD, security alert rule evaluation, event notifier dispatch, cluster abstraction (HA mode), rate-limiter memory + Redis paths, registry retention + provenance pure-evaluators, AI redactor + service abstraction, pCloud client + backup orchestration + audit dump (hash-chain integrity verified). 100% passing.
 
 ### AI (v8.0.0+) — opt-in, BYOK, off by default
 
@@ -617,6 +623,16 @@ docker-dash/
 > Features Portainer Business locks behind paid license are **free** in Docker Dash.
 > Rancher / K3s targets Kubernetes clusters; Docker Dash targets single-host and small multi-host Docker deployments.
 
+### Targeted comparisons
+
+For a deeper one-on-one breakdown of "Pick X if Y, pick Docker Dash if Z":
+
+- **[Docker Dash vs Portainer](docs/comparisons/vs-portainer.md)** — the dominant Docker UI; free CE (BSL 1.1) vs paid Business
+- **[Docker Dash vs Dockge](docs/comparisons/vs-dockge.md)** — minimal Compose-focused alternative
+- **[Docker Dash vs Komodo](docs/comparisons/vs-komodo.md)** — fleet GitOps multi-server vs single-host depth
+
+Index: [`docs/comparisons/`](docs/comparisons/).
+
 ## License
 
 [MIT](LICENSE) — free for personal and commercial use.
@@ -664,6 +680,7 @@ Docker Dash requires access to the Docker socket (`/var/run/docker.sock`). This 
 | v8.0.0 — AI features (BYOK) | 2026-04-27 | **9.8/10** | First feature category with optional outbound traffic to non-user-controlled hosts. Strategy-first deep-spec + 5 spikes ran before code; redactor S4 validated 100/100 on 27-case corpus before integration. Provider abstraction (Anthropic / OpenAI / Ollama), BYOK only, off by default. Audit log NL search ships first; vulnerability + incident triage gated on production signal. Every AI call writes audit entry with provider, model, token counts, redaction counts per pattern, SHA-256 payload hash. 63 new tests |
 | v8.1.0 — Registry Hygiene Pack | 2026-04-29 | **9.8/10** | Build provenance panel surfacing OCI annotations + cosign signature presence (read-only, zero new state). Retention policies with five safety layers: default-disabled (dry-run only), min-3-tags hard floor, default protected patterns latest/v\*/main/master/prod-\*/stable, server cap 200 deletions/run, audit per delete. Remote/virtual repos via Distribution proxy (Docker Hub rate-limit relief + offline operation). 58 new tests, all 5 safety layers regression-tested |
 | v8.2.0 — pCloud backup + off-site archives | 2026-05-05 | **9.8/10** | Third backup target alongside local + S3. AES-256-GCM encrypted token storage. Quota-aware uploads (95% pre-flight check + 50 MB safety margin). Hash-chained audit log monthly dumps preserve `entry_hash`/`prev_hash` row-for-row across months — consecutive dumps form a continuous off-site witness if the live DB is later tampered. Streaming export via `stmt.iterate()` handles 50k+ row months without buffer growth. 40 new tests including end-to-end gzip → upload → download → gunzip → chain-walk verification |
+| v8.2.x — Post-release brutal audit + remediation | 2026-05-05 | **9.8/10** | Honest re-audit of production-readiness after v8.2.0 ship. 22 issues identified across architecture/quality/tests/docs. Closed in 6 batches: archived obsolete pre-v7 audit docs, ESLint rule banning inline `onclick=` in template literals (9 violations refactored to `data-tab-jump` / `data-copy` / `data-img-fallback` delegated handlers), CLAUDE.md at repo root, 3 targeted vs-product comparison pages (Portainer/Dockge/Komodo), template `verified_at` + `deprecated_in_favor_of` trust signals (migration 065), how-to markdown loader convention (`src/db/howto-content/<slug>.md` with YAML front-matter), 125 new service tests (auth 29 + audit 15 + docker 24 + registry 21 + ssl 36 — closed dedicated-test gap on 5 of the 20 services flagged untested), a11y baseline on login form + reset flow (role=alert + aria-live + aria-required + sr-only label), Chart.js self-hosted, telemetry opt-in scaffold (off by default), Discussions enabled, Grafana + Prometheus observability profile activated on the public VPS at port :3015 |
 
 ### Known Security Tradeoffs
 
@@ -675,7 +692,7 @@ These are conscious design decisions documented in [SECURITY.md](SECURITY.md):
 
 ### Test Coverage
 
-- **1122 tests** across **70 test suites** (100% passing — 4 skipped are live-CF ACME integration tests gated on a CI secret)
+- **1247 tests** across **75 test suites** (100% passing — 4 skipped are live-CF ACME integration tests gated on a CI secret)
 - Unit tests: crypto, helpers, validation, git patterns, platform detection, DMI cloud detection, translations, filter escape, metrics rendering, AI redactor (33 cases), audit-actions enum extraction, retention pure-evaluator (27 cases), provenance parser (15 cases), pCloud HTTP client (16 cases)
 - Integration tests: auth flow, API endpoints, RBAC, security, ACME + remediation orchestrators, registry push + browse + delete + retention apply, AI provider abstraction with MockAiProvider, pCloud backup orchestration (14 cases), audit-log monthly dump with hash-chain integrity round-trip (gzip → upload → download → gunzip → chain-walk)
 - Service tests: permissions RBAC filtering, settings key-value CRUD, security alert rule evaluation (threshold + windowed), event notifier dispatch + cooldown, cluster abstraction (HA mode), rate-limiter memory + Redis paths, registry repos CRUD

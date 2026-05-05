@@ -51,6 +51,12 @@ Looking for where to start? These are great first contributions:
    ```
 7. Open http://localhost:8101 — login with `admin` / `admin`
 
+## Project workflow conventions
+
+- **`plans/` is gitignored — strategic specs live there locally.** Major features (anything that ships in a `.0` minor) follow the deep-spec → feature-spec → code → tests pipeline. Specs are local-only by design (one author, multiple iterations, no need to pollute repo history). Contributors can request a spec walkthrough via Discussion if they want to understand the "why" behind a major feature.
+- **`CLAUDE.md` at repo root** documents the project conventions for AI-assisted contributions. Read it if you're using Claude Code or any AI agent to contribute.
+- **Anti-features are documented WITH RATIONALE.** When a feature is *not* shipped, the deep-spec or CHANGELOG section says why. Examples: "no always-on AI chat sidebar" (v8.0.0), "no pCloud OAuth" (v8.2.0), "no automatic registry GC" (v7.6.0).
+
 ## Architecture Principles
 
 These are non-negotiable design decisions. Please respect them in your contributions:

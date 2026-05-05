@@ -23,35 +23,36 @@
   <div id="login-screen" class="login-screen hidden">
     <div class="login-card">
       <div class="login-logo">🐳 <span>Docker Dash</span></div>
-      <button type="button" id="login-theme-toggle" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-dim);font-size:18px;cursor:pointer" title="Toggle theme">
-        <i class="fas fa-moon" id="login-theme-icon"></i>
+      <button type="button" id="login-theme-toggle" aria-label="Toggle light/dark theme" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-dim);font-size:18px;cursor:pointer" title="Toggle theme">
+        <i class="fas fa-moon" id="login-theme-icon" aria-hidden="true"></i>
       </button>
-      <form id="login-form" autocomplete="on">
+      <form id="login-form" autocomplete="on" aria-label="Sign in to Docker Dash">
         <div class="form-group">
           <label for="login-user">Username</label>
-          <input type="text" id="login-user" name="username" autocomplete="username" placeholder="Enter username" required>
+          <input type="text" id="login-user" name="username" autocomplete="username" placeholder="Enter username" required aria-required="true">
         </div>
         <div class="form-group">
           <label for="login-pass">Password</label>
-          <input type="password" id="login-pass" name="password" autocomplete="current-password" placeholder="Enter password" required>
+          <input type="password" id="login-pass" name="password" autocomplete="current-password" placeholder="Enter password" required aria-required="true">
         </div>
-        <div id="login-error" class="login-error hidden"></div>
+        <div id="login-error" class="login-error hidden" role="alert" aria-live="assertive"></div>
         <button type="submit" class="btn btn-primary btn-block" id="login-btn">
-          <i class="fas fa-sign-in-alt"></i> <span id="login-btn-text">Sign In</span>
+          <i class="fas fa-sign-in-alt" aria-hidden="true"></i> <span id="login-btn-text">Sign In</span>
         </button>
         <div id="login-forgot" style="margin-top:12px;text-align:center">
           <a href="#" id="login-forgot-link" class="text-sm" style="color:var(--accent);text-decoration:none;cursor:pointer">Forgot password?</a>
         </div>
-        <div id="login-reset-form" style="display:none;margin-top:12px;background:var(--surface2,#1e2433);border:1px solid var(--border,#2a3040);border-radius:8px;padding:14px">
+        <div id="login-reset-form" style="display:none;margin-top:12px;background:var(--surface2,#1e2433);border:1px solid var(--border,#2a3040);border-radius:8px;padding:14px" role="region" aria-label="Password reset">
           <p class="text-sm text-muted" style="margin:0 0 10px">Enter your email address and we'll send you a reset link if an account exists.</p>
           <div class="form-group" style="margin-bottom:10px">
-            <input type="email" id="login-reset-email" class="form-control" placeholder="your@email.com" autocomplete="email">
+            <label for="login-reset-email" class="sr-only">Email address</label>
+            <input type="email" id="login-reset-email" class="form-control" placeholder="your@email.com" autocomplete="email" aria-required="true">
           </div>
-          <div id="login-reset-error" style="display:none;color:var(--red,#f87171);font-size:12px;margin-bottom:8px"></div>
-          <div id="login-reset-success" style="display:none;color:var(--green,#4ade80);font-size:13px;padding:8px 0"></div>
+          <div id="login-reset-error" style="display:none;color:var(--red,#f87171);font-size:12px;margin-bottom:8px" role="alert" aria-live="polite"></div>
+          <div id="login-reset-success" style="display:none;color:var(--green,#4ade80);font-size:13px;padding:8px 0" role="status" aria-live="polite"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end">
             <button type="button" id="login-reset-cancel" class="btn btn-secondary btn-sm">Cancel</button>
-            <button type="button" id="login-reset-submit" class="btn btn-primary btn-sm"><i class="fas fa-paper-plane"></i> Send reset link</button>
+            <button type="button" id="login-reset-submit" class="btn btn-primary btn-sm"><i class="fas fa-paper-plane" aria-hidden="true"></i> Send reset link</button>
           </div>
         </div>
         <script src="/js/login-reset.js?v=__VERSION__"></script>
@@ -247,7 +248,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/lib/chart.umd.min.js?v=__VERSION__"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.min.js"></script>
   <script src="/js/i18n.js?v=__VERSION__"></script>

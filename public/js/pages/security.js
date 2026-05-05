@@ -177,7 +177,7 @@ const SecurityPage = {
           <h3 style="margin:0"><i class="fas fa-clipboard-check" style="margin-right:8px;color:var(--green,#4ade80)"></i>CIS Docker Benchmark</h3>
           <div style="display:flex;gap:8px;align-items:center">
             <button class="btn btn-sm btn-secondary" id="cis-quick-run"><i class="fas fa-play" style="margin-right:4px"></i>Run</button>
-            <a href="#/system" id="cis-full-link" style="font-size:12px;color:var(--accent);text-decoration:none" onclick="event.preventDefault();window.location.hash='/system';setTimeout(()=>{document.querySelector('[data-tab=cis]')?.click()},300)">
+            <a href="#/system" id="cis-full-link" style="font-size:12px;color:var(--accent);text-decoration:none" data-tab-jump="cis">
               View full results <i class="fas fa-arrow-right" style="margin-left:3px"></i>
             </a>
           </div>

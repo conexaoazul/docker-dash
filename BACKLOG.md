@@ -155,6 +155,43 @@ Available major upgrades, deliberately not taken:
 
 ---
 
+## P2 — Architecture refactors (deferred from v8.3.0 audit)
+
+### system.js Egress extract → lazy module
+
+**Status (added 2026-05-05):** Identified in post-v8.2.0 audit. `public/js/pages/system.js` is 6011 lines; lines 5158-5593 (~435 LOC, 6 methods) are the Egress audit + filter editor flow. Should be extracted to `public/js/pages/system-egress.js` and merged via `Object.assign(SystemPage, SystemEgress)` lazy-load pattern (proven in v6.16.0 with `containers.js` → `container-detail.js`).
+
+**Why deferred:** the Egress flow has 6 interlinked methods sharing closure state via `this`. Extract requires careful bookkeeping (one slip = broken egress filter UI on a security-sensitive feature). Needs a dedicated session with manual Puppeteer regression of the full egress flow afterward.
+
+**Other big pages identified for future extract:**
+- `public/js/pages/containers.js` — 3238 LOC (already split once in v6.16.0; still big)
+- `public/js/pages/settings.js` — 2037 LOC
+- `public/js/pages/images.js` — 1595 LOC
+
+Pattern is documented in `CLAUDE.md` + `CONTRIBUTING.md` for future contributors.
+
+### How-To content migration to markdown files
+
+**Status (shipped 2026-05-05, partial):** New convention shipped in v8.2.x: `src/db/howto-content/<slug>.md` with YAML front-matter, loaded at startup via `src/services/howto-loader.js`. Existing 84 howtos still live in their original migrations (040, 041, 042, 048, 059) — they continue to work.
+
+**Remaining (not blocking):** Migrate the 84 existing howtos to markdown files piece-by-piece. Each migration is 10 minutes (extract HTML body → wrap in front-matter → drop in `howto-content/`). No regression risk — markdown files OVERWRITE DB rows on next startup.
+
+## P3 — Frontend self-hosting (partial in v8.2.x, full deferred)
+
+### Self-host remaining CDN dependencies
+
+**Status (added 2026-05-05):** Partially shipped in v8.2.x.
+
+**Done:**
+- Chart.js 4.4.1 → `public/lib/chart.umd.min.js` (~205 KB). Removes one external CDN dependency. Note: this does NOT eliminate `'unsafe-eval'` from CSP — Chart.js uses `new Function()` internally regardless of where it's served from.
+
+**Deferred:**
+- **FontAwesome 6.5.1** (CSS + woff2/woff/ttf font files, ~1.6 MB total). Currently from `cdnjs.cloudflare.com`. Self-host requires copying font files + the CSS that references them via relative paths, plus updating `CSP fontSrc` to drop the cdnjs entry. ~30 min work; defer until needed (e.g., if Edge Tracking Prevention starts blocking the cdn).
+- **xterm.js 5 + addon-fit** (~600 KB total). Currently from `cdn.jsdelivr.net`. Same pattern — copy + CSS refs + CSP update.
+- **Google Fonts** (if used). Check `public/css/app.css` for any `@import` from `fonts.googleapis.com`.
+
+Triggering condition: if jsDelivr or cdnjs becomes unreliable (Edge Tracking Prevention auto-block, regional outage, deprecation), self-host the rest immediately. Until then, the CSP allowlist scoped to those exact CDN hostnames is acceptable.
+
 ## P3 — Dependency major bumps (deferred non-blocking)
 
 ### dockerode 4 → 5 migration

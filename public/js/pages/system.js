@@ -2048,9 +2048,22 @@ DB_PASS=secret"></textarea>
         const customBadge = t.isCustom
           ? `<span class="badge badge-info" style="font-size:9px;margin-left:6px"><i class="fas fa-user" style="margin-right:3px"></i>custom</span>`
           : '';
+        // v8.3.0-prep — verified / deprecated trust signals
+        let trustBadge = '';
+        if (t.deprecated_in_favor_of) {
+          trustBadge = `<span class="badge badge-warning" style="font-size:9px;margin-left:6px" title="Deprecated — use '${Utils.escapeHtml(t.deprecated_in_favor_of)}' instead"><i class="fas fa-exclamation-triangle" style="margin-right:3px"></i>deprecated</span>`;
+        } else if (t.verified_at) {
+          const ageMs = Date.now() - new Date(t.verified_at).getTime();
+          const ageDays = Math.floor(ageMs / (24 * 60 * 60 * 1000));
+          if (ageDays > 180) {
+            trustBadge = `<span class="badge badge-warning" style="font-size:9px;margin-left:6px" title="Last verified ${ageDays} days ago — may be stale"><i class="fas fa-clock" style="margin-right:3px"></i>stale</span>`;
+          } else {
+            trustBadge = `<span class="badge badge-running" style="font-size:9px;margin-left:6px" title="Verified by maintainer on ${Utils.escapeHtml(t.verified_at)}"><i class="fas fa-check-circle" style="margin-right:3px"></i>verified</span>`;
+          }
+        }
         // Logo: show image with graceful fallback to FontAwesome icon
         const logoHtml = t.logoUrl
-          ? `<img src="${Utils.escapeHtml(t.logoUrl)}" alt="${Utils.escapeHtml(t.name)}" style="width:28px;height:28px;object-fit:contain;flex-shrink:0" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">`
+          ? `<img src="${Utils.escapeHtml(t.logoUrl)}" alt="${Utils.escapeHtml(t.name)}" style="width:28px;height:28px;object-fit:contain;flex-shrink:0" data-img-fallback>`
           + `<i class="${t.icon || 'fas fa-cube'}" style="display:none;font-size:18px;color:var(--accent)"></i>`
           : `<i class="${t.icon || 'fas fa-cube'}" style="font-size:18px;color:var(--accent)"></i>`;
         return `
@@ -2058,7 +2071,7 @@ DB_PASS=secret"></textarea>
             <div class="card-header" style="gap:10px">
               <div style="display:flex;align-items:center;gap:8px;min-width:0">
                 ${logoHtml}
-                <h3 style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${Utils.escapeHtml(t.name)}${modifiedBadge}${customBadge}</h3>
+                <h3 style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${Utils.escapeHtml(t.name)}${modifiedBadge}${customBadge}${trustBadge}</h3>
               </div>
               <span class="badge badge-info" style="font-size:10px;flex-shrink:0">${Utils.escapeHtml(t.category)}</span>
             </div>

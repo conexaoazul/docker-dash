@@ -51,6 +51,30 @@ const TEMPLATE_LOGOS = {
 };
 
 /** Merge built-in templates with DB overrides and custom templates */
+// v8.3.0-prep — Trust signals for built-in templates.
+// Maintainer reviews each template against the current upstream image and
+// confirms it deploys cleanly. The date here is the LAST verification time.
+// UI flags any template with no entry, or stale > 180 days, accordingly.
+const BUILTIN_VERIFICATION = {
+  // Verified 2026-05-05 (v8.2.0 release sweep)
+  'private-registry':            { verified_at: '2026-05-05' },
+  'private-registry-with-cache': { verified_at: '2026-05-05' },
+  'ai-ollama':                   { verified_at: '2026-05-05' },
+  'ai-ollama-openwebui':         { verified_at: '2026-05-05' },
+  'ai-rag-stack':                { verified_at: '2026-05-05' },
+  'ai-vllm':                     { verified_at: '2026-05-05' },
+  'ai-stable-diffusion':         { verified_at: '2026-05-05' },
+  'ai-comfyui':                  { verified_at: '2026-05-05' },
+  'ai-whisper':                  { verified_at: '2026-05-05' },
+  'ai-langflow':                 { verified_at: '2026-05-05' },
+  'ai-anything-llm':             { verified_at: '2026-05-05' },
+  'ai-n8n':                      { verified_at: '2026-05-05' },
+  'ai-litellm':                  { verified_at: '2026-05-05' },
+  'ai-flowise':                  { verified_at: '2026-05-05' },
+  // Older built-ins — not re-verified yet. UI shows neutral state, no warning.
+  // Add entries here as you re-validate.
+};
+
 function getMergedTemplates() {
   const db = getDb();
   const customRows = db.prepare('SELECT * FROM custom_templates').all();
@@ -71,6 +95,7 @@ function getMergedTemplates() {
   }
 
   const merged = TEMPLATES.map(t => {
+    const v = BUILTIN_VERIFICATION[t.id] || {};
     const override = overrideMap[t.id];
     if (override) {
       return {
@@ -81,12 +106,29 @@ function getMergedTemplates() {
         isModified: true, isBuiltin: true,
         updatedBy: override.updated_by, updatedAt: override.updated_at,
         originalCompose: t.compose,
+        verified_at: v.verified_at || null,
+        deprecated_in_favor_of: v.deprecated_in_favor_of || null,
       };
     }
-    return { ...t, isBuiltin: true, logoUrl: TEMPLATE_LOGOS[t.id] || null };
+    return {
+      ...t, isBuiltin: true,
+      logoUrl: TEMPLATE_LOGOS[t.id] || null,
+      verified_at: v.verified_at || null,
+      deprecated_in_favor_of: v.deprecated_in_favor_of || null,
+    };
   });
 
-  return [...merged, ...customOnly];
+  // Custom templates carry their own verified_at / deprecated_in_favor_of from DB
+  const customWithVerification = customOnly.map(c => {
+    const row = customRows.find(r => r.id === c.id);
+    return {
+      ...c,
+      verified_at: row?.verified_at || null,
+      deprecated_in_favor_of: row?.deprecated_in_favor_of || null,
+    };
+  });
+
+  return [...merged, ...customWithVerification];
 }
 
 /** Find a template by id (merged) */

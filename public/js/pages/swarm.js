@@ -164,14 +164,14 @@ const SwarmPage = {
             <label style="font-size:11px">Worker token</label>
             <div style="display:flex;gap:6px">
               <input class="form-control" style="font-size:11px;font-family:var(--mono)" value="${Utils.escapeHtml(tokens.worker || '')}" readonly>
-              <button class="btn btn-sm btn-secondary" onclick="Utils.copyToClipboard('${Utils.escapeHtml(tokens.worker || '')}').then(()=>Toast.success('Copied'))"><i class="fas fa-copy"></i></button>
+              <button class="btn btn-sm btn-secondary" data-copy="${Utils.escapeHtml(tokens.worker || '')}"><i class="fas fa-copy"></i></button>
             </div>
           </div>
           <div class="form-group">
             <label style="font-size:11px">Manager token</label>
             <div style="display:flex;gap:6px">
               <input class="form-control" style="font-size:11px;font-family:var(--mono)" value="${Utils.escapeHtml(tokens.manager || '')}" readonly>
-              <button class="btn btn-sm btn-secondary" onclick="Utils.copyToClipboard('${Utils.escapeHtml(tokens.manager || '')}').then(()=>Toast.success('Copied'))"><i class="fas fa-copy"></i></button>
+              <button class="btn btn-sm btn-secondary" data-copy="${Utils.escapeHtml(tokens.manager || '')}"><i class="fas fa-copy"></i></button>
             </div>
           </div>
         `;

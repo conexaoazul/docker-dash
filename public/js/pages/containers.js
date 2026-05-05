@@ -49,7 +49,9 @@ const ContainersPage = {
       this._detailId = params.id;
       try { await this._loadDetailModule(); }
       catch (err) {
-        container.innerHTML = '<div class="empty-msg is-error">Detail view could not load: ' + (err.message || 'network error') + '. <button class="btn btn-sm" onclick="location.reload()">Reload</button></div>';
+        container.innerHTML = '<div class="empty-msg is-error">Detail view could not load: ' + Utils.escapeHtml(err.message || 'network error') + '. <button class="btn btn-sm" id="dd-reload-btn">Reload</button></div>';
+        const reloadBtn = container.querySelector('#dd-reload-btn');
+        if (reloadBtn) reloadBtn.addEventListener('click', () => location.reload());
         return;
       }
       await this._renderDetail(container);
@@ -2974,7 +2976,7 @@ const ContainersPage = {
       <div class="modal-footer" style="display:flex;gap:8px;justify-content:space-between;align-items:center">
         <button class="btn btn-secondary" id="secrets-remediate-stack" style="display:none"><i class="fas fa-tools" style="margin-right:6px"></i>Remediate whole stack</button>
         <div style="display:flex;gap:8px;margin-left:auto">
-          <a href="#/system" style="align-self:center;font-size:12px;color:var(--accent);text-decoration:none" onclick="setTimeout(()=>document.querySelector('[data-tab=secrets]')?.click(),250)">Open full Secrets tab →</a>
+          <a href="#/system" style="align-self:center;font-size:12px;color:var(--accent);text-decoration:none" data-tab-jump="secrets">Open full Secrets tab →</a>
           <button class="btn btn-secondary" id="modal-ok">Close</button>
         </div>
       </div>
@@ -3086,7 +3088,7 @@ const ContainersPage = {
       <div class="modal-footer" style="display:flex;gap:8px;justify-content:space-between;align-items:center">
         <button class="btn btn-primary" id="egress-enable-stack" style="display:none"><i class="fas fa-shield-alt" style="margin-right:6px"></i>Enable filter for whole stack</button>
         <div style="display:flex;gap:8px;margin-left:auto">
-          <a href="#/system" style="align-self:center;font-size:12px;color:var(--accent);text-decoration:none" onclick="setTimeout(()=>document.querySelector('[data-tab=egress]')?.click(),250)">Open full Egress tab →</a>
+          <a href="#/system" style="align-self:center;font-size:12px;color:var(--accent);text-decoration:none" data-tab-jump="egress">Open full Egress tab →</a>
           <button class="btn btn-secondary" id="modal-ok">Close</button>
         </div>
       </div>
