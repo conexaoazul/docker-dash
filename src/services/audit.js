@@ -260,6 +260,28 @@ class AuditService {
     return lines.join('\n');
   }
 
+  /**
+   * Stream audit rows in [since, until) range as newline-delimited JSON to a
+   * Writable. Uses better-sqlite3's stmt.iterate() — no buffering, safe for
+   * large months. Used by the v8.2.0 monthly off-site dump.
+   */
+  exportJsonl({ since, until, out }) {
+    const db = getDb();
+    const stmt = db.prepare(`
+      SELECT id, user_id, username, action, target_type, target_id,
+             details, ip, user_agent, created_at, entry_hash, prev_hash
+      FROM audit_log
+      WHERE created_at >= ? AND created_at < ?
+      ORDER BY id ASC
+    `);
+    let count = 0;
+    for (const row of stmt.iterate(since, until)) {
+      out.write(JSON.stringify(row) + '\n');
+      count++;
+    }
+    return { count };
+  }
+
   /** Clean old entries (default: keep 90 days) */
   cleanup(days = 90) {
     const db = getDb();

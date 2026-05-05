@@ -2706,4 +2706,122 @@ router.get('/ssl/certificates', requireAuth, requireRole('admin'), async (req, r
   }
 });
 
+// ─── pCloud Backup (v8.2.0) ────────────────────────────────
+router.get('/backup/pcloud/status', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const pcloudBackup = require('../services/pcloud-backup');
+    res.json(pcloudBackup.getStatus());
+  } catch (err) {
+    log.error('pCloud status failed', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/backup/pcloud/connect', requireAuth, requireRole('admin'), writeable, async (req, res) => {
+  try {
+    const { username, password, region } = req.body || {};
+    if (!username || !password) return res.status(400).json({ error: 'username and password are required' });
+    const pcloudBackup = require('../services/pcloud-backup');
+    const r = await pcloudBackup.connect({ username, password, region: region || 'eu' });
+    auditService.log({
+      userId: req.user.id, username: req.user.username,
+      action: 'pcloud_config_update', targetType: 'system', targetId: 'pcloud',
+      details: JSON.stringify({ event: 'connect', region: r.region, email: r.email }),
+      ip: getClientIp(req),
+    });
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Connect failed' });
+  }
+});
+
+router.post('/backup/pcloud/disconnect', requireAuth, requireRole('admin'), writeable, async (req, res) => {
+  try {
+    const pcloudBackup = require('../services/pcloud-backup');
+    await pcloudBackup.disconnect();
+    auditService.log({
+      userId: req.user.id, username: req.user.username,
+      action: 'pcloud_config_update', targetType: 'system', targetId: 'pcloud',
+      details: JSON.stringify({ event: 'disconnect' }),
+      ip: getClientIp(req),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Disconnect failed' });
+  }
+});
+
+router.post('/backup/pcloud/test', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const pcloudBackup = require('../services/pcloud-backup');
+    res.json(await pcloudBackup.testConnection());
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Test failed' });
+  }
+});
+
+router.put('/backup/pcloud/config', requireAuth, requireRole('admin'), writeable, (req, res) => {
+  try {
+    const pcloudBackup = require('../services/pcloud-backup');
+    const status = pcloudBackup.updateConfig(req.body || {});
+    auditService.log({
+      userId: req.user.id, username: req.user.username,
+      action: 'pcloud_config_update', targetType: 'system', targetId: 'pcloud',
+      details: JSON.stringify({ event: 'update', schedules: status.schedules, keep: status.keep }),
+      ip: getClientIp(req),
+    });
+    res.json(status);
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Update failed' });
+  }
+});
+
+router.post('/backup/pcloud/run/db', requireAuth, requireRole('admin'), writeable, async (req, res) => {
+  try {
+    const pcloudBackup = require('../services/pcloud-backup');
+    const r = await pcloudBackup.uploadDbBackup({ trigger: 'manual' });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'DB upload failed' });
+  }
+});
+
+router.post('/backup/pcloud/run/stacks', requireAuth, requireRole('admin'), writeable, async (req, res) => {
+  try {
+    const stackArchive = require('../jobs/stack-archive');
+    const r = await stackArchive.run({ trigger: 'manual' });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Stack archive failed' });
+  }
+});
+
+router.post('/backup/pcloud/run/audit', requireAuth, requireRole('admin'), writeable, async (req, res) => {
+  try {
+    const auditDump = require('../jobs/audit-dump');
+    const r = await auditDump.run({ trigger: 'manual', month: req.body?.month });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Audit dump failed' });
+  }
+});
+
+router.get('/backup/audit-dump/preview', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const auditDump = require('../jobs/audit-dump');
+    const range = auditDump._previousMonth();
+    const r = getDb().prepare(
+      'SELECT COUNT(*) as count FROM audit_log WHERE created_at >= ? AND created_at < ?'
+    ).get(range.since, range.until);
+    res.json({
+      yearMonth: range.yearMonth,
+      rows: r.count,
+      estBytes: r.count * 300,
+      estGzBytes: Math.round(r.count * 60),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Preview failed' });
+  }
+});
+
 module.exports = router;

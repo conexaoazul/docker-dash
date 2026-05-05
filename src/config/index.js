@@ -108,3 +108,39 @@ module.exports = {
     defaultRole: env('OIDC_DEFAULT_ROLE', 'viewer'),
   },
 };
+
+// pCloud config lives in DB (UI-editable, no restart). 5s cache so cron picks
+// up schedule changes promptly without DB round-trip on every read.
+let _pcloudCache = { enabled: false };
+let _pcloudCacheAt = 0;
+const PCLOUD_CACHE_TTL = 5000;
+
+Object.defineProperty(module.exports, 'pcloud', {
+  configurable: true,
+  get() {
+    const now = Date.now();
+    if (now - _pcloudCacheAt < PCLOUD_CACHE_TTL) return _pcloudCache;
+    try {
+      const { getDb } = require('../db');
+      const row = getDb().prepare(
+        'SELECT enabled, region, db_schedule, stack_schedule, audit_schedule FROM pcloud_config WHERE id=1'
+      ).get();
+      _pcloudCache = row
+        ? {
+            enabled: !!row.enabled,
+            region: row.region,
+            schedules: { db: row.db_schedule, stack: row.stack_schedule, audit: row.audit_schedule },
+          }
+        : { enabled: false };
+    } catch {
+      _pcloudCache = { enabled: false };
+    }
+    _pcloudCacheAt = now;
+    return _pcloudCache;
+  },
+});
+
+/** Invalidate pCloud config cache after writes so next read sees fresh state. */
+module.exports.invalidatePcloudCache = function () {
+  _pcloudCacheAt = 0;
+};

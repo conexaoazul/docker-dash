@@ -363,6 +363,12 @@ function startAll() {
             fss.unlinkSync(path.join(backupDir, old));
             log.debug('Old backup removed', { file: old });
           }
+
+          // v8.2.0 — push to pCloud target if configured (best-effort, async)
+          if (config.pcloud && config.pcloud.enabled) {
+            require('../services/pcloud-backup').uploadDbBackup({ trigger: 'cron' })
+              .catch(err => log.error('pCloud DB upload failed', err.message));
+          }
         } catch (e) {
           log.error('Daily backup post-processing failed', e.message);
           try { fss.unlinkSync(tempPath); } catch { /* cleanup */ }
@@ -430,6 +436,27 @@ function startAll() {
       await s3Backup.uploadBackup();
     })));
     log.info('S3 backup scheduled', { cron: s3Schedule });
+  }
+
+  // v8.2.0 — Stack bundle weekly archive + audit monthly dump.
+  // Both pCloud-driven; the schedules live in pcloud_config and are read
+  // through the cached config getter (5s TTL), so changing them in the UI
+  // requires a process restart to re-register cron — documented in the UI.
+  const pcloudCfg = config.pcloud || { enabled: false, schedules: {} };
+  if (pcloudCfg.enabled) {
+    const stackSchedule = pcloudCfg.schedules?.stack || '0 4 * * 0';
+    jobs.push(cron.schedule(stackSchedule, _m('stack-archive', async () => {
+      const stackArchive = require('./stack-archive');
+      await stackArchive.run({ trigger: 'cron' }).catch(err => log.error('stack-archive failed', err.message));
+    })));
+    log.info('Stack archive scheduled', { cron: stackSchedule });
+
+    const auditSchedule = pcloudCfg.schedules?.audit || '5 4 1 * *';
+    jobs.push(cron.schedule(auditSchedule, _m('audit-dump', async () => {
+      const auditDump = require('./audit-dump');
+      await auditDump.run({ trigger: 'cron' }).catch(err => log.error('audit-dump failed', err.message));
+    })));
+    log.info('Audit dump scheduled', { cron: auditSchedule });
   }
 
   // Git polling — v6.17.2 leader-only. Each poll makes a git fetch against

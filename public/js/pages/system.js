@@ -2984,6 +2984,76 @@ DB_PASS=secret"></textarea>
         </div>
       </div>
 
+      <div class="card mt-md" id="pcloud-backup-section">
+        <div class="card-header">
+          <h3><i class="fas fa-cloud" style="margin-right:8px"></i>pCloud Backup (v8.2.0)</h3>
+        </div>
+        <div class="card-body">
+          <p class="text-muted mb-md">Push the daily DB backup, weekly stack bundles, and monthly audit log dumps to a pCloud account (free tier 10 GB, EU data center by default).</p>
+          <div id="pcloud-status" style="margin-bottom:16px"></div>
+          <div id="pcloud-connect-form" style="display:none">
+            <div class="form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:700px">
+              <div class="form-group">
+                <label>pCloud username (email)</label>
+                <input type="text" id="pcloud-username" class="form-control" placeholder="you@example.com" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="pcloud-password" class="form-control" placeholder="••••••••" autocomplete="new-password">
+              </div>
+              <div class="form-group">
+                <label>Region</label>
+                <select id="pcloud-region" class="form-control">
+                  <option value="eu" selected>EU (Switzerland)</option>
+                  <option value="us">US</option>
+                </select>
+              </div>
+            </div>
+            <div style="margin-top:12px">
+              <button class="btn btn-sm btn-primary" id="pcloud-connect-btn"><i class="fas fa-plug"></i> Connect & Test</button>
+            </div>
+            <p class="text-muted text-sm" style="margin-top:8px">Username and password are exchanged for a long-lived auth token; the password is not stored.</p>
+          </div>
+          <div id="pcloud-config-form" style="display:none">
+            <div class="form-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;max-width:900px">
+              <div class="form-group">
+                <label>DB schedule (cron)</label>
+                <input type="text" id="pcloud-sched-db" class="form-control" placeholder="0 3 * * *">
+              </div>
+              <div class="form-group">
+                <label>Stack archive (cron)</label>
+                <input type="text" id="pcloud-sched-stack" class="form-control" placeholder="0 4 * * 0">
+              </div>
+              <div class="form-group">
+                <label>Audit dump (cron)</label>
+                <input type="text" id="pcloud-sched-audit" class="form-control" placeholder="5 4 1 * *">
+              </div>
+              <div class="form-group">
+                <label>Keep DB backups</label>
+                <input type="number" id="pcloud-keep-db" class="form-control" min="1" value="7">
+              </div>
+              <div class="form-group">
+                <label>Keep stack weeks</label>
+                <input type="number" id="pcloud-keep-stack" class="form-control" min="1" value="8">
+              </div>
+              <div class="form-group">
+                <label>Keep audit months</label>
+                <input type="number" id="pcloud-keep-audit" class="form-control" min="1" value="24">
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+              <button class="btn btn-sm btn-primary" id="pcloud-save-btn"><i class="fas fa-save"></i> Save</button>
+              <button class="btn btn-sm btn-secondary" id="pcloud-test-btn"><i class="fas fa-plug"></i> Refresh quota</button>
+              <button class="btn btn-sm btn-secondary" id="pcloud-run-db"><i class="fas fa-database"></i> Run DB now</button>
+              <button class="btn btn-sm btn-secondary" id="pcloud-run-stacks"><i class="fas fa-layer-group"></i> Run stacks now</button>
+              <button class="btn btn-sm btn-secondary" id="pcloud-run-audit"><i class="fas fa-clipboard-list"></i> Run audit now</button>
+              <button class="btn btn-sm btn-danger" id="pcloud-disconnect-btn" style="margin-left:auto"><i class="fas fa-unlink"></i> Disconnect</button>
+            </div>
+            <p class="text-muted text-sm" style="margin-top:8px">Schedule changes take effect after a restart of Docker Dash.</p>
+          </div>
+        </div>
+      </div>
+
       <div class="card mt-md" id="s3-backup-section">
         <div class="card-header">
           <h3><i class="fab fa-aws" style="margin-right:8px"></i>S3 Cloud Backup</h3>
@@ -3080,6 +3150,142 @@ DB_PASS=secret"></textarea>
         const result = await Api.post('/system/backup/s3-upload');
         Toast.success('Backup uploaded to S3 (' + Utils.formatBytes(result.size) + ')');
       } catch (err) { Toast.error('S3 upload failed: ' + err.message); }
+    });
+
+    // ─── pCloud Backup (v8.2.0) ─────────────────────────
+    const renderPcloud = async () => {
+      try {
+        const status = await Api.get('/system/backup/pcloud/status');
+        const statusEl = el.querySelector('#pcloud-status');
+        const connectForm = el.querySelector('#pcloud-connect-form');
+        const configForm = el.querySelector('#pcloud-config-form');
+
+        if (!status.configured) {
+          statusEl.innerHTML = '<span class="text-muted">Not connected — enter pCloud credentials to enable.</span>';
+          connectForm.style.display = '';
+          configForm.style.display = 'none';
+          return;
+        }
+
+        const lb = status.lastBackup || {};
+        const fmtBackup = (label, b) => {
+          if (!b?.at) return `<div><strong>${label}:</strong> <span class="text-muted">never run</span></div>`;
+          const cls = b.status === 'success' ? 'badge-running' : 'badge-stopped';
+          return `<div><strong>${label}:</strong> <span class="badge ${cls}">${b.status}</span> ${Utils.timeAgo(b.at)}${b.error ? ' <span class="text-red">' + Utils.escapeHtml(b.error) + '</span>' : ''}</div>`;
+        };
+
+        const quota = status.quota || {};
+        const quotaPct = quota.pct != null ? quota.pct.toFixed(1) + '%' : '?';
+        const quotaBar = quota.total
+          ? `<div style="background:var(--card-border);height:8px;border-radius:4px;overflow:hidden;margin:8px 0">
+               <div style="background:${quota.pct > 90 ? 'var(--red)' : 'var(--accent)'};width:${Math.min(quota.pct || 0, 100)}%;height:100%"></div>
+             </div>
+             <small class="text-muted">${Utils.formatBytes(quota.used || 0)} of ${Utils.formatBytes(quota.total)} used (${quotaPct})</small>`
+          : '<small class="text-muted">Quota not yet checked.</small>';
+
+        statusEl.innerHTML = `
+          <div><strong>Connected as:</strong> ${Utils.escapeHtml(status.email || '-')} (${status.region?.toUpperCase()})</div>
+          ${quotaBar}
+          <div style="margin-top:12px">
+            ${fmtBackup('DB', lb.db)}
+            ${fmtBackup('Stacks', lb.stack)}
+            ${fmtBackup('Audit', lb.audit)}
+          </div>
+        `;
+
+        connectForm.style.display = 'none';
+        configForm.style.display = '';
+        el.querySelector('#pcloud-sched-db').value = status.schedules?.db || '';
+        el.querySelector('#pcloud-sched-stack').value = status.schedules?.stack || '';
+        el.querySelector('#pcloud-sched-audit').value = status.schedules?.audit || '';
+        el.querySelector('#pcloud-keep-db').value = status.keep?.db || 7;
+        el.querySelector('#pcloud-keep-stack').value = status.keep?.stackWeeks || 8;
+        el.querySelector('#pcloud-keep-audit').value = status.keep?.auditMonths || 24;
+      } catch (err) {
+        const statusEl = el.querySelector('#pcloud-status');
+        if (statusEl) statusEl.innerHTML = `<span class="text-red">${Utils.escapeHtml(err.message || 'Status load failed')}</span>`;
+      }
+    };
+
+    renderPcloud();
+
+    el.querySelector('#pcloud-connect-btn')?.addEventListener('click', async () => {
+      const username = el.querySelector('#pcloud-username').value.trim();
+      const password = el.querySelector('#pcloud-password').value;
+      const region = el.querySelector('#pcloud-region').value;
+      if (!username || !password) { Toast.error('Username and password required'); return; }
+      try {
+        Toast.info('Connecting to pCloud...');
+        await Api.post('/system/backup/pcloud/connect', { username, password, region });
+        Toast.success('Connected to pCloud');
+        el.querySelector('#pcloud-password').value = '';
+        await renderPcloud();
+      } catch (err) { Toast.error('Connect failed: ' + err.message); }
+    });
+
+    el.querySelector('#pcloud-disconnect-btn')?.addEventListener('click', async () => {
+      const ok = await Modal.confirm('Disconnect pCloud? Existing backups in pCloud are kept.', { danger: true });
+      if (!ok) return;
+      try {
+        await Api.post('/system/backup/pcloud/disconnect');
+        Toast.success('Disconnected');
+        await renderPcloud();
+      } catch (err) { Toast.error(err.message); }
+    });
+
+    el.querySelector('#pcloud-test-btn')?.addEventListener('click', async () => {
+      try {
+        Toast.info('Refreshing pCloud quota...');
+        await Api.post('/system/backup/pcloud/test');
+        Toast.success('Quota refreshed');
+        await renderPcloud();
+      } catch (err) { Toast.error('Test failed: ' + err.message); }
+    });
+
+    el.querySelector('#pcloud-save-btn')?.addEventListener('click', async () => {
+      try {
+        await Api.put('/system/backup/pcloud/config', {
+          schedules: {
+            db: el.querySelector('#pcloud-sched-db').value.trim(),
+            stack: el.querySelector('#pcloud-sched-stack').value.trim(),
+            audit: el.querySelector('#pcloud-sched-audit').value.trim(),
+          },
+          keep: {
+            db: parseInt(el.querySelector('#pcloud-keep-db').value, 10),
+            stackWeeks: parseInt(el.querySelector('#pcloud-keep-stack').value, 10),
+            auditMonths: parseInt(el.querySelector('#pcloud-keep-audit').value, 10),
+          },
+        });
+        Toast.success('pCloud configuration saved (restart to apply schedule changes)');
+        await renderPcloud();
+      } catch (err) { Toast.error(err.message); }
+    });
+
+    el.querySelector('#pcloud-run-db')?.addEventListener('click', async () => {
+      try {
+        Toast.info('Uploading DB to pCloud...');
+        const r = await Api.post('/system/backup/pcloud/run/db');
+        Toast.success(`DB uploaded: ${r.file} (${Utils.formatBytes(r.size)})`);
+        await renderPcloud();
+      } catch (err) { Toast.error('DB upload failed: ' + err.message); }
+    });
+
+    el.querySelector('#pcloud-run-stacks')?.addEventListener('click', async () => {
+      try {
+        Toast.info('Archiving stacks to pCloud...');
+        const r = await Api.post('/system/backup/pcloud/run/stacks');
+        Toast.success(`Archived ${r.succeeded}/${r.stacks} stacks (${r.failed} failed)`);
+        await renderPcloud();
+      } catch (err) { Toast.error('Stack archive failed: ' + err.message); }
+    });
+
+    el.querySelector('#pcloud-run-audit')?.addEventListener('click', async () => {
+      try {
+        Toast.info('Dumping previous month audit log...');
+        const r = await Api.post('/system/backup/pcloud/run/audit');
+        Toast.success(`Audit dump uploaded: ${r.yearMonth} (${r.rows} rows, ${Utils.formatBytes(r.gzBytes)} gz)`);
+        await renderPcloud();
+      } catch (err) { Toast.error('Audit dump failed: ' + err.message); }
     });
 
     // Database backup from backup tab

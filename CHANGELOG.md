@@ -2,6 +2,36 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [8.2.0] - 2026-05-05 — pCloud backup target + stack & audit off-site archives
+
+### Added
+
+- **pCloud backup target.** Push the daily SQLite backup, weekly stack bundles, and monthly audit log dumps to a pCloud account on the free tier (10 GB, EU data center default). Direct token auth — username/password are exchanged once for a long-lived auth token, the password is never persisted. Token stored AES-256-GCM encrypted in the new `pcloud_config` table. UI in **System → Backup → pCloud Backup** card with separate cron + retention controls per artifact kind.
+  - Hand-rolled HTTP client around 7 pCloud endpoints (~150 LOC) — deliberately not the abandoned `pcloud-sdk-js`.
+  - Quota-aware: aborts uploads that would push usage above 95% or below a 50 MB safety margin. Audit entry on every abort.
+  - Per-artifact retention defaults: 7 DB backups, 8 weekly stack snapshots, 24 monthly audit dumps. Capped server-side at max 50 prune deletions per run.
+
+- **Weekly stack bundle archive job.** New cron walks every active host, lists running Compose stacks, calls the existing `bundleService.exportStack()` per stack, and uploads JSON files to `/docker-dash/stacks/YYYY-MM-DD/<host>--<stack>.json` in pCloud (and S3 if `uploadObject` is wired). Per-stack failures don't abort the run.
+
+- **Monthly audit log dump job.** New cron exports the previous calendar month's audit rows as gzipped JSONL to `/docker-dash/audit/YYYY-MM.jsonl.gz`. Hash chain (`entry_hash` / `prev_hash`) preserved row-for-row — consecutive monthly dumps form a continuous off-site witness so an auditor can verify integrity even if the live DB is later tampered. DB rows are NOT deleted (separate retention concern).
+  - Streaming export via `better-sqlite3` `stmt.iterate()` — large months (50k+ rows) gzip-stream out without buffer growth.
+  - `?month=YYYY-MM` parameter on the manual run route lets operators backfill or re-dump specific months.
+
+- 4 new audit actions: `pcloud_config_update`, `backup_pcloud`, `backup_pcloud_failed`, `pcloud_prune` — recognised by the v8.0.0 AI audit search.
+- Migration `064_pcloud_config.js` — single-row settings table (CHECK id=1), 24 columns covering config + per-artifact last-run state + cached quota.
+- Tests: `pcloud-client.test.js` (16 cases), `pcloud-backup.test.js` (14 cases), `audit-dump.test.js` (10 cases) — 40 new green tests, total suite still 100% pass.
+- Docs: [`docs/features/pcloud-backup.md`](docs/features/pcloud-backup.md) covers setup, encryption, restore, hash-chain verification, and troubleshooting.
+
+### Strategic discipline
+
+This release continued the deep-spec-first pattern from v8.0.0 / v8.1.0. Three artifacts written before code: `plans/deep-spec-v8.2.0-pcloud-and-archives.md`, `plans/feature-spec-pcloud-backup.md`, `plans/feature-spec-stack-bundle-archive.md`, `plans/feature-spec-audit-monthly-dump.md`. The deep-spec one-sentence defense: "Take 'I have an off-host backup' from 'I configured S3 last quarter and never verified' to 'every night three artifacts land in pCloud free tier and I get a red banner when they don't'."
+
+Anti-features explicitly NOT shipped (see deep-spec §1): pCloud OAuth flow, pCloud Crypto, pCloud Drive mount, public sharing links, two-way sync, restore-from-pCloud UI, resumable chunked uploads, the SDK.
+
+### Why pCloud (and not just S3)
+
+S3 is great for cloud-native shops with an existing AWS account. For self-hosters who don't already have S3, pCloud's free 10 GB tier with EU jurisdiction (Switzerland) and direct token auth is genuinely lower friction. Both targets coexist — operators can enable either or both.
+
 ## [8.1.3] - 2026-04-30 — Bug fix: garbage rows in Files tab on BusyBox containers
 
 ### Fixed
