@@ -44,6 +44,10 @@ const pages = [
   { name: '22-enterprise', path: '#/', title: 'Enterprise Mode', uiMode: 'enterprise' },
   { name: '23-api', path: '#/api-playground', title: 'API Playground' },
   { name: '24-whatsnew', path: '#/whatsnew', title: "What's New" },
+  { name: '25-registry-browse', path: '#/registry-browse', title: 'Registry Browser (v7.5.0–v8.1.0)' },
+  { name: '26-ai-audit-search', path: '#/system', title: 'AI Audit NL Search (v8.0.0)', tab: 'audit' },
+  { name: '27-pcloud-backup', path: '#/system', title: 'pCloud Backup (v8.2.0)', tab: 'backup' },
+  { name: '28-observability', path: '#/observability', title: 'Observability Wizard (v7.2.0)' },
 ];
 
 async function run() {

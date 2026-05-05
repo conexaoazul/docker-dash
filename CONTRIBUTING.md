@@ -8,21 +8,22 @@ Thanks for your interest in contributing! Docker Dash is actively maintained and
 
 Looking for where to start? These are great first contributions:
 
-- **Add a language translation** — copy `public/js/i18n/TEMPLATE.js`, translate values, add one `<script>` tag. Currently: 11 languages (EN, RO, DE, IT, FR, ES, PT, ZH, JA, KO, Klingon).
-- **Add an app template** — add an entry to `src/routes/templates.js` (JSON object with compose YAML). Currently: 33 templates.
+- **Add a language translation** — copy `public/js/i18n/TEMPLATE.js`, translate values, add one `<script>` tag. Currently: 11 languages (EN complete, RO ~77%, others ~66% — translations tab in System covers the gap without code).
+- **Add an app template** — add an entry to `src/routes/templates.js` (JSON object with compose YAML). Currently: 47 templates including the AI Workload Pack (12 entries: Ollama, RAG stack, vLLM, etc.).
 - **Improve i18n coverage** — some pages still have hardcoded English strings (grep for strings not using `i18n.t()`)
-- **Add tests** — 907 tests across 59 suites; more coverage is always welcome, especially integration tests
+- **Add tests** — 1122 tests across 70 suites; more coverage is always welcome, especially integration tests for newer features (registry retention, pCloud orchestration, AI provider abstraction)
 - **Documentation** — improve README, add examples, write tutorials
 - **Accessibility** — add ARIA attributes, improve screen reader support, test keyboard navigation
 
-### Project Stats (v5.3.0)
+### Project Stats (v8.2.0)
 
-- **24 pages** in the frontend SPA (incl. Swarm, Compare with 8 tools)
-- **230+ API endpoints** (see `/api/docs` for full list)
-- **907 tests** (59 test suites, 100% passing)
-- **33 app templates** (+ custom user templates)
-- **37 database migrations** (001-037)
-- **11 languages** (EN, RO, DE, IT, FR, ES, PT, ZH, JA, KO, Klingon)
+- **30+ pages** in the frontend SPA (incl. Registry Browse, AI Settings, Observability Wizard, pCloud Backup card)
+- **451 API endpoints** (`grep -hE "router\.(get|post|put|patch|delete)" src/routes/*.js | wc -l`)
+- **1122 tests** (70 test suites, 100% passing — 4 skipped are live-Cloudflare ACME integration gated on a CI secret)
+- **47 app templates** including the v8.0.1 AI Workload Pack (Ollama / Open WebUI / RAG / vLLM / SD / ComfyUI / Whisper / Langflow / AnythingLLM / n8n / LiteLLM / Flowise)
+- **64 database migrations** (001-064)
+- **11 languages** — EN (complete), RO (~77%), DE/IT/FR/ES/PT/ZH/JA/KO/tlh (~66%, fall back to EN for missing keys)
+- **84 built-in How-To guides** (EN + RO content; AI category covers Ollama on CPU/GPU + GPU passthrough + RAG stack)
 
 ## Getting Started
 
@@ -48,7 +49,7 @@ Looking for where to start? These are great first contributions:
    ```bash
    npm run dev
    ```
-7. Open http://localhost:3456 — login with `admin` / `admin`
+7. Open http://localhost:8101 — login with `admin` / `admin`
 
 ## Architecture Principles
 
@@ -215,7 +216,7 @@ Always test your changes in **both dark and light themes**.
 Before submitting a PR, verify:
 
 - [ ] `node --check` passes on all modified `.js` files
-- [ ] `npm test` passes (740+ tests, 100%)
+- [ ] `npm test` passes (currently 1122 tests at 100%)
 - [ ] `npm run lint` passes (0 errors)
 - [ ] Works in both **dark and light** themes
 - [ ] Works with **sidebar collapsed** and expanded

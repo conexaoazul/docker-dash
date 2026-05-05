@@ -4,11 +4,11 @@
 
 | Version | Supported          |
 |---------|--------------------|
-| 6.14.x  | :white_check_mark: (current) |
-| 6.13.x  | :white_check_mark: (security fixes only) |
-| 6.12.x  | :white_check_mark: (security fixes only) |
-| 6.11.x  | :white_check_mark: (security fixes only) |
-| < 6.11  | :x:                |
+| 8.2.x   | :white_check_mark: (current) |
+| 8.1.x   | :white_check_mark: (security fixes only) |
+| 8.0.x   | :white_check_mark: (security fixes only) |
+| 7.x     | :warning: (best-effort security fixes; please upgrade to 8.x) |
+| < 7.0   | :x: (unsupported — multiple breaking security improvements since) |
 
 ## Reporting a Vulnerability
 
@@ -88,10 +88,10 @@ If you discover a security vulnerability in Docker Dash, please report it respon
 
 ## Testing
 
-- **907 tests** across 59 test suites (100% passing; 4 skipped are live-Cloudflare integration tests gated on a CI secret)
-- Unit tests: crypto round-trip, input validation, shell sanitization, git patterns
-- Integration tests: auth flow (login, session, logout, SSO), API endpoints (supertest), RBAC, security alerts
-- **CI pipeline** — GitHub Actions runs tests + syntax check + npm audit on every push
+- **1122 tests** across 70 test suites (100% passing; 4 skipped are live-Cloudflare ACME integration tests gated on a CI secret)
+- Unit tests: crypto round-trip, input validation, shell sanitization, git patterns, AI redactor (33 cases — Bearer/env-assignment/connection-string/tokens/IP/email patterns), retention pure-evaluator (27 cases — 5 safety layers + protected-pattern globs), provenance parser (15 cases — OCI annotation linkifier + cosign presence detector), pCloud HTTP client (16 cases — auth/quota/retry/region routing)
+- Integration tests: auth flow (login, session, logout, SSO), API endpoints (supertest), RBAC, security alerts, registry push/browse/delete + retention apply, AI provider abstraction with MockAiProvider, pCloud backup orchestration (14 cases), audit-log monthly dump with hash-chain integrity round-trip (gzip → upload → download → gunzip → chain-walk)
+- **CI pipeline** — GitHub Actions runs tests + syntax check + `npm audit` + ESLint on every push (lint enforcement added in v7.7.0 — fails on any warning)
 - **ESLint** — `no-eval`, `no-implied-eval`, `no-new-func`, `eqeqeq` rules enforced
 
 ## Security Audit History
@@ -103,6 +103,12 @@ If you discover a security vulnerability in Docker Dash, please report it respon
 | 2026-03-28 | Production Readiness v2 | Score: 8.8/10 | All P0+P1 resolved |
 | 2026-03-28 | Shell Injection Audit | 0 vectors remaining | All execSync eliminated |
 | 2026-03-28 | Final Security Scan | 0 warnings on server | Clean |
+| 2026-04-22 | Production Readiness v6.16.1 → v7.0.0 | Score: 9.7 → 9.8/10 | HA mode production-ready (Redis-backed leader election + WS pub/sub) |
+| 2026-04-27 | AI Features Pre-Release Spike (S4) | Redactor 100/100 on 27-case corpus | Bearer/env-assignment/connection-string patterns; bad custom regex aborts AI call |
+| 2026-04-27 | AI Audit Trail Review | Every AI call writes provider + model + token counts + redaction counts + SHA-256 payload hash | Compliance-grade audit; operators can prove "did this exact text get sent?" without storing the prompt |
+| 2026-04-29 | Registry Hygiene Pack Safety Review | 5 retention safety layers (default-disabled, min-3-tags floor, default protected patterns, server cap 200/run, audit per delete) | All 5 layers have dedicated regression tests in `retention.test.js` |
+| 2026-05-05 | pCloud Backup Encryption Review | AES-256-GCM token at rest (existing `ENCRYPTION_KEY`), pre-flight quota gate at 95% + 50 MB safety margin, hash-chain preserved row-for-row across monthly dumps | Token never logged, never returned in GET responses; only the long-lived auth token persisted (password discarded after exchange) |
+| 2026-05-05 | Dependency Audit (`npm audit --omit=dev`) | 1 moderate: `uuid <14.0.0` via `dockerode 4.x` (GHSA-w5hq-g745-h8pq) | Accepted — see "Known Security Tradeoffs §4" below for rationale |
 
 ## Known Security Tradeoffs
 
@@ -174,6 +180,18 @@ The following are conscious design decisions, not oversights. Each represents a 
 **Impact:** A compromised Docker Dash instance could potentially be used to escape to the host via Docker API. This is a structural limitation of all Docker management dashboards.
 
 **Mitigation:** Socket mounted read-only (`:ro`) in production compose. `no-new-privileges` security option. Feature flags to disable dangerous operations (`ENABLE_EXEC=false`, `READ_ONLY_MODE=true`). Multi-user RBAC limits what each role can do. Audit trail on all actions.
+
+### 7. Accepted moderate CVE: `uuid <14.0.0` via `dockerode 4.x`
+
+**What:** `npm audit --omit=dev` reports one moderate-severity advisory: [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq) — "Missing buffer bounds check in v3/v5/v6 of `uuid` when `buf` is provided." Pulled in transitively by `dockerode 4.x`.
+
+**Why we accept it:**
+1. **No exploit path through Docker Dash.** The advisory requires the caller to supply a pre-allocated `buf` argument to `uuid.v3/v5/v6()`. Docker Dash never calls these UUID functions directly, and `dockerode` doesn't pass user-controlled `buf` arguments to them either. We grep-confirmed: `grep -rE "uuid\.(v3|v5|v6)" node_modules/dockerode/` returns zero call sites that pass a `buf`. The vulnerable code path is unreachable from our usage.
+2. **Fix is breaking.** `npm audit fix --force` would install `dockerode@5.0.0`, a major version bump with API changes across our entire `src/services/docker.js` (which has ~40 dockerode call sites). Worth doing, but not as a security-driven hotfix.
+
+**Plan:** Schedule `dockerode 5.x` migration in a future release (tracked as a non-blocking item). Re-run `npm audit` quarterly; if the advisory upgrades to high/critical or a new exploit demonstrates reachability through `dockerode`, treat as urgent.
+
+**Operator action:** None required. This advisory does not affect any user-facing security guarantee of Docker Dash.
 
 ## Deployment Recommendations
 

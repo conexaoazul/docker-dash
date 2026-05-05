@@ -266,7 +266,108 @@ curl -s -X DELETE -H "Authorization: Bearer $TOKEN" \
 
 ---
 
-## 9. What's NOT here (and why)
+## 9. Build Provenance Panel (v8.1.0)
+
+A read-only panel that surfaces what an image's manifest already tells you — without requiring you to learn `oras inspect` syntax.
+
+**Where it lives:** Registry Browser → pick a tag → manifest inspect modal → **Build Provenance** collapsible card (collapsed by default; click to expand).
+
+**What it surfaces** (parses OCI annotations from the manifest's `manifests[].annotations` and the config's `annotations`):
+
+| Field | Annotation key | UI behavior |
+|-------|----------------|-------------|
+| Source repository | `org.opencontainers.image.source` | Linkified for github.com / gitlab.com / bitbucket.org / codeberg.org / gitea.com (other hosts shown as plain text) |
+| Commit SHA | `org.opencontainers.image.revision` | Truncated 8 chars, full SHA in tooltip; combined with source URL → linkified to `<source>/commit/<sha>` |
+| Authors | `org.opencontainers.image.authors` | Plain text |
+| License | `org.opencontainers.image.licenses` | Plain text (SPDX identifier expected) |
+| Vendor | `org.opencontainers.image.vendor` | Plain text |
+| Version label | `org.opencontainers.image.version` | Plain text |
+| Base image | `org.opencontainers.image.base.name` + `.base.digest` | Plain text + truncated digest |
+| Cosign signature presence | Layer with `application/vnd.dev.cosign.simplesigning.v1+json` mediaType, OR sibling `:sha256-XXX.sig` tag in same repo | "🔒 Signed" badge — **presence only, NOT cryptographic verification** |
+
+**What the panel does NOT do:**
+- Run `cosign verify` against the signature bytes — that needs the cosign binary, key management UX, and trust policy. Deferred to a future v8.x.
+- Fetch the linked GitHub/GitLab commit metadata. The link is one click away; we don't proxy.
+- Validate that `base.digest` is a digest you trust. We surface what the build wrote.
+
+**Show-all toggle:** an expander labeled "Show all annotations" lists every key/value pair from `manifests[].annotations` and `config.annotations` — useful for power users who care about a non-canonical key (`com.acme.build-id`, etc.).
+
+**Backend:** [`src/services/registry-provenance.js`](../../src/services/registry-provenance.js) — pure function `parse(manifestData) → { hasProvenance, known, other, otherCount, totalAnnotations }`. 15-case test corpus covers all 5 supported source hosts, signature presence/absence, missing annotations, and edge cases (empty manifest, malformed annotations).
+
+---
+
+## 10. Retention Policies with Dry-Run (v8.1.0)
+
+Per-repo cleanup rules. Five safety layers stacked because "I just deleted production by accident" is the dominant operator fear with retention features.
+
+**Where it lives:** Registry Browser → pick a repo → **Repository Settings** expander (collapsed by default) → **Retention Policy** section.
+
+**The five safety layers:**
+
+1. **Default disabled (dry-run only).** A new policy is created in dry-run mode. Clicking **Preview** shows what *would* be deleted; clicking **Apply** is a separate, deliberate action that requires the operator to flip the `enabled` toggle.
+2. **Hard floor: minimum 3 tags kept.** Even if the rule says "keep 1", the evaluator floors at 3. Rationale: defense against off-by-one errors and YAML typos that wipe out a repo.
+3. **Default protected patterns.** New policies pre-fill the protect-glob list with `latest`, `v*`, `main`, `master`, `prod-*`, `stable`. Operators can edit, but the defaults catch the common cases.
+4. **Server-side cap of 200 deletions per run.** If the evaluator wants to delete 500 tags, only 200 are processed; remainder is logged for the operator to investigate. Prevents a runaway evaluation from wiping a year of CI artifacts in one cron tick.
+5. **Audit per delete.** Every individual `registry_tag_delete` event is hash-chain-logged with the policy ID and the rule version that triggered it. If something does go wrong, you can prove what was configured at the time.
+
+**4 rule templates:**
+
+| Template | Rule shape | Use case |
+|----------|------------|----------|
+| Keep last N tags | `{ keepLastN: 10 }` | Rolling release tags |
+| Delete untagged older than X days | `{ deleteUntaggedOlderThanDays: 30 }` | Build artifacts that lost their tag via a re-tag |
+| Keep last N + delete untagged | combination | Most common — apply both rules |
+| Custom JSON | raw `rule_json` editor | Power users with multi-clause rules |
+
+**Cron:** Daily at `17 3 * * *` (off-:00 to avoid clashing with the daily DB backup). Leader-only in HA mode (registered via `cluster.onBecomeLeader`).
+
+**Backend:** [`src/services/retention.js`](../../src/services/retention.js) — pure function `evaluate({tags, rule}) → {toDelete, toKeep, summary}`. 27-case test corpus covers all 5 safety layers, glob pattern edge cases (`v*` matching `v1`/`v1.2.3`/`v-rc1`, NOT matching `version`), date arithmetic, and the empty-input case.
+
+**Migration:** `063_registry_repos_and_retention.js` creates `retention_policies` (1:1 with `registry_repos`, ON DELETE CASCADE both ways).
+
+---
+
+## 11. Remote/Virtual Repositories (v8.1.0)
+
+JFrog-style local/remote/virtual repo taxonomy adapted to the OCI Distribution constraint of "one upstream per registry instance."
+
+**Three repo types** (stored on `registry_repos.type`):
+
+| Type | What it is | Use case |
+|------|------------|----------|
+| `local` | The default — repos hosted directly in your Distribution registry | Your own pushed images |
+| `remote` | A proxy to an upstream public registry (Docker Hub, GHCR, Quay) — Distribution caches on first pull | Survive Docker Hub rate limits + offline operation after first cache |
+| `virtual` | A logical group of `local + remote` repos served under one path | Single pull URL that resolves transparently across upstreams |
+
+**Where it lives:** Registry Browser → pick a repo → Repository Settings expander → **Repository Type** section. Editor is a radio (Local / Remote / Virtual) with conditional fields:
+
+- **Remote** type reveals: upstream URL, upstream username (optional), upstream password (encrypted at rest).
+- **Virtual** type reveals: drag-and-drop list of member `local` and `remote` repos.
+
+**The "Private Registry + Cache" template (v8.1.0):**
+
+Templates → DevOps → **Private Registry + Cache (4 containers)**. Ships:
+- 1× `registry:3` for `local` repos (your pushes)
+- 1× `registry:3` configured as a Docker Hub proxy via `proxy: { remoteurl: 'https://registry-1.docker.io' }`
+- 1× `registry:3` configured as a GHCR proxy
+- 1× Caddy router with `strip_prefix` rules so `/local/*`, `/dockerhub/*`, `/ghcr/*` resolve to the right backend
+
+This is the JFrog "virtual" pattern adapted to OCI Distribution's one-upstream-per-instance constraint. Each remote needs its own container (Distribution doesn't multiplex upstreams within one process), but Caddy hides the multi-container shape from operators behind a single hostname.
+
+**What this solves:**
+- **Docker Hub rate limit relief.** First pull populates the cache; subsequent pulls hit your local copy. Anonymous Hub limit (100/6h) becomes "your team's first 100 unique pulls in 6 hours, ever."
+- **Offline operation.** After the cache is warm for the images you actually use, an air-gapped or transient-network host can still pull.
+- **Single pull URL across upstreams.** `docker pull registry.internal/redis:7-alpine` resolves to Hub via the proxy; `docker pull registry.internal/myorg/myapp:v1.2.3` resolves to your local repo. Operators don't need to remember which upstream a tag came from.
+
+**Backend:** [`src/services/registry.js`](../../src/services/registry.js) gains `listRepos()`, `upsertRepo()`, `deleteRepo()`, `resolveVirtual()`. The `_authConfigForRegistry()` helper picks per-repo upstream credentials when present, falling back to the registry's default credential.
+
+**Migration:** `063_registry_repos_and_retention.js` creates `registry_repos` (registry_id + repo_path UNIQUE, type CHECK constraint, upstream_url + upstream_password_encrypted nullable for `local`).
+
+**Audit:** 8 new audit actions — `registry_repo_create`, `registry_repo_update`, `registry_repo_delete`, `retention_policy_create`, `retention_policy_update`, `retention_policy_delete`, `retention_dry_run`, `retention_executed`.
+
+---
+
+## 12. What's NOT here (and why)
 
 | Feature | Status | Why |
 |---------|--------|-----|
@@ -282,10 +383,11 @@ These are deliberate decisions, not oversights. If any becomes important enough 
 
 ---
 
-## 10. See also
+## 13. See also
 
 - [`SECURITY.md`](../../SECURITY.md) — credential storage encryption details
-- [`CHANGELOG.md`](../../CHANGELOG.md) — implementation notes per release (v7.5.0, v7.5.1, v7.6.0)
+- [`CHANGELOG.md`](../../CHANGELOG.md) — implementation notes per release (v7.5.0, v7.5.1, v7.6.0, v7.7.0, v8.1.0)
 - [`docs/CONTRIBUTING.md`](../CONTRIBUTING.md) — how to add a new feature in this codebase (the registry feature is itself a 7-layer example)
 - [Distribution docs](https://distribution.github.io/distribution/) — upstream registry config + GC procedure
 - [Harbor installer](https://goharbor.io/docs/latest/install-config/) — for enterprise needs (RBAC, scanning, replication)
+- [JFrog Artifactory comparison](https://jfrog.com/artifactory/) — the v8.1.0 hygiene pack borrows the local/remote/virtual taxonomy

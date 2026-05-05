@@ -13,7 +13,7 @@
     <img src="https://img.shields.io/badge/version-8.2.0-blue" alt="Version">
     <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.8%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
-    <img src="https://img.shields.io/badge/Docker-~80MB-blue" alt="Image Size">
+    <img src="https://img.shields.io/badge/Docker-~180MB-blue" alt="Image Size">
     <img src="https://img.shields.io/badge/RAM-~50MB-blue" alt="RAM Usage">
   </p>
   <p align="center">
@@ -124,6 +124,14 @@ Deep reading: [HA Mode reference](docs/features/ha-mode.md) · [Failover runbook
     <td align="center"><strong>API Playground</strong><br><img src="docs/screenshots/api-playground.png" alt="API Playground" width="400"></td>
     <td align="center"><strong>What's New</strong><br><img src="docs/screenshots/whatsnew.png" alt="What's New" width="400"></td>
   </tr>
+  <tr>
+    <td align="center"><strong>Registry Browser (v7.5.0–v8.1.0)</strong><br><img src="docs/screenshots/registry-browse.png" alt="Registry Browser" width="400"></td>
+    <td align="center"><strong>Observability Wizard (v7.2.0)</strong><br><img src="docs/screenshots/observability-wizard.png" alt="Observability Wizard" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>AI Audit NL Search (v8.0.0)</strong><br><img src="docs/screenshots/ai-audit-search.png" alt="AI Audit NL Search" width="400"></td>
+    <td align="center"><strong>pCloud Backup (v8.2.0)</strong><br><img src="docs/screenshots/pcloud-backup.png" alt="pCloud Backup" width="400"></td>
+  </tr>
 </table>
 
 ## Features
@@ -215,13 +223,13 @@ Deep reading: [HA Mode reference](docs/features/ha-mode.md) · [Failover runbook
 - **Visual Badges** — `EPHEMERAL` (red + countdown) or `SANDBOX` (yellow) badges in containers list, detail card with Extend +1h / Remove buttons
 
 ### Developer Tools
-- **API Playground** — Browse and test all 230+ API endpoints from the UI with response viewer
+- **API Playground** — Browse and test 450+ API endpoints from the UI with response viewer
 - **docker run → Compose** — Paste any docker run command, get docker-compose YAML
 - **Dual AI Provider** — Container Doctor supports OpenAI API and local Ollama; provider/model/key selector + inline response
 - **AI Log Analysis** — Generate diagnostic prompts for ChatGPT/Claude from container logs
 - **Generate Compose from GitHub** — Paste a public repo URL, AI (OpenAI or Ollama) generates a production-ready docker-compose.yml
 - **Traefik/Caddy Labels** — Generate reverse proxy labels from domain + port
-- **App Templates** — 33 built-in + custom templates with CRUD, preview, Template Configurator and modification tracking
+- **App Templates** — 47 built-in + custom templates with CRUD, preview, Template Configurator and modification tracking. **AI Workload Pack** (v8.0.1): 12 curated AI/ML templates — Ollama, Open WebUI, RAG stack (Ollama+Qdrant+Open WebUI), vLLM, Stable Diffusion WebUI, ComfyUI, Whisper, Langflow, AnythingLLM, n8n, LiteLLM Proxy, Flowise (GPU passthrough block ready, commented for CPU compat)
 - **Image Layer Visualization** — View all layers of any image with command, size, and relative-size bar per layer
 - **Deploy Preview** — Check for image updates via digest comparison before pulling
 - **Resource Limits Editor** — Visual sliders with presets for CPU and memory
@@ -236,7 +244,7 @@ Deep reading: [HA Mode reference](docs/features/ha-mode.md) · [Failover runbook
 - **Security Alerts** — 5 default rules (brute force, admin created, MFA disabled), threshold detection
 
 ### Knowledge Base
-- **How-To Guides** — 63 built-in bilingual guides (EN + RO) covering Docker basics, Linux, networking, security, Compose, Swarm, troubleshooting, backup, performance — plus dedicated platform setups for Synology DSM, Unraid, TrueNAS SCALE, QNAP, OpenMediaVault, Generic VPS (Hetzner/DO/EC2/GCE/Azure/Linode/Vultr), and a canonical SSH key auth guide with per-platform public-key placement instructions
+- **How-To Guides** — 84 built-in bilingual guides (EN + RO) covering Docker basics, Linux, networking, security, Compose, Swarm, troubleshooting, backup, performance — plus dedicated platform setups for Synology DSM, Unraid, TrueNAS SCALE, QNAP, OpenMediaVault, Generic VPS (Hetzner/DO/EC2/GCE/Azure/Linode/Vultr), an SSH key auth guide with per-platform public-key placement instructions, and an **AI category** (v8.0.1) covering Ollama on CPU/GPU, NVIDIA GPU passthrough to Docker, and a self-hosted RAG stack walkthrough
 - **Guide Editor** — Admins can create, edit, and delete custom guides with HTML content in both languages
 - **Search & Categories** — Filter by 9 categories, difficulty level, and free-text search across all guides
 
@@ -248,8 +256,8 @@ Deep reading: [HA Mode reference](docs/features/ha-mode.md) · [Failover runbook
 - **Public Status Page** — Unauthenticated status page for selected services
 - **Container Metadata** — Custom labels, descriptions, links, categories, owner, notes
 - **Dark/Light Theme** — Per-user sync across devices, system-aware toggle, mobile responsive
-- **i18n** — 11 languages: English, Romanian, German, Italian, French, Spanish, Portuguese, Chinese, Japanese, Korean, Klingon ([add yours](public/js/i18n/README.md))
-- **Translations tab** (v6.11) — Built-in Google Translate + DeepL integration for the 25% of keys missing in non-EN locales. Per-provider monthly quota tracking (500k chars each free tier), auto-accept toggle, chunked batch with progress bar + cancel, runtime DB overrides applied on login (no file download / git commit / container rebuild). AES-GCM encrypted API keys, hash-chained audit trail
+- **i18n** — 11 languages: English (complete), Romanian (~77%), German / Italian / French / Spanish / Portuguese / Chinese / Japanese / Korean / Klingon (~66% each — fall back to English for missing keys). [Add yours](public/js/i18n/README.md). The Translations tab below closes the gap without code changes.
+- **Translations tab** (v6.11) — Built-in Google Translate + DeepL integration for the missing keys in non-EN locales. Per-provider monthly quota tracking (500k chars each free tier), auto-accept toggle, chunked batch with progress bar + cancel, runtime DB overrides applied on login (no file download / git commit / container rebuild). AES-GCM encrypted API keys, hash-chained audit trail
 - **Klingon Easter Egg** — Full activation animation with sound, dagger cursor, red theme
 - **Command Palette** — Ctrl+K quick navigation with keyboard shortcuts
 - **Watchtower Detection** — Auto-detect and migrate from Watchtower to native safe-pull
@@ -257,7 +265,7 @@ Deep reading: [HA Mode reference](docs/features/ha-mode.md) · [Failover runbook
 - **Self-Reporting Footprint** — Docker Dash memory, uptime, DB size at `/api/footprint`
 - **Let's Encrypt Wizard** — 3-step UI for issuing certs via DNS-01 (Cloudflare, Route53, DigitalOcean, Hetzner, Linode) or HTTP-01. Encrypted credential vault, auto-renewal via Caddy, hash-chained audit trail. Open source — no other Docker UI ships this
 - **Container Remediation Wizard** — 3-step UI that turns Secrets Audit + CIS Benchmark findings into actionable fixes. 20-entry catalog, 4 live-updatable (zero downtime), 16 with compose-recreate + auto-rollback. Git-PR mode for git-backed stacks. No other OSS Docker UI ships this
-- **1024 Tests** — 64 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics, permissions RBAC, settings CRUD, security alert rule evaluation, event notifier dispatch, cluster abstraction (HA mode), rate-limiter memory + Redis paths, registry push + browse + delete, AI redactor + service abstraction (100% passing)
+- **1122 Tests** — 70 test suites covering auth, RBAC, security, CRUD, services, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics, permissions RBAC, settings CRUD, security alert rule evaluation, event notifier dispatch, cluster abstraction (HA mode), rate-limiter memory + Redis paths, registry push + browse + delete + retention + provenance, AI redactor + service abstraction, pCloud client + backup orchestration + audit dump (hash-chain integrity verified), 100% passing
 
 ### AI (v8.0.0+) — opt-in, BYOK, off by default
 
@@ -266,10 +274,10 @@ The first feature category that introduces optional outbound traffic to non-user
 - **Provider abstraction** — Anthropic Claude, OpenAI, Ollama. **BYOK** — Docker Dash ships zero API keys. Off by default until operator configures + enables in Settings → AI tab.
 - **Privacy-first redactor** — strips secrets/PII before any payload leaves the host. Built-in patterns cover Bearer auth, env-style assignments (incl. `STRIPE_SECRET_KEY`-style prefixes), connection-string credentials (13 schemes), high-entropy tokens, IPs, emails. Validated 100/100 on a 27-case corpus. Bad custom regex aborts the call (privacy beats utility).
 - **Compliance-grade audit** — every AI call logged with provider, model, token counts, redaction counts, SHA-256 payload hash. Operators can prove "did this exact text get sent?" without storing the prompt.
-- **Audit log NL search (v8.0.0)** — System → Audit page → magic-wand search box. Type *"who deleted containers in the last 7 days"* → translates to a structured filter via the AI provider, runs through existing audit query path. Never NL→SQL — only structured fields conforming to a JSON schema with a 161-entry action enum.
+- **Audit log NL search (v8.0.0)** — System → Audit page → magic-wand search box. Type *"who deleted containers in the last 7 days"* → translates to a structured filter via the AI provider, runs through existing audit query path. Never NL→SQL — only structured fields conforming to a JSON schema with a 174-entry action enum.
 - **Ollama is first-class** for sovereignty-critical deployments — zero outbound traffic. Recommended local model: `qwen2.5-coder:7b` (≈6 GB RAM, $0/month).
 - **Cost example** for cloud providers: 100 NL searches/day ≈ **$1.50/month** on Claude Haiku 4.5, **$0.30/month** on GPT-4o-mini.
-- **Roadmap**: v8.1.0 vulnerability triage (ranks scan results by real exploitability via EPSS + LLM reasoning), v8.2.0 incident triage (container restart-loop diagnosis from inspect + logs + stats). Both ship after v8.0.0 has 2+ weeks in production with no compliance issues.
+- **Roadmap**: AI vulnerability triage (rank scan results by real exploitability via EPSS + LLM reasoning) and AI incident triage (container restart-loop diagnosis from inspect + logs + stats) remain gated on production signal from v8.0.0 audit search — need ≥2 weeks of uptime, ≥1 real redactor catch, zero compliance issues. Until then, v8.x has prioritized adjacent value: registry hygiene (v8.1.0) and off-site backup (v8.2.0).
 
 See [`docs/features/ai.md`](docs/features/ai.md) for the full setup walkthrough, provider tradeoffs, redactor reference, and programmatic API.
 
@@ -285,8 +293,9 @@ Dedicated reference docs for the deeper features, in [docs/features/](docs/featu
 - **[HA Load Balancer Configs](docs/features/ha-lb-configs.md)** — copy-paste examples for Caddy + Traefik + HAProxy + nginx with sticky-session + WS upgrade + health checks
 - **[Observability Stack (v7.1.0)](docs/features/observability.md)** — opt-in Prometheus + Grafana via `docker compose --profile observability up -d`, 8-panel dashboard auto-provisioned, recommended alerts, integration with existing Prometheus/Grafana
 - **[Observability Wizard (v7.2.0)](docs/features/observability.md#1a-in-app-wizard-v720)** — admin UI at **System → Observability**. Detects existing Prometheus/Grafana on the host and offers 3 UX branches: integrate (both found → copy scrape snippet + one-click dashboard import via Grafana API), partial deploy, or full deploy with copy-paste instructions. Admin-only, audit-logged, token never persisted
-- **[Image Registry (v7.5.0–v7.6.0)](docs/features/registry.md)** — Distribution one-click template + push from Images page (SSE progress stream) + Browse page (catalog + tags + manifest inspect) + delete-by-digest with two-step confirmation gate. Reuses the encrypted credential store from Settings → Registries. Multi-arch manifest lists deliberately not supported (use `buildx imagetools`)
-- **[AI Features (v8.0.0)](docs/features/ai.md)** — opt-in, BYOK, off by default. Provider abstraction across Anthropic / OpenAI / Ollama. Privacy-first redactor (validated 100/100 on a hand-built corpus). SHA-256 payload hash in audit log for compliance evidence. Audit NL search (System → Audit) ships first; vulnerability triage + incident triage on the v8.1.0/v8.2.0 roadmap
+- **[Image Registry (v7.5.0–v8.1.0)](docs/features/registry.md)** — Distribution one-click template + push from Images page (SSE progress stream) + Browse page (catalog + tags + manifest inspect) + delete-by-digest with two-step confirmation gate + **Registry Hygiene Pack (v8.1.0)**: build provenance panel surfacing OCI annotations + cosign presence, retention policies with dry-run + 5-layer safety (default-disabled, min-3-tags floor, default protected patterns latest/v\*/main/master/prod-\*/stable, server cap 200/run, audit per delete), and JFrog-style local/remote/virtual repo taxonomy via Distribution proxy config (Docker Hub rate-limit relief + offline operation)
+- **[AI Features (v8.0.0)](docs/features/ai.md)** — opt-in, BYOK, off by default. Provider abstraction across Anthropic / OpenAI / Ollama. Privacy-first redactor (validated 100/100 on a hand-built corpus). SHA-256 payload hash in audit log for compliance evidence. Audit NL search (System → Audit) ships first; AI vulnerability triage + incident triage gated on production signal from v8.0.0
+- **[pCloud Backup (v8.2.0)](docs/features/pcloud-backup.md)** — third backup target alongside local + S3. Pushes the daily DB, weekly stack bundles, and monthly hash-chain-preserving audit log dumps to a pCloud free-tier account (10 GB, EU Switzerland default). Direct token auth (no OAuth dance), AES-256-GCM token storage, quota-aware uploads (95% threshold + 50 MB safety margin), per-artifact retention. Anti-features deliberately NOT shipped: pCloud Crypto, Drive mount, public sharing, restore-from-pCloud UI, the abandoned pcloud-sdk-js
 
 ## Where to start
 
@@ -370,7 +379,7 @@ See the [HA Mode reference](docs/features/ha-mode.md) for the full enablement pr
 
 - Docker Engine 20.10+ (or Docker Desktop 4.x+)
 - Docker Compose v2
-- ~50MB RAM, minimal CPU, ~80MB disk for the image
+- ~50MB RAM, minimal CPU, ~180MB disk for the image (includes Trivy + Grype + Docker Scout binaries for built-in vulnerability scanning)
 
 ### HA mode (additional)
 
@@ -536,7 +545,7 @@ Currently supported: **English**, **Romanian**, **German**, **Italian**, **Frenc
 docker-dash/
 ├── src/
 │   ├── config/          # Environment-based configuration
-│   ├── db/              # SQLite setup + 60 auto-migrations
+│   ├── db/              # SQLite setup + 64 auto-migrations
 │   ├── middleware/       # Auth, rate limiting, hostId extraction
 │   ├── routes/          # REST API (containers, images, volumes, networks, swarm, hosts, ...)
 │   ├── services/        # Business logic (docker, stats, alerts, ssh-tunnel, registry, ldap, cis-benchmark, ssl)
@@ -599,11 +608,12 @@ docker-dash/
 | Command Palette | ✅ | — | — | — | — | — | — | — |
 | Mobile Responsive | ✅ | ✅ | ✅ | ✅ | ✅ | partial | ✅ | ✅ |
 | Build Step | **None** | Angular | Angular | required | none | none | required | required |
-| Container Size | **~80MB** | ~250MB | ~250MB | ~200MB | ~100MB | ~500MB+ | ~100MB | ~80MB |
+| Container Size | **~180MB** (incl. Trivy + Grype + Scout) | ~250MB | ~250MB | ~200MB | ~100MB | ~500MB+ | ~100MB | ~80MB |
 | RAM Usage | **~50MB** | ~200MB | ~200MB | ~150MB | ~50MB | ~500MB+ | ~50MB | ~60MB |
 | License | **MIT** | Zlib | commercial | Apache 2.0 | MIT | Apache 2.0 | MIT | BSL 1.1 |
 
-> ✅ **30+ features exclusive to Docker Dash** (no other free tool has them).
+> The comparison table flags **20+ rows** where Docker Dash ships a feature no compared free tool has — Container Doctor, Container Cloning, AI workload templates, Let's Encrypt wizard, CIS benchmark UI, registry hygiene pack with provenance + retention dry-run, hash-chained off-site audit dumps, etc. Coverage gaps cut both ways: Portainer wins on Kubernetes ergonomics, Komodo wins on multi-server orchestration UX. Pick the tool that fits *your* workflow.
+>
 > Features Portainer Business locks behind paid license are **free** in Docker Dash.
 > Rancher / K3s targets Kubernetes clusters; Docker Dash targets single-host and small multi-host Docker deployments.
 
@@ -650,6 +660,10 @@ Docker Dash requires access to the Docker socket (`/var/run/docker.sock`). This 
 | Production Readiness v6.16.1 | 2026-04-22 | **9.7/10** | Testing 8.5 → 9.5 (+86 tests across 4 previously-untested services: permissions RBAC, settings CRUD, security-alerts rule evaluation, event-notifier dispatch). Documentation 9 → 9.5 (3 new feature reference docs under `docs/features/`: Prometheus metrics, platform detection, translations tooling). Residual: Docker-in-Docker integration tests (v7), Redis HA mode (v7), external 3rd-party audit (v7) — 10/10 requires all three |
 | Production Readiness v7.0.0 | 2026-04-22 | **9.8/10** | HA mode production-ready: opt-in `DD_MODE=ha` + Redis. 4-phase rollout (v6.17.0 rate limiter, v6.17.1 WS pub/sub, v6.17.2 leader election, v7.0.0 observability + operator runbook + LB configs). Standalone default unchanged. Staging soak verified: 3-replica deploy with lock acquire, graceful leader handover, Redis restart recovery. `/api/cluster/status` + 4 Prometheus gauges. BACKLOG F30 closed. Residual gap to 10: external 3rd-party security audit (budget + vendor coordination) |
 | v7.1.0–v7.2.0 | 2026-04-22 | **9.8/10** | Observability bundle shipped: opt-in Prometheus + Grafana compose profile with 8-panel auto-provisioned dashboard (v7.1.0), then in-app wizard at **System → Observability** that detects existing monitoring stacks and offers integrate/deploy/hybrid paths with one-click dashboard import via Grafana API (v7.2.0). Admin-only, 10s outbound timeout, tokens never persisted. 28 new tests. No production-readiness score change — UX layer on top of v7.0.0's foundation |
+| v7.3.0–v7.7.0 | 2026-04-25 | **9.8/10** | UX + workflow shipped: in-app update notifications via GitHub releases polling (v7.3.0), session-expiry recovery (v7.3.1), Express 5 + path-to-regexp v8 migration (v7.3.x), sample plugin + CONTRIBUTING.md (v7.4.0), image registry workflow — push/browse/template (v7.5.0), registry delete-by-digest with two-step confirmation (v7.6.0), CI lint enforcement (v7.7.0). All admin-gated, all audited |
+| v8.0.0 — AI features (BYOK) | 2026-04-27 | **9.8/10** | First feature category with optional outbound traffic to non-user-controlled hosts. Strategy-first deep-spec + 5 spikes ran before code; redactor S4 validated 100/100 on 27-case corpus before integration. Provider abstraction (Anthropic / OpenAI / Ollama), BYOK only, off by default. Audit log NL search ships first; vulnerability + incident triage gated on production signal. Every AI call writes audit entry with provider, model, token counts, redaction counts per pattern, SHA-256 payload hash. 63 new tests |
+| v8.1.0 — Registry Hygiene Pack | 2026-04-29 | **9.8/10** | Build provenance panel surfacing OCI annotations + cosign signature presence (read-only, zero new state). Retention policies with five safety layers: default-disabled (dry-run only), min-3-tags hard floor, default protected patterns latest/v\*/main/master/prod-\*/stable, server cap 200 deletions/run, audit per delete. Remote/virtual repos via Distribution proxy (Docker Hub rate-limit relief + offline operation). 58 new tests, all 5 safety layers regression-tested |
+| v8.2.0 — pCloud backup + off-site archives | 2026-05-05 | **9.8/10** | Third backup target alongside local + S3. AES-256-GCM encrypted token storage. Quota-aware uploads (95% pre-flight check + 50 MB safety margin). Hash-chained audit log monthly dumps preserve `entry_hash`/`prev_hash` row-for-row across months — consecutive dumps form a continuous off-site witness if the live DB is later tampered. Streaming export via `stmt.iterate()` handles 50k+ row months without buffer growth. 40 new tests including end-to-end gzip → upload → download → gunzip → chain-walk verification |
 
 ### Known Security Tradeoffs
 
@@ -661,11 +675,11 @@ These are conscious design decisions documented in [SECURITY.md](SECURITY.md):
 
 ### Test Coverage
 
-- **843 tests** across **55 test suites** (100% passing — 4 skipped are live-CF integration tests gated on a CI secret)
-- Unit tests: crypto, helpers, validation, git patterns, platform detection, DMI cloud detection, translations, filter escape, metrics rendering
-- Integration tests: auth flow, API endpoints, RBAC, security, ACME + remediation orchestrators
-- Service tests (v6.16.1): permissions RBAC filtering, settings key-value CRUD, security alert rule evaluation (threshold + windowed), event notifier dispatch + cooldown
-- CI runs on every push via GitHub Actions (pinned to Node 24 actions as of v6.13.1, clearing the June 2026 deprecation; test count reported dynamically in the CI summary as of v6.15.0)
+- **1122 tests** across **70 test suites** (100% passing — 4 skipped are live-CF ACME integration tests gated on a CI secret)
+- Unit tests: crypto, helpers, validation, git patterns, platform detection, DMI cloud detection, translations, filter escape, metrics rendering, AI redactor (33 cases), audit-actions enum extraction, retention pure-evaluator (27 cases), provenance parser (15 cases), pCloud HTTP client (16 cases)
+- Integration tests: auth flow, API endpoints, RBAC, security, ACME + remediation orchestrators, registry push + browse + delete + retention apply, AI provider abstraction with MockAiProvider, pCloud backup orchestration (14 cases), audit-log monthly dump with hash-chain integrity round-trip (gzip → upload → download → gunzip → chain-walk)
+- Service tests: permissions RBAC filtering, settings key-value CRUD, security alert rule evaluation (threshold + windowed), event notifier dispatch + cooldown, cluster abstraction (HA mode), rate-limiter memory + Redis paths, registry repos CRUD
+- CI runs on every push via GitHub Actions (pinned to Node 24 actions as of v6.13.1; test count reported dynamically in the CI summary as of v6.15.0; lint enforcement added in v7.7.0 — fails on any warning or error)
 
 ## Contributing
 

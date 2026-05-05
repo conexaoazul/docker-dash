@@ -1,6 +1,6 @@
 # Docker Dash — Known Backlog
 
-**Last updated:** 2026-04-22 · Post-v6.13.0 release (sweep cleanup)
+**Last updated:** 2026-05-05 · Post-v8.2.0 release (pCloud + off-site archives)
 
 This is the single source of truth for deferred work. Each item lists WHY it's deferred (not just WHAT), so future contributors don't waste cycles rediscovering the rationale.
 
@@ -27,22 +27,17 @@ This is the single source of truth for deferred work. Each item lists WHY it's d
 
 ### F30 — Distributed rate limiter (Redis-backed) — opt-in HA mode
 
-**Status (updated 2026-04-22):** 🟡 Partial — foundation shipped in v6.17.0 (preview).
+**Status (updated 2026-05-05):** ✅ Fully shipped across the v6.17 → v7.0 → v7.2 series. HA mode is production-ready.
 
-**v6.17.0 (shipped):**
-- `src/services/cluster.js` — HA abstraction with `DD_MODE=ha` opt-in. Zero overhead for standalone users.
-- Redis-backed rate limiter via `INCR + PEXPIRE` fixed-window (2× looser than standalone sliding-window at bucket boundaries — documented trade-off).
-- `docker-compose --profile ha` with `redis:7-alpine` service (optional, off by default).
-- `ioredis` as `optionalDependencies` (not `dependencies`). Standalone installs don't pull it.
-- 23 new tests via `ioredis-mock` (no real Redis needed to run the suite).
-- `docs/features/ha-mode.md` — operator-facing reference.
+**Final shape:**
+- v6.17.0 — `src/services/cluster.js` HA abstraction + Redis-backed rate limiter (`INCR + PEXPIRE` fixed-window) + `docker-compose --profile ha` + `ioredis` as optionalDependencies + 23 mock tests.
+- v6.17.1 — WebSocket pub/sub via Redis (fixed "user on replica A misses events from replica B").
+- v6.17.2 — Leader election via `SET NX PX` for all cron jobs + Docker event stream + SSH tunnels + git polling.
+- v7.0.0 — Operator runbook ([`docs/features/ha-failover-runbook.md`](docs/features/ha-failover-runbook.md)) + sticky-session LB configs ([`docs/features/ha-lb-configs.md`](docs/features/ha-lb-configs.md)) + staging soak verified (3-replica deploy with lock acquire, graceful leader handover, Redis restart recovery). `/api/cluster/status` + 4 Prometheus gauges.
+- v7.1.0 — Bundled Prometheus + Grafana observability stack with HA-aware dashboard panels.
+- v7.2.0 — In-app Observability Wizard at System → Observability with detect/integrate/deploy paths.
 
-**Still deferred for v7.0.0 (per [`plans/deep-spec-ha-mode.md`](plans/deep-spec-ha-mode.md)):**
-- v7.0.0-alpha.1 — WebSocket pub/sub via Redis (fix "user on replica A misses events from replica B")
-- v7.0.0-rc.1 — Leader election via `SET NX PX` for the 13 cron jobs, Docker event stream, SSH tunnels, git polling
-- v7.0.0 stable — failover runbook, sticky-session LB docs, staging soak
-
-**Known v6.17.0 limitations (loudly documented):** **don't run multi-replica in HA mode yet.** Every replica runs every cron job → duplicate backups, concurrent `VACUUM` risk. Single-replica HA mode is only useful for operational drill (Prometheus scrape, LB config) before v7.0 rolls out true multi-replica.
+**Multi-replica HA in production is supported as of v7.0.0.** Documented operator runbook covers the failure modes (leader death, rolling restart, Redis failure, split-brain detection, recovery checklist).
 
 ---
 
@@ -125,9 +120,8 @@ Available major upgrades, deliberately not taken:
 
 ## P3 — Nice-to-have
 
-- Sandbox-clone "test fix on copy first" mode for Remediation Wizard (v6.7+)
-- AI-suggested image-specific fixes via LLM API (opt-in, v7+)
-- Cross-stack fleet remediation (v7+)
+- Sandbox-clone "test fix on copy first" mode for Remediation Wizard
+- Cross-stack fleet remediation
 - Docker Dash's own `docker update` sandbox for risky updates
 - Per-image hint database for Remediation Wizard (crowd-sourced or first-party)
 - Scheduled remediation rollouts (apply at 02:00)
@@ -136,23 +130,57 @@ Available major upgrades, deliberately not taken:
 
 ---
 
-## What's in the current release (v6.13.0)
+## P2 — AI roadmap (gated on v8.0.0 production signal)
 
-For context — everything above is beyond what's shipped. Current state:
+### AI vulnerability triage
 
-- v6.13.0 ldapjs → ldapts migration (deprecated client replaced; interface preserved)
-- v6.12.2 NAS How-To guides complete (TrueNAS SCALE + QNAP + OMV)
-- v6.12.1 Cloud vendor badges via DMI probe (AWS/GCE/Azure/DO/Hetzner/VMware/etc.)
-- v6.12.0 Platform auto-detection + branded badges on Multi-Host page
-- v6.11.x Translations tooling (Google + DeepL, quota tracking, runtime DB overrides)
-- v6.10.0 Per-container Security sub-tab (Secrets + Egress + CIS + Image Vulns)
-- v6.9.x Per-stack Secrets/Egress audit + Remediation drill-down from Security page
-- v6.8.0 Multi-host SSH exec channel (Remediation Wizard works on remote hosts)
-- v6.7.x Outbound Network Filter sidecar
-- v6.6.0 Container Remediation Wizard (20-entry catalog, 3-step modal, Git-PR mode, auto-rollback)
-- v6.5.0 Let's Encrypt Wizard (9 DNS providers, encrypted credential vault, zero-downtime rotation)
-- v6.4.0 Hardening (31 of 35 pre-sale audit findings closed)
-- **740 tests passing + 4 skipped across 50 suites**
+**Status (added 2026-05-05):** Deep-spec drafted in v8.0.0 ([`plans/deep-spec-ai-features.md`](plans/deep-spec-ai-features.md)). Deferred until v8.0.0 audit search has accumulated production signal.
+
+**Acceptance gate before implementation:**
+- ≥2 weeks of v8.0.0 audit NL search uptime in real installs
+- ≥1 redactor catch on real prompt content (proves the privacy gate works in the wild, not only on the test corpus)
+- Zero compliance issues raised by operators
+
+**Scope:** Rank Trivy/Grype scan results by real exploitability via EPSS scores + LLM reasoning over the CVE description + the actual call-site reachability. Read-only — no auto-remediation. Surfaces in Security tab with "Likely exploitable" / "Theoretical" / "False positive in our context" labels.
+
+### AI incident triage
+
+**Status (added 2026-05-05):** Same gate as AI vulnerability triage above.
+
+**Scope:** Container restart-loop diagnosis from `inspect` + last 200 log lines + recent stats. Output: ranked hypothesis ("OOMKilled" / "config error" / "dependency unreachable" / "permission denied on volume mount") with the supporting evidence in each case. Read-only — no auto-restart, no auto-rollback.
+
+### Cosign signature cryptographic verification
+
+**Status (added 2026-04-29):** v8.1.0 surfaces signature *presence* via OCI annotations only — actual `cosign verify` is deferred. Needs cosign binary handling, key management UX, and additional UI affordances. Tracked for a future v8.x minor.
+
+---
+
+## P3 — Dependency major bumps (deferred non-blocking)
+
+### dockerode 4 → 5 migration
+
+**Status (added 2026-05-05):** `npm audit --omit=dev` reports one moderate-severity transitive advisory ([GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq) — `uuid <14.0.0` via `dockerode 4.x`). Documented as accepted in [`SECURITY.md` §7](SECURITY.md) — the vulnerable code path (`uuid.v3/v5/v6` with caller-supplied `buf`) is unreachable from how Docker Dash uses dockerode.
+
+**Plan:** Migrate to `dockerode 5.x` in a future release as a clean dependency-bump session, not as a security-driven hotfix. Affects ~40 call sites in `src/services/docker.js`; needs a regression run and possibly minor signature changes.
+
+**Re-trigger:** Re-run `npm audit` quarterly; if the advisory upgrades to high/critical or a new exploit demonstrates reachability through dockerode, treat as urgent.
+
+---
+
+## What's in the current release (v8.2.0)
+
+For context — everything above is beyond what's shipped. Current state highlights (most recent first):
+
+- **v8.2.0** pCloud backup target + weekly stack bundle archive + monthly hash-chain-preserving audit log dump (3 off-site artifacts to free-tier pCloud, AES-256-GCM token storage, quota-aware uploads)
+- v8.1.x Registry Hygiene Pack — build provenance panel + retention policies with dry-run + 5-layer safety + remote/virtual repos via Distribution proxy. Plus 3 v8.1.x bug fixes (lazy-load detail, files-tab preview-mode selector, BusyBox file listing)
+- v8.0.x AI features (BYOK, off by default) — provider abstraction across Anthropic / OpenAI / Ollama, audit log NL search, privacy-first redactor (validated 100/100), SHA-256 payload hash audit. AI Workload template pack (12 templates: Ollama, RAG stack, vLLM, etc.)
+- v7.x HA mode production-ready (Redis-backed leader election + WS pub/sub + sticky-session runbook), bundled Prometheus + Grafana observability with in-app wizard, image registry workflow (push + browse + delete), in-app update notifications, sample plugin + CONTRIBUTING.md, Express 5 migration, CI lint enforcement
+- v6.x foundations — LE Wizard, Remediation Wizard, Outbound Network Filter, Per-container Security tab, Translations tooling, NAS auto-detection, Cloud vendor badges, ldapjs → ldapts migration
+- **1122 tests passing + 4 skipped across 70 suites**
+- **64 auto-migrations**
+- **84 built-in How-To guides** (EN + RO; AI category covers Ollama on CPU/GPU + GPU passthrough + RAG stack walkthrough)
+- **47 built-in App Templates** (incl. AI Workload Pack of 12)
+- **451 API endpoints**
 
 ---
 
