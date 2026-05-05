@@ -13,7 +13,7 @@
 //     | grep -oE "['\"][a-z_]+['\"]" \
 //     | tr -d "'\"" | sort -u
 //
-// 161 entries as of 2026-04-27.
+// 174 entries as of 2026-05-05 (v8.2.0).
 
 const auditActionsList = [
   "acme_certificate_remove",

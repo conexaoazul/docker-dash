@@ -10,6 +10,46 @@ const WhatsNewPage = {
   // Types: feature, fix, improvement, security, breaking
   _releases: [
     {
+      version: '8.2.0',
+      date: '2026-05-05',
+      title: 'pCloud backup target + stack & audit off-site archives',
+      changes: [
+        { type: 'feature', text: 'pCloud Backup target — push the daily DB, weekly stack bundles, and monthly audit log dumps to a pCloud account on the free tier (10 GB, EU Switzerland data center default). Direct-token auth: username/password are exchanged once for a long-lived token and the password is never persisted. UI lives at System → Backup → pCloud Backup card with separate cron + retention controls per artifact kind.' },
+        { type: 'feature', text: 'Hand-rolled HTTP client around 7 pCloud endpoints (~150 LOC) — deliberately not the abandoned pcloud-sdk-js. Quota-aware: aborts uploads that would push usage above 95% or below a 50 MB safety margin. Per-artifact retention defaults: 7 DB backups, 8 weekly stack snapshots, 24 monthly audit dumps. Capped server-side at 50 prune deletions per run.' },
+        { type: 'feature', text: 'Weekly stack bundle archive job. New cron walks every active host, lists running Compose stacks, calls the existing bundleService.exportStack() per stack, and uploads JSON files to /docker-dash/stacks/YYYY-MM-DD/<host>--<stack>.json on pCloud. Per-stack failures don\'t abort the run — partial wins still ship.' },
+        { type: 'feature', text: 'Monthly audit log dump job. Exports the previous calendar month\'s audit rows as gzipped JSONL, hash chain (entry_hash / prev_hash) preserved row-for-row. Consecutive monthly dumps form a continuous off-site witness — if the live DB is later tampered, the chain anchors truth. Streaming via better-sqlite3 stmt.iterate() handles large months (50k+ rows) without buffer growth. ?month=YYYY-MM parameter on the manual run lets operators backfill or re-dump specific months.' },
+        { type: 'feature', text: '4 new audit actions registered with the v8.0.0 AI search: pcloud_config_update, backup_pcloud, backup_pcloud_failed, pcloud_prune. Migration 064 adds pcloud_config single-row settings table. AES-256-GCM encrypted token storage using the existing ENCRYPTION_KEY.' },
+        { type: 'improvement', text: '40 new green tests (16 client + 14 backup orchestration + 10 audit dump). Suite: 1082 → 1122 / 70 suites. Lint clean. Hash chain round-trip verified end-to-end (gzip → upload → download → gunzip → walk).' },
+        { type: 'improvement', text: 'Strategic discipline: deep-spec + 3 feature-specs written before code (plans/, gitignored). One-sentence defense: take "I have an off-host backup" from "I configured S3 last quarter and never verified" to "every night three artifacts land in pCloud and I get a red banner when they don\'t". Anti-features deliberately NOT shipped: pCloud OAuth, pCloud Crypto, Drive mount, public sharing links, two-way sync, restore-from-pCloud UI, resumable chunked uploads, the SDK.' },
+      ],
+    },
+    {
+      version: '8.1.3',
+      date: '2026-04-30',
+      title: 'Bug fix: garbage rows in Files tab on BusyBox containers',
+      changes: [
+        { type: 'fix', text: 'User-reported screenshot showed file rows with bizarre names (2G), and .., binary., instead of names) and garbled sizes (0 B 243M, 0 B */=@|) on a frontend container\'s Files tab. Root cause: the listing endpoint ran ls -la --time-style=+ISO, but BusyBox ls (Alpine, distroless, scratch images) doesn\'t support --time-style — it responds with help/usage text on stderr, the exec stream demux concatenates stdout + stderr, and the parser produced one bogus "file" entry per help line.' },
+        { type: 'fix', text: 'Three layers of defense in src/routes/containers.js:1707-1779: (1) permissions regex gate /^[-dlbcps][-rwxstST]{9}[.+]?$/ rejects any line that doesn\'t start with a valid ls -l permissions field, dropping help text + error messages + blank lines; (2) timestamp-shape detection — if parts[5] is an ISO 8601 token, name starts at parts[6], otherwise it\'s the Unix 3-token form (MMM DD time-or-year) and name starts at parts[8]; (3) auto-fallback to plain ls -la (no --time-style flag) when the first parse returns zero entries — covers BusyBox where the flag itself bombed.' },
+      ],
+    },
+    {
+      version: '8.1.2',
+      date: '2026-04-29',
+      title: 'Files tab: preview-mode selector',
+      changes: [
+        { type: 'feature', text: 'Per-operator preview-mode selector on the container detail page → Files tab. Four radio options between the "File Browser" title and the "Upload" button: Off (default — single-click does nothing, only the per-row download button works), Bottom (single-click → preview panel below — the original behavior), Right (single-click → preview panel to the right of the file list, split layout), Modal (single-click does nothing, double-click opens a modal with the content).' },
+        { type: 'improvement', text: 'Choice persists in localStorage as dd_files_preview_mode so it sticks across container detail visits. Default is Off — least surprising, no accidental network fetch when an operator is just clicking around. Modal mode is the gentlest path to "I only want a preview when I really mean to".' },
+      ],
+    },
+    {
+      version: '8.1.1',
+      date: '2026-04-29',
+      title: 'Bug fix: lazy-load detail module before _editMetaDialog',
+      changes: [
+        { type: 'fix', text: 'User clicked "Edit metadata" on the container detail page and got Uncaught TypeError: ContainersPage._editMetaDialog is not a function. Root cause: lazy-load split (v6.16.0) moved _editMetaDialog into the detail module, but the button click handler in the eager containers.js called it directly without first awaiting ContainersPage._loadDetailModule(). Fixed by awaiting the module load before invoking. Audited the rest of the eager file for similar references — _stopLogFollow already had a guard, _execUnsub was already safe via if-check.' },
+      ],
+    },
+    {
       version: '8.1.0',
       date: '2026-04-29',
       title: 'Registry Hygiene Pack — provenance + retention + remote/virtual',
