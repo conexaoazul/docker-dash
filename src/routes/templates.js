@@ -876,3 +876,8 @@ router.post('/import', requireAuth, requireRole('admin'), asyncHandler(async (re
 }));
 
 module.exports = router;
+// Test surface: expose pure helpers + the verification map so the
+// post-v8.2.0 template-verification gap-closure test suite can read them
+// without standing up the full express stack.
+module.exports.getMergedTemplates = getMergedTemplates;
+module.exports.BUILTIN_VERIFICATION = BUILTIN_VERIFICATION;

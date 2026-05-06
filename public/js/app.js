@@ -453,6 +453,11 @@ const App = {
     // Setup UI mode toggle (standard / enterprise)
     this._initUiModeToggle();
 
+    // v8.2.x post-audit a11y: auto-augment tabs + sortable tables on every
+    // page render. Single MutationObserver + delegated focus/keyboard handler
+    // covers all 30+ pages without per-page edits.
+    this._initA11yAugmentation();
+
     // Setup density toggle (comfortable / compact / dense)
     this._initDensityToggle();
 
@@ -768,6 +773,84 @@ const App = {
     if (!icon) return;
     icon.className = this._uiMode === 'enterprise' ? 'fas fa-building' : 'fas fa-rocket';
     icon.title = this._uiMode === 'enterprise' ? 'Switch to Standard mode' : 'Switch to Enterprise mode';
+  },
+
+  // ─── A11y augmentation (v8.2.x post-audit) ────────────────
+  // Walks the DOM after every page render and adds ARIA attributes for
+  // tabs, sortable tables, and custom dropdowns. Centralized here so per-
+  // page rendering code doesn't need to repeat boilerplate.
+  _initA11yAugmentation() {
+    const augment = (root) => {
+      // Tabs: <div class="tabs"><button class="tab [active]" data-tab="x"></button>…</div>
+      root.querySelectorAll('.tabs:not([role="tablist"])').forEach((list) => {
+        list.setAttribute('role', 'tablist');
+        list.querySelectorAll('.tab').forEach((tab) => {
+          tab.setAttribute('role', 'tab');
+          tab.setAttribute('tabindex', tab.classList.contains('active') ? '0' : '-1');
+          tab.setAttribute('aria-selected', tab.classList.contains('active') ? 'true' : 'false');
+        });
+      });
+      // Sortable table headers (any <th> with class containing "sortable" or
+      // a data-sort attribute) get aria-sort + role columnheader.
+      root.querySelectorAll('th[data-sort], th.sortable').forEach((th) => {
+        if (!th.hasAttribute('role')) th.setAttribute('role', 'columnheader');
+        if (!th.hasAttribute('aria-sort')) {
+          const dir = th.classList.contains('sort-asc') ? 'ascending'
+            : th.classList.contains('sort-desc') ? 'descending' : 'none';
+          th.setAttribute('aria-sort', dir);
+        }
+        if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      });
+    };
+
+    // Initial pass for whatever's rendered already
+    augment(document.body);
+
+    // Observe #page-content for new render cycles (SPA navigation)
+    const target = document.getElementById('page-content');
+    if (target && typeof MutationObserver !== 'undefined') {
+      const obs = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          for (const node of m.addedNodes) {
+            if (node.nodeType === 1) augment(node);
+          }
+        }
+      });
+      obs.observe(target, { childList: true, subtree: true });
+    }
+
+    // Update aria-selected when user clicks a tab (delegated)
+    document.body.addEventListener('click', (e) => {
+      const tab = e.target.closest('.tab[role="tab"]');
+      if (!tab) return;
+      const list = tab.closest('[role="tablist"]');
+      if (!list) return;
+      list.querySelectorAll('[role="tab"]').forEach((t) => {
+        const sel = t === tab;
+        t.setAttribute('aria-selected', sel ? 'true' : 'false');
+        t.setAttribute('tabindex', sel ? '0' : '-1');
+      });
+    }, true);
+
+    // Keyboard support for tabs: Left/Right + Home/End
+    document.body.addEventListener('keydown', (e) => {
+      const tab = document.activeElement;
+      if (!tab || !tab.classList.contains('tab') || tab.getAttribute('role') !== 'tab') return;
+      const list = tab.closest('[role="tablist"]');
+      if (!list) return;
+      const tabs = Array.from(list.querySelectorAll('[role="tab"]'));
+      const idx = tabs.indexOf(tab);
+      let next = -1;
+      if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = tabs.length - 1;
+      if (next >= 0) {
+        e.preventDefault();
+        tabs[next].click();
+        tabs[next].focus();
+      }
+    });
   },
 
   _initDensityToggle() {

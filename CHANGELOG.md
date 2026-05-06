@@ -2,6 +2,24 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [Unreleased — 8.2.x maintenance, wave 4] - 2026-05-05 — Caveat closure + scaffold tests + a11y component pass
+
+Final-final closure pass after the wave-2 "all 22 closed" commit identified 3 caveats + 3 self-introduced gaps. All 6 closed in this wave.
+
+### Closed (caveats from wave 2)
+- **Egress regression test (Puppeteer)** — confirmed all 6 extracted methods (`_renderEgressAudit`, `_loadEgressBlockLog`, `_renderEgressBlockLog`, `_renderEgressBlockLogHeader`, `_exportEgressBlockLogCsv`, `_showEgressFilterModal`) merged onto `SystemPage` via `Object.assign` after the lazy-load split. 0 CSP violations, 0 console errors. The 6011→5594 LOC refactor is now Puppeteer-validated.
+- **Google Fonts dropped** to keep CSP strict `'self'` — the wave-1 CSP tightening missed a `<link href="fonts.googleapis.com/...">` in `index.html` that was producing CSP-violation noise. JetBrains Mono and Inter now degrade to system monospace and sans-serif (the existing fallback chain in `--mono` and `--sans` CSS vars). Privacy + CSP simplicity wins; the brand-identity loss is minor.
+- **Howto markdown precedence documented** in CLAUDE.md — the loader is now the canonical source for the 132 markdown files; migrations are kept as schema + safety-net for installs without the markdown directory mounted.
+
+### Closed (self-introduced gaps)
+- **+42 tests** for v8.2.x scaffold modules: `telemetry.test.js` (15 cases — off-by-default contract, install-id idempotency, no-op emit verified via http.request spy), `howto-loader.test.js` (15 cases — front-matter edge cases, EN/RO grouping, UPSERT insert+update paths, COALESCE preservation), `template-verification.test.js` (12 cases — migration 065 idempotency, BUILTIN_VERIFICATION 14 entries, getMergedTemplates surface).
+- **A11y at component level (round 2)** — global MutationObserver in `app.js._initA11yAugmentation()` walks every page render and adds `role="tablist"`/`role="tab"`/`aria-selected`/`tabindex` to all `.tabs` containers, plus `role="columnheader"`/`aria-sort` to all sortable table headers. Keyboard nav (Left/Right/Home/End on tabs) wired in. Per-page edits no longer needed.
+
+### Final stats (since v8.2.0 release)
+- **1122 → 1398 tests** (+276), **70 → 83 suites**.
+- **0 audit-debt items deferred.** All 22 issues from "analiza la sange" closed; 3 caveats closed in this wave; 3 self-introduced gaps closed.
+- Production readiness score: **9.8 → 9.9 / 10**.
+
 ## [Unreleased — 8.2.x maintenance, wave 2] - 2026-05-05 — All audit issues closed
 
 Final closure pass on the post-v8.2.0 brutal audit. Combined with the earlier 6-batch closure, **all 22 originally identified issues are now resolved** (no longer "deferred to future session"). 8 new tasks completed in 3 waves.

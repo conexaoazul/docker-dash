@@ -40,9 +40,20 @@ Examples already in `plans/` (gitignored, but referenced by CHANGELOG):
 
 ## File-size guidelines (post-v8.2.0 audit)
 
-- Frontend pages > 1500 lines should split via the `containers.js` + `container-detail.js` lazy-merge pattern (see v6.16.0 architecture).
+- Frontend pages > 1500 lines should split via the `containers.js` + `container-detail.js` lazy-merge pattern (see v6.16.0 architecture). For non-lazy splits (pure organisational), see the v8.2.x `system-egress.js` extract.
 - Backend route files > 2000 lines should split by sub-resource.
-- Migrations should NOT contain bulk content (howto guides, template seeds). Use `src/db/howto-content/<lang>/<slug>.md` and a single import-at-startup loader instead.
+- Migrations should NOT contain bulk content (howto guides, template seeds). Use `src/db/howto-content/<slug>.md` (with optional `.ro.md` companion) and the import-at-startup loader (`src/services/howto-loader.js`) instead.
+
+## How-To content precedence (v8.2.x)
+
+When the server starts, this is the order of operations on `howto_guides`:
+
+1. Migrations 040, 041, 042, 048, 050, 052, 053, 055, 058-062 INSERT initial built-in rows (historical seed).
+2. `howto-loader.js` walks `src/db/howto-content/`, parses each `.md` file's YAML front-matter, UPSERTS into `howto_guides`. Markdown content **overrides** the migration content for any matching slug.
+
+**Practical rule:** to add or edit a how-to, drop a markdown file. Don't touch migrations. The 132 markdown files committed in v8.2.x are the canonical source for the 66 howtos that have body content; migrations remain only as the schema-of-record + safety net for fresh installs that have no markdown directory mounted (which shouldn't happen with the production image, but the redundancy is cheap).
+
+To migrate a how-to from migration to markdown: drop `src/db/howto-content/<slug>.md` with the same `slug` as the migration's INSERT. Loader UPSERTs, migration's content stops being the source of truth.
 
 ## Commit conventions
 

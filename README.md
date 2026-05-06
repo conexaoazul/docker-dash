@@ -9,7 +9,7 @@
     <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/bogdanpricop/docker-dash/releases/latest"><img src="https://img.shields.io/github/v/release/bogdanpricop/docker-dash?color=blue" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bogdanpricop/docker-dash" alt="License"></a>
-    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-1356%20passing%20(100%25)-brightgreen" alt="Tests"></a>
+    <a href="https://github.com/bogdanpricop/docker-dash/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/tests-1398%20passing%20(100%25)-brightgreen" alt="Tests"></a>
     <img src="https://img.shields.io/badge/version-8.2.0-blue" alt="Version">
     <a href="SECURITY.md#security-audit-history"><img src="https://img.shields.io/badge/production%20readiness-9.9%2F10-brightgreen" alt="Production Readiness"></a>
     <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-audited-brightgreen" alt="Security Audited"></a>
@@ -271,7 +271,7 @@ Deep reading: [HA Mode reference](docs/features/ha-mode.md) · [Failover runbook
 - **Self-Reporting Footprint** — Docker Dash memory, uptime, DB size at `/api/footprint`
 - **Let's Encrypt Wizard** — 3-step UI for issuing certs via DNS-01 (Cloudflare, Route53, DigitalOcean, Hetzner, Linode) or HTTP-01. Encrypted credential vault, auto-renewal via Caddy, hash-chained audit trail. Open source — no other Docker UI ships this
 - **Container Remediation Wizard** — 3-step UI that turns Secrets Audit + CIS Benchmark findings into actionable fixes. 20-entry catalog, 4 live-updatable (zero downtime), 16 with compose-recreate + auto-rollback. Git-PR mode for git-backed stacks. No other OSS Docker UI ships this
-- **1356 Tests** — 80 test suites covering 10 critical-path services with ≥15 dedicated cases each (auth, audit, docker, registry, ssl, ldap, ssh-tunnel, stackBundle, securityAlerts, webhooks), plus RBAC, security, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics, settings CRUD, security alert rule evaluation + cooldown, event notifier dispatch, cluster abstraction (HA mode), rate-limiter memory + Redis paths, registry retention + provenance pure-evaluators, AI redactor + service abstraction, pCloud client + backup orchestration + audit dump (hash-chain integrity verified). 100% passing.
+- **1398 Tests** — 83 test suites covering 10 critical-path services with ≥15 dedicated cases each (auth, audit, docker, registry, ssl, ldap, ssh-tunnel, stackBundle, securityAlerts, webhooks) + 3 v8.2.x scaffold modules (telemetry, howto-loader, template-verification with migration 065), plus RBAC, security, ACME + remediation orchestrators, platform detection, DMI cloud detection, translations, Prometheus metrics, settings CRUD, security alert rule evaluation + cooldown, event notifier dispatch, cluster abstraction (HA mode), rate-limiter memory + Redis paths, registry retention + provenance pure-evaluators, AI redactor + service abstraction, pCloud client + backup orchestration + audit dump (hash-chain integrity verified). 100% passing.
 
 ### AI (v8.0.0+) — opt-in, BYOK, off by default
 
@@ -692,7 +692,7 @@ These are conscious design decisions documented in [SECURITY.md](SECURITY.md):
 
 ### Test Coverage
 
-- **1356 tests** across **80 test suites** (100% passing — 4 skipped are live-CF ACME integration tests gated on a CI secret)
+- **1398 tests** across **83 test suites** (100% passing — 4 skipped are live-CF ACME integration tests gated on a CI secret)
 - Unit tests: crypto, helpers, validation, git patterns, platform detection, DMI cloud detection, translations, filter escape, metrics rendering, AI redactor (33 cases), audit-actions enum extraction, retention pure-evaluator (27 cases), provenance parser (15 cases), pCloud HTTP client (16 cases)
 - Integration tests: auth flow, API endpoints, RBAC, security, ACME + remediation orchestrators, registry push + browse + delete + retention apply, AI provider abstraction with MockAiProvider, pCloud backup orchestration (14 cases), audit-log monthly dump with hash-chain integrity round-trip (gzip → upload → download → gunzip → chain-walk)
 - Service tests: permissions RBAC filtering, settings key-value CRUD, security alert rule evaluation (threshold + windowed), event notifier dispatch + cooldown, cluster abstraction (HA mode), rate-limiter memory + Redis paths, registry repos CRUD
