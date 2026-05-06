@@ -155,20 +155,31 @@ Available major upgrades, deliberately not taken:
 
 ---
 
-## P2 — Architecture refactors (deferred from v8.3.0 audit)
+## P2 — Architecture refactors (frontend done in v8.2.x waves; backend deferred)
 
-### system.js Egress extract → lazy module
+### Frontend "aircraft carrier" splits — DONE in v8.2.x further-split
 
-**Status (added 2026-05-05):** Identified in post-v8.2.0 audit. `public/js/pages/system.js` is 6011 lines; lines 5158-5593 (~435 LOC, 6 methods) are the Egress audit + filter editor flow. Should be extracted to `public/js/pages/system-egress.js` and merged via `Object.assign(SystemPage, SystemEgress)` lazy-load pattern (proven in v6.16.0 with `containers.js` → `container-detail.js`).
+| File | Was | Now | Modules extracted |
+|------|-----|-----|-------------------|
+| `public/js/pages/system.js` | 6011 | 2618 | system-egress + system-templates + system-backup + system-ssl + system-cis + system-secrets + system-translations |
+| `public/js/pages/settings.js` | 2037 | 572 | settings-users + settings-registries + settings-git + settings-workflows + settings-logforwarding + settings-ldap + settings-ai |
 
-**Why deferred:** the Egress flow has 6 interlinked methods sharing closure state via `this`. Extract requires careful bookkeeping (one slip = broken egress filter UI on a security-sensitive feature). Needs a dedicated session with manual Puppeteer regression of the full egress flow afterward.
+All extracts verified via Puppeteer (12+12 methods present, all tabs render).
 
-**Other big pages identified for future extract:**
-- `public/js/pages/containers.js` — 3238 LOC (already split once in v6.16.0; still big)
-- `public/js/pages/settings.js` — 2037 LOC
-- `public/js/pages/images.js` — 1595 LOC
+### Frontend remaining (lower priority — not strictly necessary)
 
-Pattern is documented in `CLAUDE.md` + `CONTRIBUTING.md` for future contributors.
+- `public/js/pages/containers.js` — 3240 LOC (already split once in v6.16.0; still big but list+filter are cohesive)
+- `public/js/pages/container-detail.js` — 2718 LOC (already lazy-loaded; could split per tab — Files / Logs / Stats)
+- `public/js/pages/images.js` — 1595 LOC (could split list / push / browse)
+- `public/js/app.js` — 2051 LOC (init + delegated handlers + routing — split would be cosmetic)
+
+### Backend route splits — DEFERRED
+
+- `src/routes/system.js` — 2827 LOC, 74 routes. Sub-resources: /backup/* (17 routes), /schedules/* (7), /database/* (5), /stacks/* + /compose/* (9), /firewall/* (3).
+- `src/routes/misc.js` — 1780 LOC, 42 routes. "Bag of stuff" — /audit, /notifications, /api-keys, /favorites, /health, /metrics.
+- `src/routes/containers.js` — 2087 LOC, 65 routes.
+
+**Why deferred:** Express sub-router mounting changes the path resolution. A `/backup/s3-status` route mounted via `app.use('/api/system/backup', backupRouter)` becomes `/s3-status` in the sub-router file. Each split needs careful API regression test (paths, middleware chain, audit invocations). Higher risk-to-value than the frontend split. Schedule a dedicated session per route file.
 
 ### How-To content migration to markdown files
 

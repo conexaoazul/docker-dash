@@ -2,6 +2,60 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [Unreleased — 8.2.x maintenance, wave 5] - 2026-05-06 — Frontend "aircraft carrier" splits
+
+The two largest frontend files (system.js 6011 LOC, settings.js 2037 LOC) lifted into per-tab modules using the proven `Object.assign` merge pattern from v6.16.0. No lazy-loading complications — modules load with the rest of the dashboard, but each is reviewable independently and grep-able for one concern.
+
+### Frontend extracts
+
+**`public/js/pages/system.js`: 6011 → 2618 LOC (-56%)**
+
+7 new modules in `public/js/pages/`:
+
+| Module | LOC | Methods |
+|---|---|---|
+| `system-egress.js` (already in v8.2.x) | 462 | `_renderEgressAudit`, `_loadEgressBlockLog`, `_renderEgressBlockLog`, `_renderEgressBlockLogHeader`, `_exportEgressBlockLogCsv`, `_showEgressFilterModal` |
+| `system-templates.js` | 354 | `_renderTemplates`, `_templateFormDialog` |
+| `system-backup.js` | 466 | `_renderBackup` (Local + S3 + pCloud sub-cards with v8.2.0 connect/test/run/disconnect) |
+| `system-ssl.js` | 803 | `_renderSsl`, `_renderCertificates`, `_showAddCertificateModal`, `_showCsrModal`, `_showAcmeRotateModal`, `_showLetsEncryptWizard` |
+| `system-cis.js` | 414 | `_renderCisBenchmark`, `_cisContainerRemediation`, `_cisBenchmarkGuide` |
+| `system-secrets.js` | 583 | `_renderSecretsAudit`, `_renderSecretRotations` |
+| `system-translations.js` | 442 | `_renderTranslations`, `_renderTranslationsProviders`, `_renderTranslationsUsage`, `_renderTranslationsTranslate`, `_renderTranslationsReview` |
+
+Verified via Puppeteer: 12 tracked render methods all present on `SystemPage`, 8 tabs (info/health/backup/ssl/cis/secrets/translations/templates) render without DOM error states, 0 console errors beyond the unrelated 401 noise.
+
+**`public/js/pages/settings.js`: 2037 → 572 LOC (-72%)**
+
+7 new modules in `public/js/pages/`:
+
+| Module | LOC |
+|---|---|
+| `settings-users.js` | 452 |
+| `settings-registries.js` | 207 |
+| `settings-git.js` | 196 |
+| `settings-ai.js` | 198 |
+| `settings-ldap.js` | 178 |
+| `settings-workflows.js` | 159 |
+| `settings-logforwarding.js` | 152 |
+
+Smaller tabs (Profile, Webhooks, NotificationChannels, Secrets, General — each <130 LOC) stay in main `settings.js` for proximity to `_renderTab()` dispatch logic.
+
+Verified via Puppeteer: 12 tracked render methods all present on `SettingsPage`.
+
+### Pattern documentation
+
+Both extracts follow the same convention:
+- New file declares `const SystemPageX = { ... };` (or `SettingsPageX`).
+- Bottom of file: `if (typeof window !== 'undefined') window.SystemPageX = SystemPageX;`.
+- Bottom of `system.js` / `settings.js`: alphabetically-ordered chain of `if (typeof X !== 'undefined') Object.assign(SystemPage, X);`.
+- `index.html`: each new module gets a `<script>` tag BEFORE the main page script.
+
+Documented in `CLAUDE.md` (architecture invariants section) for future contributors.
+
+### Backend route splits — DEFERRED
+
+`src/routes/system.js` (2827 LOC, 74 routes) and `src/routes/misc.js` (1780 LOC, 42 routes) identified for future split. Backend Express sub-router mounting changes path resolution mid-tree, so each backend split needs careful regression test on the live API. Tracked in BACKLOG.md with explicit rationale; not blocking.
+
 ## [Unreleased — 8.2.x maintenance, wave 4] - 2026-05-05 — Caveat closure + scaffold tests + a11y component pass
 
 Final-final closure pass after the wave-2 "all 22 closed" commit identified 3 caveats + 3 self-introduced gaps. All 6 closed in this wave.
