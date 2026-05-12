@@ -173,13 +173,18 @@ All extracts verified via Puppeteer (12+12 methods present, all tabs render).
 - `public/js/pages/images.js` — 1595 LOC (could split list / push / browse)
 - `public/js/app.js` — 2051 LOC (init + delegated handlers + routing — split would be cosmetic)
 
-### Backend route splits — DEFERRED
+### Backend route splits — DONE in v8.2.x wave 6
 
-- `src/routes/system.js` — 2827 LOC, 74 routes. Sub-resources: /backup/* (17 routes), /schedules/* (7), /database/* (5), /stacks/* + /compose/* (9), /firewall/* (3).
-- `src/routes/misc.js` — 1780 LOC, 42 routes. "Bag of stuff" — /audit, /notifications, /api-keys, /favorites, /health, /metrics.
-- `src/routes/containers.js` — 2087 LOC, 65 routes.
+| File | Was | Now | Sub-routers |
+|------|-----|-----|-------------|
+| `src/routes/system.js` | 2827 | 1646 | system-backup (17 routes) + system-stacks (9) + system-schedules (7) + system-database (5) |
+| `src/routes/misc.js` | 1780 | 1433 | misc-favorites (3) + misc-notifications (6) + misc-api-keys (3) + misc-audit (3) + misc-ai (2) |
 
-**Why deferred:** Express sub-router mounting changes the path resolution. A `/backup/s3-status` route mounted via `app.use('/api/system/backup', backupRouter)` becomes `/s3-status` in the sub-router file. Each split needs careful API regression test (paths, middleware chain, audit invocations). Higher risk-to-value than the frontend split. Schedule a dedicated session per route file.
+External API URLs unchanged. All 1398 tests pass; 10 sub-router endpoints verified live via curl.
+
+### Remaining backend candidates (LOWER priority)
+
+- `src/routes/containers.js` — 2087 LOC, 65 routes. Container CRUD + lifecycle + exec + logs + stats are tightly coupled around `dockerService.containerAction()`; split would be cosmetic.
 
 ### How-To content migration to markdown files
 

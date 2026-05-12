@@ -2,6 +2,57 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [Unreleased — 8.2.x maintenance, wave 6] - 2026-05-13 — Backend route splits
+
+The two remaining backend monoliths split into per-resource sub-routers. External API URLs are unchanged — `router.use(prefix, subRouter)` mounts replicate original path resolution. Adds the BACKLOG-deferred backend splits.
+
+### Backend extracts
+
+**`src/routes/system.js`: 2827 → 1646 LOC (-42%)**
+
+4 new sub-routers mounted from `system.js`:
+
+| Sub-router | LOC | Routes |
+|---|---|---|
+| `system-backup.js` | 353 | 17 routes — `/backup/config`, `/backup/restore`, `/backup/s3-*` (5), `/backup/list`, `/backup/pcloud/*` (7), `/backup/audit-dump/preview` |
+| `system-stacks.js` | 364 | 9 routes — `/compose/:stack/:action`, `/compose/:stack/config`, `/stacks/:name/validate`, `/stacks` (CRUD), `/stacks/:name/env`, `/stacks/:name/deploy` |
+| `system-schedules.js` | 236 | 7 routes — `/schedules` (CRUD), `/schedules/preview`, `/schedules/:id/history`, `/schedules/:id/run-now`, plus 3 helper functions (`loadSchedules`, `getSchedulesFromDb`, `cronMatchesDate`) |
+| `system-database.js` | 301 | 5 routes — `/database`, `/database/cleanup`, `/database/cleanup-aggressive`, `/database/diagnostics`, `/database/vacuum` |
+
+**`src/routes/misc.js`: 1780 → 1433 LOC (-19%)**
+
+5 new sub-routers:
+
+| Sub-router | LOC | Routes |
+|---|---|---|
+| `misc-favorites.js` | 26 | 3 routes |
+| `misc-notifications.js` | 55 | 6 routes |
+| `misc-api-keys.js` | 33 | 3 routes |
+| `misc-audit.js` | 109 | 3 routes (list, export, analytics) |
+| `misc-ai.js` | 203 | 2 routes (chat, github-compose) |
+
+### Mount pattern documented in CLAUDE.md
+
+For future backend splits:
+- Each sub-router declares its own `Router()` + imports needed middleware/services.
+- Routes inside use the prefix-stripped path (e.g., `/s3-status` instead of `/backup/s3-status`).
+- Parent file mounts via `router.use('/prefix', require('./sub-router'))`.
+- External URLs unchanged.
+
+### Verification
+
+- 1398/1398 tests passing (schedules + security-input + others).
+- All sub-router files load via `require()` smoke test.
+- Live API smoke test verified 10 representative endpoints across all new sub-routers (`/backup/s3-status`, `/backup/list`, `/backup/pcloud/status`, `/stacks`, `/schedules`, `/database`, `/favorites`, `/notifications/count`, `/api-keys`, `/audit`).
+- Lint: 0 errors, 3 pre-existing warnings unchanged.
+
+### Stats since v8.2.0
+
+- Frontend: `system.js` 6011 → 2618 LOC, `settings.js` 2037 → 572 LOC (waves 1-5).
+- Backend: `src/routes/system.js` 2827 → 1646 LOC, `src/routes/misc.js` 1780 → 1433 LOC (wave 6).
+- **Total LOC moved from monoliths to per-concern modules: ~6,400 LOC.**
+- Tests: 1122 → 1398 (+276), suites 70 → 83.
+
 ## [Unreleased — 8.2.x maintenance, wave 5] - 2026-05-06 — Frontend "aircraft carrier" splits
 
 The two largest frontend files (system.js 6011 LOC, settings.js 2037 LOC) lifted into per-tab modules using the proven `Object.assign` merge pattern from v6.16.0. No lazy-loading complications — modules load with the rest of the dashboard, but each is reviewable independently and grep-able for one concern.

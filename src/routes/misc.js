@@ -2,7 +2,9 @@
 
 const express = require('express');
 const { Router } = require('express');
-const { favorites, notifications, apiKeys } = require('../services/misc');
+// favorites / notifications / apiKeys destructured imports moved into the
+// extracted sub-router files (misc-favorites.js, misc-notifications.js,
+// misc-api-keys.js). Other ../services/misc exports may still be used below.
 const auditService = require('../services/audit');
 const settingsService = require('../services/settings');
 const statsService = require('../services/stats');
@@ -136,177 +138,9 @@ router.get('/footprint', requireAuth, (req, res) => {
 
 // ─── Favorites ──────────────────────────────────────────────
 
-router.get('/favorites', requireAuth, (req, res) => {
-  res.json(favorites.list(req.user.id));
-});
 
-router.post('/favorites', requireAuth, (req, res) => {
-  try { favorites.add(req.user.id, req.body.containerId); res.json({ ok: true }); }
-  catch (err) { log.error('favorites add', err); res.status(500).json({ error: 'Internal server error' }); }
-});
 
-router.delete('/favorites/:containerId', requireAuth, (req, res) => {
-  try { favorites.remove(req.user.id, req.params.containerId); res.json({ ok: true }); }
-  catch (err) { log.error('favorites remove', err); res.status(500).json({ error: 'Internal server error' }); }
-});
 
-// ─── Notifications ──────────────────────────────────────────
-
-router.get('/notifications', requireAuth, (req, res) => {
-  const { unreadOnly, page, limit, type } = req.query;
-  res.json(notifications.list(req.user.id, {
-    unreadOnly: unreadOnly === 'true',
-    page: parseInt(page) || 1,
-    limit: parseInt(limit) || 50,
-    type: type || undefined,
-  }));
-});
-
-router.get('/notifications/count', requireAuth, (req, res) => {
-  res.json({ count: notifications.unreadCount(req.user.id) });
-});
-
-router.post('/notifications/:id/read', requireAuth, (req, res) => {
-  try { notifications.markRead(parseInt(req.params.id), req.user.id); res.json({ ok: true }); }
-  catch (err) { log.error('notifications markRead', err); res.status(500).json({ error: 'Internal server error' }); }
-});
-
-router.post('/notifications/read-all', requireAuth, (req, res) => {
-  try { notifications.markAllRead(req.user.id); res.json({ ok: true }); }
-  catch (err) { log.error('notifications markAllRead', err); res.status(500).json({ error: 'Internal server error' }); }
-});
-
-router.delete('/notifications/:id', requireAuth, (req, res) => {
-  try { notifications.delete(parseInt(req.params.id), req.user.id); res.json({ ok: true }); }
-  catch (err) { log.error('notifications delete', err); res.status(500).json({ error: 'Internal server error' }); }
-});
-
-router.post('/notifications/bulk', requireAuth, (req, res) => {
-  try {
-    const { ids, action } = req.body;
-    if (!ids || !Array.isArray(ids) || !['read', 'delete'].includes(action)) {
-      return res.status(400).json({ error: 'ids (array) and action (read|delete) required' });
-    }
-    notifications.bulkAction(ids.map(id => parseInt(id)), req.user.id, action);
-    res.json({ ok: true });
-  } catch (err) { log.error('notifications bulkAction', err); res.status(500).json({ error: 'Internal server error' }); }
-});
-
-// ─── API Keys ───────────────────────────────────────────────
-
-router.get('/api-keys', requireAuth, (req, res) => {
-  res.json(apiKeys.list(req.user.id));
-});
-
-router.post('/api-keys', requireAuth, (req, res) => {
-  try {
-    const result = apiKeys.create(req.user.id, req.body);
-    auditService.log({ userId: req.user.id, username: req.user.username,
-      action: 'apikey_create', details: { name: req.body.name }, ip: getClientIp(req) });
-    res.status(201).json(result);
-  } catch (err) { log.error('api-keys create', err); res.status(500).json({ error: 'Internal server error' }); }
-});
-
-router.delete('/api-keys/:id', requireAuth, (req, res) => {
-  try { apiKeys.revoke(parseInt(req.params.id), req.user.id); res.json({ ok: true }); }
-  catch (err) { log.error('api-keys revoke', err); res.status(500).json({ error: 'Internal server error' }); }
-});
-
-// ─── Audit Log ──────────────────────────────────────────────
-
-router.get('/audit', requireAuth, requireRole('admin'), (req, res) => {
-  const { action, targetType, userId, page, limit, since, until } = req.query;
-  res.json(auditService.query({
-    action, targetType, userId: userId ? parseInt(userId) : undefined,
-    page: parseInt(page) || 1, limit: parseInt(limit) || 50, since, until,
-  }));
-});
-
-// ─── Audit CSV Export ───────────────────────────────────────
-
-router.get('/audit/export', requireAuth, requireRole('admin'), (req, res) => {
-  try {
-    const db = getDb();
-    const days = parseInt(req.query.days) || 30;
-    const rows = db.prepare(`
-      SELECT id, username, action, target_type, target_id, ip, created_at
-      FROM audit_log WHERE created_at >= datetime('now', '-' || ? || ' days')
-      ORDER BY created_at DESC LIMIT 10000
-    `).all(days);
-
-    const csv = [
-      'ID,Username,Action,Target Type,Target ID,IP,Timestamp',
-      ...rows.map(r =>
-        `${r.id},"${(r.username || '').replace(/"/g, '""')}","${r.action}","${r.target_type || ''}","${(r.target_id || '').replace(/"/g, '""')}","${r.ip || ''}","${r.created_at}"`
-      ),
-    ].join('\n');
-
-    const ts = new Date().toISOString().substring(0, 10);
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="audit-log-${ts}.csv"`);
-    res.send(csv);
-  } catch (err) {
-    log.error('audit export', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ─── Audit Analytics ────────────────────────────────────────
-
-router.get('/audit/analytics', requireAuth, requireRole('admin'), (req, res) => {
-  try {
-    const db = getDb();
-    const days = parseInt(req.query.days) || 7;
-
-    // Top users by action count
-    const topUsers = db.prepare(`
-      SELECT username, COUNT(*) AS action_count
-      FROM audit_log WHERE created_at >= datetime('now', '-' || ? || ' days')
-      GROUP BY username ORDER BY action_count DESC LIMIT 10
-    `).all(days);
-
-    // Top actions
-    const topActions = db.prepare(`
-      SELECT action, COUNT(*) AS count
-      FROM audit_log WHERE created_at >= datetime('now', '-' || ? || ' days')
-      GROUP BY action ORDER BY count DESC LIMIT 15
-    `).all(days);
-
-    // Most actioned containers/targets
-    const topTargets = db.prepare(`
-      SELECT target_id, target_type, COUNT(*) AS count
-      FROM audit_log WHERE created_at >= datetime('now', '-' || ? || ' days')
-        AND target_id IS NOT NULL AND target_id != ''
-      GROUP BY target_id, target_type ORDER BY count DESC LIMIT 10
-    `).all(days);
-
-    // Activity by hour (heatmap data)
-    const hourly = db.prepare(`
-      SELECT strftime('%H', created_at) AS hour, COUNT(*) AS count
-      FROM audit_log WHERE created_at >= datetime('now', '-' || ? || ' days')
-      GROUP BY hour ORDER BY hour
-    `).all(days);
-
-    // Activity by day
-    const daily = db.prepare(`
-      SELECT date(created_at) AS day, COUNT(*) AS count
-      FROM audit_log WHERE created_at >= datetime('now', '-' || ? || ' days')
-      GROUP BY day ORDER BY day
-    `).all(days);
-
-    // Total counts
-    const total = db.prepare(
-      "SELECT COUNT(*) AS cnt FROM audit_log WHERE created_at >= datetime('now', '-' || ? || ' days')"
-    ).get(days)?.cnt || 0;
-
-    res.json({ days, total, topUsers, topActions, topTargets, hourly, daily });
-  } catch (err) {
-    log.error('audit analytics', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ─── Database Backup ────────────────────────────────────────
 
 router.post('/backup/database', requireAuth, requireRole('admin'), (req, res) => {
   try {
@@ -1222,195 +1056,6 @@ router.put('/about/file/:name', requireAuth, requireRole('admin'), (req, res) =>
 
 // ─── AI Chat (OpenAI / Ollama) ─────────────────────────────
 // POST /api/ai/chat  { prompt, provider, config: { apiKey?, model?, baseUrl? } }
-router.post('/ai/chat', requireAuth, async (req, res) => {
-  const { prompt, provider = 'ollama', config: aiConfig = {} } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'prompt is required' });
-
-  try {
-    let response = '';
-
-    if (provider === 'openai') {
-      const apiKey = aiConfig.apiKey || process.env.OPENAI_API_KEY;
-      if (!apiKey) return res.status(400).json({ error: 'OpenAI API key not configured. Set OPENAI_API_KEY env var or provide it in the request.' });
-      const model = aiConfig.model || 'gpt-4o-mini';
-      const https = require('https');
-      const body = JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 1500 });
-      response = await new Promise((resolve, reject) => {
-        const req2 = https.request({
-          hostname: 'api.openai.com', path: '/v1/chat/completions', method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}`, 'Content-Length': Buffer.byteLength(body) },
-        }, (r) => {
-          let data = '';
-          r.on('data', d => { data += d; });
-          r.on('end', () => {
-            try { resolve(JSON.parse(data)?.choices?.[0]?.message?.content || 'No response'); }
-            catch { resolve(data); }
-          });
-        });
-        req2.on('error', reject);
-        req2.write(body);
-        req2.end();
-      });
-
-    } else if (provider === 'ollama') {
-      const baseUrl = aiConfig.baseUrl || process.env.OLLAMA_URL || 'http://localhost:11434';
-      const model = aiConfig.model || 'llama3';
-      const http = require(baseUrl.startsWith('https') ? 'https' : 'http');
-      const bodyStr = JSON.stringify({ model, prompt, stream: false });
-      const urlObj = new URL(`${baseUrl.replace(/\/$/, '')}/api/generate`);
-      response = await new Promise((resolve, reject) => {
-        const req2 = http.request({
-          hostname: urlObj.hostname, port: urlObj.port || (baseUrl.startsWith('https') ? 443 : 80),
-          path: urlObj.pathname, method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) },
-        }, (r) => {
-          let data = '';
-          r.on('data', d => { data += d; });
-          r.on('end', () => {
-            try { resolve(JSON.parse(data)?.response || 'No response'); }
-            catch { resolve(data); }
-          });
-        });
-        req2.on('error', reject);
-        req2.write(bodyStr);
-        req2.end();
-      });
-
-    } else {
-      return res.status(400).json({ error: `Unknown provider: ${provider}. Use 'openai' or 'ollama'.` });
-    }
-
-    res.json({ response });
-  } catch (err) {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ─── GitHub-to-Compose Generator ─────────────────────────────
-// POST /api/ai/github-compose  { repoUrl, provider, config }
-// Fetches README + package.json from GitHub, asks AI to generate docker-compose
-router.post('/ai/github-compose', requireAuth, async (req, res) => {
-  const { repoUrl, provider = 'ollama', config: aiConfig = {} } = req.body;
-  if (!repoUrl) return res.status(400).json({ error: 'repoUrl is required' });
-
-  // Parse GitHub URL  → owner/repo
-  const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/|$)/i);
-  if (!match) return res.status(400).json({ error: 'Invalid GitHub URL. Expected: https://github.com/owner/repo' });
-  const [, owner, repo] = match;
-
-  try {
-    const https = require('https');
-    const fetchGH = (path) => new Promise((resolve) => {
-      const opts = {
-        hostname: 'raw.githubusercontent.com', path, method: 'GET',
-        headers: { 'User-Agent': 'docker-dash/1.0' },
-        timeout: 8000,
-      };
-      const req2 = https.request(opts, (r) => {
-        let data = '';
-        r.on('data', d => { data += d; });
-        r.on('end', () => resolve(r.statusCode === 200 ? data : null));
-      });
-      req2.on('error', () => resolve(null));
-      req2.on('timeout', () => { req2.destroy(); resolve(null); });
-      req2.end();
-    });
-
-    // Fetch useful files (limit to avoid huge prompts)
-    const [readme, pkgJson, requirements, goMod, pyProject, composeSample] = await Promise.all([
-      fetchGH(`/${owner}/${repo}/HEAD/README.md`),
-      fetchGH(`/${owner}/${repo}/HEAD/package.json`),
-      fetchGH(`/${owner}/${repo}/HEAD/requirements.txt`),
-      fetchGH(`/${owner}/${repo}/HEAD/go.mod`),
-      fetchGH(`/${owner}/${repo}/HEAD/pyproject.toml`),
-      fetchGH(`/${owner}/${repo}/HEAD/docker-compose.yml`)
-        .then(r => r || fetchGH(`/${owner}/${repo}/HEAD/docker-compose.yaml`)),
-    ]);
-
-    // Build context (truncate to keep prompt manageable)
-    const trim = (s, n = 1500) => s ? s.substring(0, n) + (s.length > n ? '\n...(truncated)' : '') : null;
-    const context = [
-      readme && `=== README ===\n${trim(readme, 2000)}`,
-      pkgJson && `=== package.json ===\n${trim(pkgJson)}`,
-      requirements && `=== requirements.txt ===\n${trim(requirements, 500)}`,
-      goMod && `=== go.mod ===\n${trim(goMod, 500)}`,
-      pyProject && `=== pyproject.toml ===\n${trim(pyProject, 500)}`,
-      composeSample && `=== Existing compose (reference only) ===\n${trim(composeSample)}`,
-    ].filter(Boolean).join('\n\n');
-
-    if (!context) return res.status(422).json({ error: 'Could not fetch any files from the repository. Make sure it is public.' });
-
-    const prompt = `You are a Docker expert. Analyze the following GitHub repository context and generate a production-ready docker-compose.yml file.
-
-Repository: https://github.com/${owner}/${repo}
-
-${context}
-
-Requirements:
-- Identify all services (web, database, cache, worker, etc.)
-- Use appropriate Docker images with specific version tags (not :latest)
-- Add health checks where applicable
-- Include restart: unless-stopped
-- Use named volumes for persistent data
-- Define a custom network
-- Add reasonable environment variable placeholders
-- Add resource limits (mem_limit, cpus) for production
-
-Respond with ONLY the docker-compose.yml content, no markdown fences, no explanations.`;
-
-    // Reuse the ai/chat logic by making an internal call
-    const callAi = async () => {
-      if (provider === 'openai') {
-        const apiKey = aiConfig.apiKey || process.env.OPENAI_API_KEY;
-        if (!apiKey) throw new Error('OpenAI API key not configured');
-        const model = aiConfig.model || 'gpt-4o-mini';
-        const body = JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 2000 });
-        return new Promise((resolve, reject) => {
-          const req2 = https.request({
-            hostname: 'api.openai.com', path: '/v1/chat/completions', method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}`, 'Content-Length': Buffer.byteLength(body) },
-          }, (r) => {
-            let data = '';
-            r.on('data', d => { data += d; });
-            r.on('end', () => {
-              try { resolve(JSON.parse(data)?.choices?.[0]?.message?.content || 'No response'); }
-              catch { resolve(data); }
-            });
-          });
-          req2.on('error', reject);
-          req2.write(body); req2.end();
-        });
-      } else {
-        const baseUrl = aiConfig.baseUrl || process.env.OLLAMA_URL || 'http://localhost:11434';
-        const model = aiConfig.model || 'llama3';
-        const http2 = require(baseUrl.startsWith('https') ? 'https' : 'http');
-        const bodyStr = JSON.stringify({ model, prompt, stream: false });
-        const urlObj = new URL(`${baseUrl.replace(/\/$/, '')}/api/generate`);
-        return new Promise((resolve, reject) => {
-          const req2 = http2.request({
-            hostname: urlObj.hostname, port: urlObj.port || (baseUrl.startsWith('https') ? 443 : 80),
-            path: urlObj.pathname, method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) },
-          }, (r) => {
-            let data = '';
-            r.on('data', d => { data += d; });
-            r.on('end', () => {
-              try { resolve(JSON.parse(data)?.response || 'No response'); }
-              catch { resolve(data); }
-            });
-          });
-          req2.on('error', reject);
-          req2.write(bodyStr); req2.end();
-        });
-      }
-    };
-
-    const compose = await callAi();
-    res.json({ compose, repo: `${owner}/${repo}` });
-  } catch (err) {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
 
 // ─── Docker Version Checker ────────────────────────────────
 router.get('/docker-versions', requireAuth, async (req, res) => {
@@ -1776,5 +1421,13 @@ router.delete('/howto/:slug', requireAuth, requireRole('admin'), writeable, (req
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// ─── Sub-routers (v8.2.x post-audit further-split) ────────────────────
+// External URLs unchanged — mounts replicate original path prefixes.
+router.use('/favorites', require('./misc-favorites'));      // 3 routes
+router.use('/notifications', require('./misc-notifications')); // 6 routes
+router.use('/api-keys', require('./misc-api-keys'));        // 3 routes
+router.use('/audit', require('./misc-audit'));              // 3 routes
+router.use('/ai', require('./misc-ai'));                    // 2 routes
 
 module.exports = router;
