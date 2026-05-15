@@ -132,13 +132,49 @@ generate_secrets() {
   # Copy .env.example and replace placeholder secrets
   cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
 
-  # Replace placeholder values with generated secrets
-  if [[ "$OS_NAME" == "macOS" ]]; then
-    sed -i '' "s|APP_SECRET=generate-a-random-string-here|APP_SECRET=$APP_SECRET|" "$INSTALL_DIR/.env"
-    sed -i '' "s|ENCRYPTION_KEY=change-me-to-a-random-32-char-hex|ENCRYPTION_KEY=$ENCRYPTION_KEY|" "$INSTALL_DIR/.env"
+  # Replace placeholder values with generated secrets. Sed pattern is the SAME
+  # on Linux + macOS via a portable in-place trick (separate -i.bak then rm).
+  for kv in \
+    "APP_SECRET=generate-a-random-string-here|APP_SECRET=$APP_SECRET" \
+    "ENCRYPTION_KEY=change-me-to-a-random-32-char-hex|ENCRYPTION_KEY=$ENCRYPTION_KEY"; do
+    if [[ "$OS_NAME" == "macOS" ]]; then
+      sed -i '' "s|${kv}|" "$INSTALL_DIR/.env"
+    else
+      sed -i "s|${kv}|" "$INSTALL_DIR/.env"
+    fi
+  done
+
+  # CRITICAL FIX (Ubuntu 25.10 restart-loop bug): server.js refuses to boot
+  # when APP_ENV=production AND ADMIN_PASSWORD=admin (and ALLOW_DEFAULT_ADMIN
+  # is not set). For one-line installs we set ALLOW_DEFAULT_ADMIN=true so the
+  # documented "admin/admin → forced password change on first login" flow works.
+  # Operators who want an unattended-secure install can set
+  # FORCE_RANDOM_ADMIN_PASSWORD=1 before running the installer.
+  if [ "${FORCE_RANDOM_ADMIN_PASSWORD:-0}" = "1" ]; then
+    if command -v openssl &>/dev/null; then
+      ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | head -c 20)
+    else
+      ADMIN_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 20)
+    fi
+    GENERATED_ADMIN_PASSWORD="$ADMIN_PASSWORD"
+    if [[ "$OS_NAME" == "macOS" ]]; then
+      sed -i '' "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$ADMIN_PASSWORD|" "$INSTALL_DIR/.env"
+    else
+      sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$ADMIN_PASSWORD|" "$INSTALL_DIR/.env"
+    fi
+    ok "Generated random ADMIN_PASSWORD (will display at end)"
   else
-    sed -i "s|APP_SECRET=generate-a-random-string-here|APP_SECRET=$APP_SECRET|" "$INSTALL_DIR/.env"
-    sed -i "s|ENCRYPTION_KEY=change-me-to-a-random-32-char-hex|ENCRYPTION_KEY=$ENCRYPTION_KEY|" "$INSTALL_DIR/.env"
+    # Keep ADMIN_PASSWORD=admin but enable the explicit override so the boot
+    # check at src/server.js:286 doesn't process.exit(1).
+    if ! grep -q '^ALLOW_DEFAULT_ADMIN=' "$INSTALL_DIR/.env"; then
+      echo "" >> "$INSTALL_DIR/.env"
+      echo "# Added by install.sh: allow ADMIN_PASSWORD=admin in production. The app" >> "$INSTALL_DIR/.env"
+      echo "# forces a password change on first login. Set FORCE_RANDOM_ADMIN_PASSWORD=1" >> "$INSTALL_DIR/.env"
+      echo "# before running the installer if you want an auto-generated admin password" >> "$INSTALL_DIR/.env"
+      echo "# instead." >> "$INSTALL_DIR/.env"
+      echo "ALLOW_DEFAULT_ADMIN=true" >> "$INSTALL_DIR/.env"
+    fi
+    ok "Set ALLOW_DEFAULT_ADMIN=true (admin/admin works for first login, forced change after)"
   fi
 
   ok "Generated APP_SECRET and ENCRYPTION_KEY"
@@ -152,10 +188,65 @@ patch_compose_for_remote() {
     # Verify the image is reachable before rewriting compose; fall back to git-clone+build if not
     if ! docker pull ghcr.io/bogdanpricop/docker-dash:latest >/dev/null 2>&1; then
       warn "Pre-built image ghcr.io/bogdanpricop/docker-dash:latest not available — falling back to git clone + build"
-      git clone --depth 1 https://github.com/bogdanpricop/docker-dash.git "$INSTALL_DIR/.src" 2>&1 | tail -3
-      cp -r "$INSTALL_DIR/.src/Dockerfile" "$INSTALL_DIR/.src/src" "$INSTALL_DIR/.src/public" "$INSTALL_DIR/.src/scripts" "$INSTALL_DIR/.src/entrypoint.sh" "$INSTALL_DIR/.src/package.json" "$INSTALL_DIR/.src/package-lock.json" "$INSTALL_DIR/" 2>/dev/null || true
+      if ! command -v git &>/dev/null; then
+        fail "git is required for the local-build fallback. Install git, OR ensure 'docker pull ghcr.io/bogdanpricop/docker-dash:latest' works (check network + GHCR availability)."
+      fi
       rm -rf "$INSTALL_DIR/.src"
-      ok "Cloned source — will build locally"
+      git clone --depth 1 https://github.com/bogdanpricop/docker-dash.git "$INSTALL_DIR/.src" 2>&1 | tail -3
+      # Copy EVERY file the production Dockerfile stage needs. Earlier versions
+      # of this script copied a smaller subset; the production stage's
+      # `COPY package.json README.md LICENSE CONTRIBUTING.md .env.example .gitignore ./`
+      # then failed at build time because README/LICENSE/CONTRIBUTING/.gitignore
+      # were missing → user got a build error or restart loop.
+      local REQUIRED_FILES=(
+        Dockerfile
+        package.json
+        package-lock.json
+        entrypoint.sh
+        README.md
+        LICENSE
+        CONTRIBUTING.md
+        .gitignore
+        .dockerignore
+        src
+        public
+        scripts
+      )
+      local MISSING=()
+      for f in "${REQUIRED_FILES[@]}"; do
+        if [ -e "$INSTALL_DIR/.src/$f" ]; then
+          cp -r "$INSTALL_DIR/.src/$f" "$INSTALL_DIR/"
+        else
+          MISSING+=("$f")
+        fi
+      done
+      rm -rf "$INSTALL_DIR/.src"
+      # Belt-and-suspenders: the production Dockerfile stage does
+      # `COPY package.json README.md LICENSE CONTRIBUTING.md .env.example .gitignore ./`
+      # which fails atomically if ANY listed file is missing. If git clone produced
+      # a sparse repo (or future Dockerfile changes add a new mandatory file we
+      # haven't synced here), drop a placeholder so build still succeeds.
+      for f in README.md LICENSE CONTRIBUTING.md .gitignore; do
+        if [ ! -e "$INSTALL_DIR/$f" ]; then
+          echo "# Placeholder created by install.sh because $f was missing from the cloned repo." > "$INSTALL_DIR/$f"
+          MISSING+=("$f (placeholder created)")
+        fi
+      done
+      if [ ${#MISSING[@]} -gt 0 ]; then
+        warn "These files were missing from the cloned repo: ${MISSING[*]}"
+      fi
+      ok "Cloned source — will build locally (target=production)"
+      # When building locally, ensure compose uses --target production so the
+      # `development` stage (which runs `npm install` with devDeps) doesn't
+      # get built in parallel by BuildKit and fail on flaky devDep installs.
+      if [ -f "$INSTALL_DIR/docker-compose.yml" ] && ! grep -q 'target:' "$INSTALL_DIR/docker-compose.yml"; then
+        if [[ "$OS_NAME" == "macOS" ]]; then
+          sed -i '' 's|dockerfile: Dockerfile|dockerfile: Dockerfile\n      target: production|' "$INSTALL_DIR/docker-compose.yml"
+        else
+          sed -i 's|dockerfile: Dockerfile|dockerfile: Dockerfile\n      target: production|' "$INSTALL_DIR/docker-compose.yml"
+        fi
+        ok "Patched docker-compose.yml with target: production (skips dev-stage parallel build)"
+      fi
       return
     fi
     # Replace build section with image reference
@@ -218,7 +309,12 @@ show_success() {
   echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
   echo ""
   echo -e "  URL:          ${BLUE}http://localhost:${PORT}${NC}"
-  echo -e "  Credentials:  ${YELLOW}admin${NC} / ${YELLOW}admin${NC} (change on first login)"
+  if [ -n "${GENERATED_ADMIN_PASSWORD:-}" ]; then
+    echo -e "  Credentials:  ${YELLOW}admin${NC} / ${YELLOW}${GENERATED_ADMIN_PASSWORD}${NC}"
+    echo -e "                ${RED}↑ SAVE THIS NOW — generated random password, not shown again${NC}"
+  else
+    echo -e "  Credentials:  ${YELLOW}admin${NC} / ${YELLOW}admin${NC} (forced password change on first login)"
+  fi
   echo -e "  Install dir:  ${BLUE}${INSTALL_DIR}${NC}"
   echo ""
   echo -e "  Manage:"

@@ -38,11 +38,17 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `latest` added explicitly so install.sh can pull a known-good image
+          # instead of falling back to git-clone+local-build (the fallback path
+          # was the trigger for the Ubuntu 25.10 restart-loop bug — see history).
+          # Only attached to default-branch builds; tagged releases also get the
+          # semver tags below.
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
