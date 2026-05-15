@@ -23,6 +23,7 @@
     <a href="#features">Features</a> &bull;
     <a href="#screenshots">Screenshots</a> &bull;
     <a href="#comparison">Comparison</a> &bull;
+    <a href="#troubleshooting-install">Troubleshooting</a> &bull;
     <a href="#contributing">Contributing</a>
   </p>
   <p align="center">
@@ -342,6 +343,10 @@ This will detect your OS, check Docker, generate secure secrets, and start Docke
 
 Set a custom install directory: `DOCKER_DASH_DIR=/opt/docker-dash curl -fsSL ... | bash`
 
+For an unattended-secure install with a random admin password (instead of `admin/admin`-then-change): `FORCE_RANDOM_ADMIN_PASSWORD=1 curl -fsSL ... | bash` — the generated password is printed once at the end.
+
+> **Install didn't work?** Jump to [Troubleshooting Install](#troubleshooting-install) — covers restart loops, build failures, port conflicts, permission issues, and the diagnostic one-liner that surfaces 95% of failure modes.
+
 ### Manual Install
 
 ```bash
@@ -393,6 +398,222 @@ See the [HA Mode reference](docs/features/ha-mode.md) for the full enablement pr
 - Sticky-session-capable load balancer for 2+ replica deploys (Caddy, Traefik, HAProxy, nginx — [configs provided](docs/features/ha-lb-configs.md))
 - Shared volume for SQLite (Docker named volume works on same host; K8s `ReadWriteMany` PVC for multi-node)
 - Operator familiarity with Redis basics (single instance is fine — Sentinel only needed for Redis HA separately)
+
+## Troubleshooting Install
+
+If `curl ... | bash` finishes but the container won't stay up, the Docker container exits immediately, or you see `restarting` in `docker ps` over and over — work through this section in order. It covers the bugs we've actually seen reported, with the diagnostic commands to confirm each and the exact fix for each.
+
+### Step 1 — Triage in one command
+
+Run this from inside the install directory (default `~/docker-dash`):
+
+```bash
+cd ~/docker-dash 2>/dev/null || cd /opt/docker-dash 2>/dev/null
+echo "=== container state ==="
+docker inspect docker-dash --format 'exitCode={{.State.ExitCode}} error={{.State.Error}} restartCount={{.RestartCount}} status={{.State.Status}}'
+echo "=== last 50 log lines ==="
+docker logs docker-dash --tail 50 2>&1
+echo "=== env (no secrets) ==="
+grep -E '^(APP_ENV|APP_PORT|ADMIN_PASSWORD|ALLOW_DEFAULT_ADMIN|DD_MODE|DOCKER_SOCKET)' .env 2>/dev/null
+echo "=== image in use ==="
+docker inspect docker-dash --format '{{.Config.Image}} (created {{.Created}})'
+echo "=== compose file ==="
+head -25 docker-compose.yml
+echo "=== disk space ==="
+df -h / /var/lib/docker 2>/dev/null | head -3
+```
+
+The output is enough to identify 95% of install failures. Map the symptom to the section below.
+
+### Step 2 — Match the symptom
+
+#### A. Logs end with `FATAL: ADMIN_PASSWORD is "admin" in production`
+
+Your `.env` has `ADMIN_PASSWORD=admin` but no `ALLOW_DEFAULT_ADMIN=true`. Server refuses to boot in production mode with the default password unless you opt in. Two fixes:
+
+```bash
+# Option 1 — keep admin/admin (forced password change on first login)
+echo 'ALLOW_DEFAULT_ADMIN=true' >> .env
+docker compose up -d
+
+# Option 2 — set a random strong admin password
+NEW_PW=$(openssl rand -base64 24 | tr -d '/+=' | head -c 20)
+sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$NEW_PW|" .env
+docker compose up -d
+echo "Your new admin password: $NEW_PW"
+```
+
+Re-run from a fresh installer (recommended path — picks up all the install.sh fixes shipped after this bug was first reported):
+
+```bash
+docker compose down
+mv .env .env.backup
+curl -fsSL https://raw.githubusercontent.com/bogdanpricop/docker-dash/main/install.sh | bash
+```
+
+#### B. Logs end with `FATAL: APP_SECRET is weak or default` or `ENCRYPTION_KEY is weak or default`
+
+`.env` has placeholder values for one of those. Generate strong replacements:
+
+```bash
+APP_SECRET=$(openssl rand -hex 48)
+ENCRYPTION_KEY=$(openssl rand -hex 32)
+sed -i "s|^APP_SECRET=.*|APP_SECRET=$APP_SECRET|" .env
+sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$ENCRYPTION_KEY|" .env
+docker compose up -d
+```
+
+#### C. `failed to compute cache key` or `COPY ... not found` during build
+
+The local-build fallback got a sparse build context (some required files weren't cloned). The fix: use the pre-built image instead.
+
+```bash
+docker compose down
+docker pull ghcr.io/bogdanpricop/docker-dash:latest
+# Edit docker-compose.yml: replace the entire `build:` block with:
+#   image: ghcr.io/bogdanpricop/docker-dash:latest
+# Then:
+docker compose up -d
+```
+
+Or run the latest installer, which now uses the GHCR image first by default:
+
+```bash
+mv ~/docker-dash ~/docker-dash.broken
+curl -fsSL https://raw.githubusercontent.com/bogdanpricop/docker-dash/main/install.sh | bash
+```
+
+#### D. Logs show `EACCES`, `permission denied`, or SQLite write errors on `/data`
+
+Volume mount can't be written by the container's UID. Most common on bind-mounted host directories with stale ownership.
+
+```bash
+# If using the default named volume (recommended) — recreate it:
+docker compose down
+docker volume rm docker-dash-data
+docker compose up -d
+
+# If you bind-mounted a host path, fix ownership:
+sudo chown -R 1000:1000 /path/to/your/data/dir
+docker compose up -d
+```
+
+#### E. Logs show `EADDRINUSE` or container exits with `port is already allocated`
+
+Port 8101 (or whichever you set) is taken by another process. Either change the port or stop the conflicting process.
+
+```bash
+# Find what's on 8101
+sudo ss -tlnp | grep ':8101'
+
+# Either kill it, or edit .env to use a different port:
+sed -i 's|^APP_PORT=.*|APP_PORT=8201|' .env
+docker compose up -d
+```
+
+#### F. `docker info` fails / `Cannot connect to the Docker daemon`
+
+Docker daemon isn't running, or your user isn't in the `docker` group.
+
+```bash
+# Start the daemon:
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Add yourself to the docker group (then log out and back in):
+sudo usermod -aG docker $USER
+# Confirm with:
+docker info
+```
+
+#### G. `Cannot connect to /var/run/docker.sock` from inside the container
+
+Container needs read-only socket access. The default compose file mounts it. If you have AppArmor or SELinux enforcing strict policies (Ubuntu 24.04+, RHEL 9+), the mount might be blocked.
+
+```bash
+# Confirm the mount is there:
+docker inspect docker-dash --format '{{range .Mounts}}{{.Source}} -> {{.Destination}} ({{.Mode}}){{"\n"}}{{end}}'
+
+# On SELinux, add the :z label:
+# In docker-compose.yml change:
+#   - /var/run/docker.sock:/var/run/docker.sock:ro
+# to:
+#   - /var/run/docker.sock:/var/run/docker.sock:ro,z
+```
+
+#### H. `no space left on device`
+
+Disk is full — most often the Docker storage on `/var/lib/docker`.
+
+```bash
+# Reclaim space:
+docker system prune -a --volumes  # destructive — review what gets removed first
+df -h /var/lib/docker
+```
+
+#### I. Pull from GHCR fails with 404 or auth error
+
+Most common reason: the package was made private or temporarily unavailable. Use the local-build path:
+
+```bash
+cd ~/docker-dash
+git clone --depth 1 https://github.com/bogdanpricop/docker-dash.git .src
+cp -r .src/Dockerfile .src/src .src/public .src/scripts .src/entrypoint.sh \
+      .src/package.json .src/package-lock.json .src/README.md .src/LICENSE \
+      .src/CONTRIBUTING.md .src/.gitignore .src/.dockerignore .
+rm -rf .src
+docker compose build app
+docker compose up -d
+```
+
+#### J. Container says `(healthy)` but the UI returns 502 / connection refused
+
+The reverse-proxy in front (Caddy, Nginx, Traefik) isn't routing to the container's port. Test the container directly first:
+
+```bash
+curl http://localhost:8101/api/health
+# Should return: {"status":"ok","version":"8.2.x",...}
+
+# If that works, the issue is upstream — check your proxy config.
+# If it doesn't work, see Steps A-F above.
+```
+
+### Step 3 — Clean reinstall (last resort)
+
+If you've debugged enough and just want a known-good state — and you're OK losing local Docker Dash data (audit log, custom templates, registries you added):
+
+```bash
+cd ~/docker-dash
+docker compose down -v  # -v also removes the data volume
+cd ..
+rm -rf ~/docker-dash
+curl -fsSL https://raw.githubusercontent.com/bogdanpricop/docker-dash/main/install.sh | bash
+```
+
+To preserve data, replace `down -v` with `down`, and don't delete the directory — the named volume `docker-dash-data` persists.
+
+### Step 4 — Still stuck?
+
+Open a [Discussion](https://github.com/bogdanpricop/docker-dash/discussions) with the **full Step 1 triage output**. Include:
+
+- OS + version (`uname -a` and `lsb_release -a` on Ubuntu)
+- Docker version (`docker --version`)
+- Docker Compose version (`docker compose version`)
+- Whether you used the `curl | bash` installer or `git clone + docker compose up`
+- The triage output from Step 1 (redact secrets — APP_SECRET / ENCRYPTION_KEY / passwords)
+
+For confirmed bugs, [open an Issue](https://github.com/bogdanpricop/docker-dash/issues/new) with the same info plus reproduction steps.
+
+### What changed in v8.2.x to make installs more reliable
+
+The install path was hardened in v8.2.x after a user reported a restart-loop on Ubuntu 25.10:
+
+- **GHCR `:latest` tag now exists** — `install.sh` pulls a known-good pre-built image instead of falling back to git-clone+local-build.
+- **`install.sh` adds `ALLOW_DEFAULT_ADMIN=true` to `.env` by default** — admin/admin works for first login (forced password change after); `FORCE_RANDOM_ADMIN_PASSWORD=1` opt-in generates a random password and prints it once.
+- **`install.sh` git-clone fallback now copies all 12 files** the production Dockerfile stage requires, plus drops placeholders for any missing optional files.
+- **`install.sh` patches `docker-compose.yml` with `target: production`** when the local-build fallback runs, so BuildKit doesn't waste time on the dev stage in parallel.
+
+If you installed before these fixes landed and you're still seeing trouble, the cleanest path is **Step 3 — clean reinstall** above. The new installer picks up all the fixes.
 
 ## Architecture
 
