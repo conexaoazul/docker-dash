@@ -2,6 +2,32 @@
 
 All notable changes to Docker Dash are documented here.
 
+## [Unreleased — 8.2.x maintenance, wave 7] - 2026-05-15 — One-line install restart-loop bug
+
+User reported: fresh `curl ... | bash` install on Ubuntu 25.10 → container downloads, then enters a restart loop forever. Root-caused to **three independent bugs** stacking; all three fixed.
+
+### The three bugs
+
+1. **No `:latest` tag in GHCR.** The docker-build.yml workflow's metadata-action only emitted `:main` and `:sha-XXX` tags. install.sh's `docker pull ghcr.io/.../docker-dash:latest` returned 404 → fell into a fragile git-clone+local-build fallback path that nobody had end-to-end tested in production. **Fix:** added `type=raw,value=latest,enable={{is_default_branch}}` to the workflow.
+2. **Sparse build context in the install.sh git-clone fallback.** The fallback copied only Dockerfile + src + public + scripts + entrypoint.sh + package*.json from the cloned repo. The production Dockerfile stage's `COPY package.json README.md LICENSE CONTRIBUTING.md .env.example .gitignore ./` then failed atomically because README/LICENSE/CONTRIBUTING/.gitignore were missing from the build context. **Fix:** explicit REQUIRED_FILES array covers all 12 paths; belt-and-suspenders pass drops a placeholder for any of README/LICENSE/CONTRIBUTING/.gitignore that's still missing (so future Dockerfile changes don't silently regress this).
+3. **`ADMIN_PASSWORD=admin` in `APP_ENV=production` caused `process.exit(1)`.** `.env.example` ships with `APP_ENV=production` + `ADMIN_PASSWORD=admin`. install.sh regenerated APP_SECRET + ENCRYPTION_KEY but left ADMIN_PASSWORD untouched. `server.js:286` then refused to boot ("FATAL: ADMIN_PASSWORD is admin in production. Set a strong ADMIN_PASSWORD or ALLOW_DEFAULT_ADMIN=true"). Container exited code 1 → Docker `restart: unless-stopped` policy bounced it forever. **Fix:** install.sh now appends `ALLOW_DEFAULT_ADMIN=true` to .env (the `admin/admin` → forced password change on first login flow is the documented first-run UX). Operators who want a random admin password can set `FORCE_RANDOM_ADMIN_PASSWORD=1` before running the installer; the success output prints the generated password once.
+
+### Defensive bonus
+
+When the local-build fallback runs, install.sh now patches `docker-compose.yml` with `target: production` so BuildKit doesn't try the `development` stage in parallel — the dev stage runs `npm install` with devDeps including `puppeteer` which downloads a Chromium binary that can fail on some host configurations.
+
+### Verification
+
+- Reproduced original crash: `docker run -e APP_ENV=production -e ADMIN_PASSWORD=admin docker-dash:8.2.0` → "FATAL: ADMIN_PASSWORD is admin" → process.exit(1).
+- Confirmed fix: same command + `-e ALLOW_DEFAULT_ADMIN=true` → container Up (healthy), `/api/health` returns 200.
+- Tested install.sh end-to-end inside an Ubuntu 25.10 container with stubbed docker daemon — git-clone fallback runs, all 12 required files copied, .env has `ALLOW_DEFAULT_ADMIN=true` + generated APP_SECRET/ENCRYPTION_KEY, docker-compose.yml patched with `target: production`.
+- Confirmed `ghcr.io/bogdanpricop/docker-dash:latest` now pulls cleanly (commit f416c8d → workflow run 25917749308 → 3 tags published: `:main`, `:latest`, `:sha-f416c8d`).
+- Final E2E: `docker pull` :latest → `docker run` with the fixed env → container Up (healthy) within 12s.
+
+### What this means for users
+
+`curl -fsSL https://raw.githubusercontent.com/bogdanpricop/docker-dash/main/install.sh | bash` now works on a fresh Ubuntu / Debian / Fedora / macOS / etc. — pulls the pre-built image from GHCR (no more build-from-source fallback for the happy path), generates strong APP_SECRET + ENCRYPTION_KEY, allows `admin/admin` first login (forced change after), runs healthy on first boot.
+
 ## [Unreleased — 8.2.x maintenance, wave 6] - 2026-05-13 — Backend route splits
 
 The two remaining backend monoliths split into per-resource sub-routers. External API URLs are unchanged — `router.use(prefix, subRouter)` mounts replicate original path resolution. Adds the BACKLOG-deferred backend splits.
