@@ -22,7 +22,7 @@ services:
       # Keep standalone mode (no Redis/HA)
       # DD_MODE: ""
     networks:
-      - infra_backend
+      - web_swarm
     deploy:
       placement:
         constraints:
@@ -41,16 +41,15 @@ services:
         - "traefik.http.routers.dockerdash.tls.certresolver=letsencrypt"
         - "traefik.http.services.dockerdash.loadbalancer.server.port=8101"
         - "traefik.http.services.dockerdash.loadbalancer.server.scheme=http"
-        - "traefik.docker.network=infra_backend"
+        - "traefik.docker.network=web_swarm"
       restart_policy:
         condition: any
         delay: 10s
         max_attempts: 3
 
 networks:
-  infra_backend:
+  web_swarm:
     external: true
-    name: infra_backend
 
 volumes:
   docker-dash-data:
