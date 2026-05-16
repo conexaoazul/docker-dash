@@ -1,0 +1,57 @@
+version: "3.8"
+
+services:
+  docker-dash:
+    image: ghcr.io/bogdanpricop/docker-dash:latest
+    ports:
+      - published: 9501
+        target: 8101
+        protocol: tcp
+        mode: host
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+      - type: volume
+        source: docker-dash-data
+        target: /data
+    environment:
+      APP_PORT: "8101"
+      DOCKER_SOCKET: /var/run/docker.sock
+      # Keep standalone mode (no Redis/HA)
+      # DD_MODE: ""
+    networks:
+      - infra_backend
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.dockerdash.rule=Host(`dockerdash.conexaoazul.com`)"
+        - "traefik.http.routers.dockerdash.entrypoints=websecure"
+        - "traefik.http.routers.dockerdash.tls.certresolver=letsencrypt"
+        - "traefik.http.services.dockerdash.loadbalancer.server.port=8101"
+        - "traefik.http.services.dockerdash.loadbalancer.server.scheme=http"
+        - "traefik.docker.network=infra_backend"
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 3
+
+networks:
+  infra_backend:
+    external: true
+    name: infra_backend
+
+volumes:
+  docker-dash-data:
+    driver: local
